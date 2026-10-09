@@ -17,7 +17,7 @@ import { basename, dirname, join, posix, resolve } from "node:path";
 import { run } from "./proc.ts";
 import { pyRstrip, pySplitLines, pyTrim, pyWords } from "./text.ts";
 import { parse } from "./vendor/babel-parser.js";
-import type { BabelNode, BabelOptions } from "./vendor/babel-parser.js";
+import type { BabelComment, BabelNode, BabelOptions } from "./vendor/babel-parser.js";
 
 const UNSET_GIT = {
   GIT_DIR: undefined,
@@ -165,30 +165,60 @@ function collectBlocks(node: BabelNode, out: { start: number; end: number }[]): 
 }
 
 /** The comments and braced ranges of one file's text. Throws on input the
- * parser cannot read: the check reports that loud, never clear. */
+ * parser cannot read cleanly, recovered errors included: recovery invents
+ * structure that can hide a directive, so a recovered parse is unparseable
+ * here, and the check reports that loud, never clear. A file without ESM
+ * syntax is also read as a script, as Oxlint reads it, so Annex B comments
+ * (`<!--`, line-start `-->`) reach the list from either parse. */
 export function parseSource(text: string, path: string): ParsedFile {
-  let file;
-  try {
-    file = parse(text, parserOptions(path));
-  } catch {
-    throw new Error(`cannot parse ${path}: refusing to report clear over unparseable input`);
-  }
+  const file = cleanParse(text, parserOptions(path), path);
   const comments: SwitchComment[] = [];
-  for (const c of file.comments ?? []) {
-    if (c.loc === null) {
-      throw new Error(`cannot place a comment in ${path}: refusing to report over it`);
-    }
-    comments.push({
-      line: c.loc.start.line,
-      endLine: c.loc.end.line,
-      raw: pyRstrip(text.slice(c.start, c.end)),
-      start: c.start,
-      end: c.end,
-    });
+  const seen = new Set<number>();
+  const take = (c: BabelComment): void => {
+    if (seen.has(c.start)) return;
+    seen.add(c.start);
+    comments.push(toComment(text, path, c));
+  };
+  for (const c of file.comments ?? []) take(c);
+  if (file.program["sourceType"] === "script") {
+    const scripted = cleanParse(text, { ...parserOptions(path), sourceType: "script" }, path);
+    for (const c of scripted.comments ?? []) take(c);
   }
   const blocks: { start: number; end: number }[] = [];
   collectBlocks(file.program, blocks);
   return { comments, blocks };
+}
+
+/** One parse that must come back clean: a throw or a recovered error fails
+ * loud at the call. */
+function cleanParse(
+  text: string,
+  options: BabelOptions,
+  path: string,
+): { comments: BabelComment[] | null; program: BabelNode } {
+  let file;
+  try {
+    file = parse(text, options);
+  } catch {
+    throw new Error(`cannot parse ${path}: refusing to report clear over unparseable input`);
+  }
+  if (file.errors.length > 0) {
+    throw new Error(`cannot parse ${path}: refusing to report clear over unparseable input`);
+  }
+  return file;
+}
+
+function toComment(text: string, path: string, c: BabelComment): SwitchComment {
+  if (c.loc === null) {
+    throw new Error(`cannot place a comment in ${path}: refusing to report over it`);
+  }
+  return {
+    line: c.loc.start.line,
+    endLine: c.loc.end.line,
+    raw: pyRstrip(text.slice(c.start, c.end)),
+    start: c.start,
+    end: c.end,
+  };
 }
 
 /** What a comment switches off, and how far. `line` covers its own line, `next`
@@ -360,6 +390,8 @@ export function parseSwitchOff(raw: string): SwitchDirective | null {
  * two lines, and both suppress; the single-shot parse above is its first. */
 function parseAllDirectives(raw: string): SwitchDirective[] {
   if (raw.startsWith("//")) return parseLineComment(raw.slice(2));
+  if (raw.startsWith("<!--")) return parseLineComment(raw.slice(4));
+  if (raw.startsWith("-->")) return parseLineComment(raw.slice(3));
   if (!raw.startsWith("/*")) return [];
   const body = raw.endsWith("*/") ? raw.slice(2, -2) : raw.slice(2);
   return parseBlockComment(body);
