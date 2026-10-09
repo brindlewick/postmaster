@@ -320,7 +320,10 @@ function herdrStubInner(args: string[], stateDir: string): void {
     if (flag(join(stateDir, "wsget.succeed-once")))
       rmSync(join(stateDir, "wsget.succeed-once"), { force: true });
     else if (flag(join(stateDir, "wsget.fail"))) throw new StubFail(1);
-    const w = st.spaces[args[2]!] ?? {};
+    const w = st.spaces[args[2]!];
+    // As the server does, getting a space Herdr destroyed fails: closes tell
+    // a gone space from one they must not touch by this failure.
+    if (!w) fail("workspace_not_found");
     out({
       workspace: {
         workspace_id: args[2],
