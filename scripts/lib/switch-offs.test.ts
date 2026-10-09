@@ -1681,6 +1681,8 @@ describe("switch-off units", () => {
     // Position still rules: a mid-line mention names no directive.
     expect(parseSwitchOff("// see @ts-ignore docs")).toBeNull();
     expect(parseSwitchOff("// biome-ignoreX")).toBeNull();
+    // Case is ASCII only, like the tools': a Kelvin sign is not a k.
+    expect(parseSwitchOff("// @ts-i\u212anore -- r")).toBeNull();
   });
 });
 

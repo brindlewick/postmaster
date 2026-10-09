@@ -259,10 +259,24 @@ export interface SwitchDirective {
  * every spelling a tool honors is listed, and a spelling no tool honors only
  * asks a needless question. Position still rules — a mid-line mention names
  * no directive — and Biome still needs its category and reason, which switch
- * nothing off when missing. */
-const TS_RE = /^@(ts-ignore|ts-expect-error|ts-nocheck)/iu;
-const LINTER_RE = /^(eslint|oxlint)-(disable-line|disable-next-line|disable|enable)/iu;
-const BIOME_RE = /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)/iu;
+ * nothing off when missing. Case is ASCII only, like the tools': the match
+ * runs over asciiLower, never the i flag or toLowerCase, which would fold
+ * non-ASCII lookalikes no tool honors. */
+const TS_RE = /^@(ts-ignore|ts-expect-error|ts-nocheck)/u;
+const LINTER_RE = /^(eslint|oxlint)-(disable-line|disable-next-line|disable|enable)/u;
+const BIOME_RE = /^(biome-ignore-all|biome-ignore-start|biome-ignore-end|biome-ignore)/u;
+
+/** ASCII-only lowercase for directive words: A-Z shift one step, everything
+ * else passes through, so the length never changes and a match over the
+ * lowered text slices the original. */
+function asciiLower(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    out += code >= 65 && code <= 90 ? String.fromCodePoint(code + 32) : ch;
+  }
+  return out;
+}
 
 /** Split source text on JS line breaks only: LF, CRLF (once), CR, U+2028 and
  * U+2029. Python's wider set would split where the scanner counts no break
@@ -282,10 +296,9 @@ function splitJsLines(text: string): string[] {
 function tsDirective(match: RegExpExecArray, line: string): SwitchDirective {
   const rest = pyTrim(line.slice(match[0].length));
   const reason = pyTrim(rest.replace(/^(?:--|:)[ \t]*/u, ""));
-  const form = match[1]!.toLowerCase();
   return {
-    form,
-    scope: form === "ts-nocheck" ? "file" : "next",
+    form: match[1]!,
+    scope: match[1] === "ts-nocheck" ? "file" : "next",
     tool: "ts",
     rules: "every rule",
     reason: reason === "" ? null : reason,
@@ -293,7 +306,7 @@ function tsDirective(match: RegExpExecArray, line: string): SwitchDirective {
 }
 
 function linterDirective(match: RegExpExecArray, rest: string): SwitchDirective {
-  const what = match[2]!.toLowerCase();
+  const what = match[2]!;
   const scope: SwitchDirective["scope"] =
     what === "disable"
       ? "open"
@@ -315,7 +328,7 @@ function linterDirective(match: RegExpExecArray, rest: string): SwitchDirective 
   }
   if (reason === "") reason = null;
   return {
-    form: `${match[1]!.toLowerCase()}-${what}`,
+    form: `${match[1]}-${what}`,
     scope,
     tool: "linter",
     rules: rest === "" ? "every rule" : pyWords(rest.replace(/,/gu, " ")).join(", "),
@@ -330,7 +343,7 @@ function biomeDirective(match: RegExpExecArray, line: string): SwitchDirective |
   const rules = pyTrim(rest.slice(0, colon));
   const reason = pyTrim(rest.slice(colon + 1));
   if (rules === "" || reason === "") return null;
-  const what = match[1]!.toLowerCase();
+  const what = match[1]!;
   return {
     form: what,
     scope:
@@ -358,11 +371,11 @@ function parseLineComment(body: string): SwitchDirective[] {
   const line = pyTrim(body);
   if (line === "") return [];
   const tsLine = pyTrim(body.replace(/^\/+/u, ""));
-  const ts = TS_RE.exec(tsLine);
+  const ts = TS_RE.exec(asciiLower(tsLine));
   if (ts !== null) return [tsDirective(ts, tsLine)];
-  const lint = LINTER_RE.exec(line);
+  const lint = LINTER_RE.exec(asciiLower(line));
   if (lint !== null) return [linterDirective(lint, pyTrim(line.slice(lint[0].length)))];
-  const biome = BIOME_RE.exec(line);
+  const biome = BIOME_RE.exec(asciiLower(line));
   if (biome !== null) {
     const off = biomeDirective(biome, line);
     if (off !== null) return [off];
@@ -383,18 +396,18 @@ function parseBlockComment(body: string): SwitchDirective[] {
   const lines = splitJsLines(body).map((entry) => pyTrim(entry));
   if (lines.every((entry) => entry === "")) return out;
   const tsLine = noMarks(lines[lines.length - 1]!);
-  const ts = TS_RE.exec(tsLine);
+  const ts = TS_RE.exec(asciiLower(tsLine));
   if (ts !== null) out.push(tsDirective(ts, tsLine));
   const fi = lines.findIndex((entry) => entry !== "");
   const first = fi < 0 ? "" : lines[fi]!;
-  const lint = first === "" ? null : LINTER_RE.exec(first);
+  const lint = first === "" ? null : LINTER_RE.exec(asciiLower(first));
   if (lint !== null) {
     const rest = pyTrim(`${first.slice(lint[0].length)} ${lines.slice(fi + 1).join(" ")}`);
     out.push(linterDirective(lint, rest));
   }
   for (const entry of lines) {
     const cand = noMarks(entry);
-    const biome = BIOME_RE.exec(cand);
+    const biome = BIOME_RE.exec(asciiLower(cand));
     if (biome === null) continue;
     const off = biomeDirective(biome, cand);
     if (off !== null) out.push(off);
