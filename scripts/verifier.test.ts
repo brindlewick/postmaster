@@ -260,7 +260,7 @@ describe("spawnCommand", () => {
   });
 
   test("quotes spaces and single quotes in the worktree path", () => {
-    expect(spawnCommand("/o'brien/r e", ["muse"])[2]).toBe(`cd -- '/o'\\''brien/r e' && exec "$@"`);
+    expect(spawnCommand("/o'brien/r e", ["muse"])[2]).toBe("cd -- '/o'\\''brien/r e' && exec \"$@\"");
   });
 });
 
