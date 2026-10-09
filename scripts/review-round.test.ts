@@ -923,7 +923,9 @@ describe("the round's three steps", () => {
         const cuts = of(calls, "cut-scratch");
         expect(cuts.length).toBe(3);
         for (const lens of ["style", "bug", "security"]) {
-          const cut = cuts.find((c) => c.args[2] === join(p.repo, ".worktrees", `T-1-rev-${lens}-luna`));
+          const cut = cuts.find(
+            (c) => c.args[2] === join(p.repo, ".worktrees", `T-1-rev-${lens}-luna`),
+          );
           expect(cut?.args).toEqual([
             p.repo,
             p.synthesis,
