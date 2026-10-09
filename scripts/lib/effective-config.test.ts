@@ -439,6 +439,50 @@ describe("C3: complete project settings run with no global config", () => {
   }, 60000);
 });
 
+describe("usable counts the keys that survive the strip (#335)", () => {
+  test("legacy-only settings read as no config with no global config", () => {
+    const { repo } = scratch();
+    writeSettings(
+      repo,
+      '[project]\nrisk_surfaces = "binds nothing"\n[tracker]\nbinding = "board"\n',
+    );
+    const missing = join(tmp, `missing-${n}.toml`);
+    const env = envFor(missing);
+    const effective = runCli(["project-settings", "effective", repo], env);
+    expect(effective.code).not.toBe(0);
+    expect(effective.err).toContain("no config at");
+    const kind = runCli(["tracker-kind", repo], env);
+    expect(kind.code).not.toBe(0);
+    expect(kind.out).not.toContain("github");
+    expect(kind.err).toContain("no config at");
+  }, 30000);
+
+  test("a complete project-only config stays usable", () => {
+    const { repo } = scratch();
+    writeSettings(repo, example);
+    const missing = join(tmp, `missing-${n}.toml`);
+    const r = runCli(["project-settings", "effective", repo], envFor(missing));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("opus-x");
+  }, 30000);
+
+  test("a global-only config stays usable", () => {
+    const { repo, config } = scratch();
+    const r = runCli(["project-settings", "effective", repo], envFor(config));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("opus-x");
+  }, 30000);
+
+  test("global and project settings still merge", () => {
+    const { repo, config } = scratch();
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    const r = runCli(["project-settings", "effective", repo], envFor(config));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("gpt-other");
+    expect(r.out).toContain("opus-x");
+  }, 30000);
+});
+
 describe("C4: tracked settings wait for acceptance", () => {
   function pending(): { repo: string; config: string; settings: string } {
     const { repo, config } = scratch();
