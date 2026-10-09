@@ -8,8 +8,9 @@
 //   prompt     print the session's instructions for the repo and surface
 //   make       cut a worktree on a branch of its own beside the repo, render the prompt,
 //              launch the coachman role headless through run launch under run host, wait,
-//              fall back to coachman_fallback on a provider wall, stop the session at the
-//              limit by the pid host recorded, and log one dispatch action per launch
+//              fall back to coachman_fallback on a provider wall read from the session
+//              stream, stop the session at the limit by the pid host recorded, and log
+//              one dispatch action per launch
 //   --timeout  seconds to wait for the session (default 3600, at most 9 digits)
 //
 //   exit 0  prompt printed; make: the session ended with no wall and HANDOVER.md present
@@ -19,6 +20,7 @@
 //           that is not a git repository or holds no commit, or no run at the dispatch
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { endingWallMessage, isWallMessage } from "./launch.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
@@ -196,21 +198,39 @@ export function defaultBase(repo: string): string | null {
   return null;
 }
 
-/** The wall detail for a role in the action lines, or null when it never walled. */
-export function wallForRole(lines: string[], role: string): string | null {
-  for (const line of lines) {
-    let row: unknown;
-    try {
-      row = JSON.parse(line);
-    } catch {
-      continue;
+/**
+ * The first line of the provider wall the stream ended on, or null. The
+ * session runs under the coachman role, whose walls the launcher does not
+ * record, so the verifier reads its own stream with the launcher's helpers.
+ */
+export function wallInStream(streamText: string, harness: string): string | null {
+  const message = endingWallMessage(streamText, harness);
+  if (message === null) return null;
+  const first = message.split("\n")[0] ?? "";
+  if (!isWallMessage(first)) return null;
+  return first;
+}
+
+/** The harness the run recorded for a role, mirroring launch's per-leg pick. */
+export function roleHarness(config: unknown, role: string, leg: string): string | null {
+  if (typeof config !== "object" || config === null || Array.isArray(config)) return null;
+  const team = (config as Record<string, unknown>)["team"];
+  if (typeof team !== "object" || team === null || Array.isArray(team)) return null;
+  const t = team as Record<string, unknown>;
+  const harnessOf = (v: unknown): string | null => {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+    const h = (v as Record<string, unknown>)["harness"];
+    return typeof h === "string" && h !== "" ? h : null;
+  };
+  if (role === "coachman") {
+    const legs = t["coachman_legs"];
+    if (typeof legs === "object" && legs !== null && !Array.isArray(legs)) {
+      const perLeg = harnessOf((legs as Record<string, unknown>)[leg]);
+      if (perLeg !== null) return perLeg;
     }
-    if (typeof row !== "object" || row === null || Array.isArray(row)) continue;
-    const r = row as Record<string, unknown>;
-    if (r["action"] === "wall" && r["target"] === role) {
-      return typeof r["detail"] === "string" ? r["detail"] : "";
-    }
+    return harnessOf(t["coachman"]);
   }
+  if (role === "coachman_fallback") return harnessOf(t["coachman_fallback"]);
   return null;
 }
 
@@ -247,16 +267,6 @@ function runPrompt(req: ParsedPrompt): number {
   return 0;
 }
 
-function readActionLines(dispatch: string): string[] {
-  try {
-    return readFileSync(join(dispatch, "actions.jsonl"), "utf8")
-      .split("\n")
-      .filter((l) => l !== "");
-  } catch {
-    return [];
-  }
-}
-
 function fileText(path: string): string {
   try {
     return readFileSync(path, "utf8").trim();
@@ -271,25 +281,71 @@ interface Attempt {
   thread: string;
   walled: boolean;
   wallDetail: string;
+  failed: string;
 }
 
-function launchAndWait(o: {
+/** A launch that started its process and then failed: its attempt is logged. */
+class LaunchedError extends RunError {
+  attempt: Attempt;
+  constructor(message: string, attempt: Attempt) {
+    super(message);
+    this.attempt = attempt;
+  }
+}
+
+interface LaunchOpts {
   role: string;
-  leg: string[];
+  leg: string;
   wt: string;
   name: string;
   logs: string;
   branch: string;
+  surface: string;
   promptFile: string;
   dispatch: string;
   timeout: number;
-}): Attempt {
+}
+
+function threadOf(stream: string): string {
+  const id = run(RUN, ["launch", "thread-id", stream]);
+  return id.code === 0 ? id.out.trim() : "none";
+}
+
+function streamText(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function readRunConfig(dispatch: string): unknown {
+  try {
+    const data = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    return data["config"] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function launchAndWait(o: LaunchOpts): Attempt {
   const base = join(o.logs, `verifier-${o.branch}-${o.role}`);
   const stream = `${base}-events.jsonl`;
   const errFile = `${base}.err`;
   const marker = `${base}.done`;
   const pidFile = `${base}.pid`;
-  const before = readActionLines(o.dispatch).length;
+  const failed = (message: string): LaunchedError =>
+    new LaunchedError(message, {
+      role: o.role,
+      stream,
+      thread: threadOf(stream),
+      walled: false,
+      wallDetail: "",
+      failed: message,
+    });
   const started = run(RUN, [
     "host",
     "run",
@@ -298,7 +354,7 @@ function launchAndWait(o: {
     "--under",
     o.dispatch,
     "--role",
-    "lane",
+    "coachman",
     "--run",
     o.dispatch,
     "--out",
@@ -316,7 +372,8 @@ function launchAndWait(o: {
     o.role,
     o.wt,
     o.promptFile,
-    ...o.leg,
+    "--leg",
+    o.leg,
     "--run",
     o.dispatch,
   ]);
@@ -326,30 +383,43 @@ function launchAndWait(o: {
     );
   }
   const waited = run(RUN, ["wait-for-markers", o.logs, basename(marker), "1", String(o.timeout)]);
-  if (waited.code === 3) {
-    run(RUN, ["host", "stop", o.wt]);
-    throw new RunError(
-      `the ${o.role} session was still running after ${o.timeout} seconds; stopped`,
-    );
-  }
   if (waited.code !== 0) {
-    throw new RunError(
-      `waiting for the ${o.role} session failed: ${waited.err.trim() || waited.out.trim()}`,
+    // Stopping an already-exited session is a no-op, so every wait failure
+    // stops first; the stop result is checked before anything claims it.
+    const stop = run(RUN, ["host", "stop", o.wt]);
+    const stopFailed =
+      stop.code === 0
+        ? ""
+        : `the stop failed: ${stop.err.trim() || stop.out.trim() || `exit ${stop.code}`}`;
+    if (waited.code === 3) {
+      throw failed(
+        stop.code === 0
+          ? `the ${o.role} session was still running after ${o.timeout} seconds; stopped`
+          : `the ${o.role} session was still running after ${o.timeout} seconds; ${stopFailed}`,
+      );
+    }
+    throw failed(
+      `waiting for the ${o.role} session failed: ${waited.err.trim() || waited.out.trim()}${stopFailed === "" ? "" : `; ${stopFailed}`}`,
     );
   }
-  const wallDetail = wallForRole(readActionLines(o.dispatch).slice(before), o.role);
-  const id = run(RUN, ["launch", "thread-id", stream]);
+  const harness = roleHarness(readRunConfig(o.dispatch), o.role, o.leg);
+  if (harness === null) {
+    throw failed(`the run names no harness for ${o.role}`);
+  }
+  const wallDetail = wallInStream(streamText(stream), harness);
   return {
     role: o.role,
     stream,
-    thread: id.code === 0 ? id.out.trim() : "none",
+    thread: threadOf(stream),
     walled: wallDetail !== null,
     wallDetail: wallDetail ?? "",
+    failed: "",
   };
 }
 
 function logLaunch(dispatch: string, surface: string, branch: string, a: Attempt): void {
-  const detail = `thread ${a.thread} role ${a.role} branch ${branch}${a.walled ? " walled" : ""}`;
+  const outcome = a.failed !== "" ? ` failed: ${a.failed}` : a.walled ? " walled" : "";
+  const detail = `thread ${a.thread} role ${a.role} branch ${branch}${outcome}`;
   const r = run(RUN, [
     "log-action",
     dispatch,
@@ -360,6 +430,18 @@ function logLaunch(dispatch: string, surface: string, branch: string, a: Attempt
   ]);
   if (r.code !== 0)
     throw new RunError(`the launch was not logged: ${r.err.trim() || r.out.trim()}`);
+}
+
+/** One launch and its one dispatch line, on success and on every failure past the start. */
+function attempt(o: LaunchOpts): Attempt {
+  try {
+    const a = launchAndWait(o);
+    logLaunch(o.dispatch, o.surface, o.branch, a);
+    return a;
+  } catch (e) {
+    if (e instanceof LaunchedError) logLaunch(o.dispatch, o.surface, o.branch, e.attempt);
+    throw e;
+  }
 }
 
 function runMake(req: ParsedMake): number {
@@ -395,32 +477,32 @@ function runMake(req: ParsedMake): number {
     throw new RunError(`the launch could not be named: ${named.err.trim() || named.out.trim()}`);
   }
   const name = named.out.trim();
-  const first = launchAndWait({
+  const first = attempt({
     role: "coachman",
-    leg: ["--leg", "synthesis"],
+    leg: "synthesis",
     wt,
     name,
     logs,
     branch,
+    surface: req.surface,
     promptFile,
     dispatch,
     timeout: req.timeout,
   });
-  logLaunch(dispatch, req.surface, branch, first);
   let final = first;
   if (first.walled) {
-    const second = launchAndWait({
+    const second = attempt({
       role: "coachman_fallback",
-      leg: [],
+      leg: "synthesis",
       wt,
       name,
       logs,
       branch,
+      surface: req.surface,
       promptFile,
       dispatch,
       timeout: req.timeout,
     });
-    logLaunch(dispatch, req.surface, branch, second);
     if (second.walled) {
       throw new RunError(
         `both roles walled: coachman: ${first.wallDetail}; coachman_fallback: ${second.wallDetail}`,

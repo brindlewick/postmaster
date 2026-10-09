@@ -15,9 +15,10 @@ import {
   pickWorktree,
   remoteFromSymbolicRef,
   renderPrompt,
+  roleHarness,
   surfaceProse,
   verifyDirName,
-  wallForRole,
+  wallInStream,
 } from "./verifier.ts";
 
 function tempDir(): string {
@@ -236,22 +237,70 @@ describe("prompt needs a commit to name", () => {
   });
 });
 
-describe("wallForRole", () => {
-  const wall = (target: string, detail: string): string =>
-    JSON.stringify({ action: "wall", target, detail });
-  const other = JSON.stringify({ action: "dispatch", target: "coachman", detail: "x" });
-
-  test("finds the role's wall and nothing else", () => {
-    expect(wallForRole([other, wall("coachman", "workhorse - - none tired")], "coachman")).toBe(
-      "workhorse - - none tired",
-    );
-    expect(wallForRole([wall("coachman_fallback", "d")], "coachman")).toBe(null);
-    expect(wallForRole([other], "coachman")).toBe(null);
-    expect(wallForRole([], "coachman")).toBe(null);
+describe("wallInStream", () => {
+  test("reads a wall ending in each recorded shape", () => {
+    expect(
+      wallInStream(
+        '{"type":"turn.completed"}\n{"type":"turn.failed","error":{"message":"Rate limit exceeded, retry later"}}\n',
+        "codex",
+      ),
+    ).toBe("Rate limit exceeded, retry later");
+    expect(
+      wallInStream(
+        '{"type":"assistant"}\n{"type":"result","is_error":true,"result":"Too many requests"}\n',
+        "claude",
+      ),
+    ).toBe("Too many requests");
+    expect(
+      wallInStream(
+        '{"payload_type":"run.terminal.failed","payload":{"reason":"Usage limit reached"}}\n',
+        "muse",
+      ),
+    ).toBe("Usage limit reached");
   });
 
-  test("skips lines that are not action objects", () => {
-    expect(wallForRole(["{torn", "[]", "4", wall("coachman", "")], "coachman")).toBe("");
-    expect(wallForRole(["{torn"], "coachman")).toBe(null);
+  test("a clean end, a non-wall error and an unread shape read as no wall", () => {
+    expect(wallInStream('{"type":"result","is_error":false,"result":"done"}\n', "claude")).toBe(
+      null,
+    );
+    expect(
+      wallInStream('{"type":"turn.failed","error":{"message":"bad gateway"}}\n', "codex"),
+    ).toBe(null);
+    expect(
+      wallInStream('{"type":"turn.failed","error":{"message":"Rate limit exceeded"}}\n', "grok"),
+    ).toBe(null);
+    expect(wallInStream("", "codex")).toBe(null);
+  });
+});
+
+describe("roleHarness", () => {
+  const config = {
+    team: {
+      coachman: { harness: "muse" },
+      coachman_fallback: { harness: "codex" },
+    },
+  };
+
+  test("each role reads its own harness", () => {
+    expect(roleHarness(config, "coachman", "synthesis")).toBe("muse");
+    expect(roleHarness(config, "coachman_fallback", "synthesis")).toBe("codex");
+  });
+
+  test("a per-leg coachman wins over the shared one", () => {
+    const legged = {
+      team: {
+        coachman: { harness: "muse" },
+        coachman_legs: { synthesis: { harness: "claude" } },
+      },
+    };
+    expect(roleHarness(legged, "coachman", "synthesis")).toBe("claude");
+    expect(roleHarness(legged, "coachman", "review")).toBe("muse");
+  });
+
+  test("a missing table or harness reads as none", () => {
+    expect(roleHarness({}, "coachman", "synthesis")).toBe(null);
+    expect(roleHarness({ team: {} }, "coachman_fallback", "synthesis")).toBe(null);
+    expect(roleHarness(null, "coachman", "synthesis")).toBe(null);
+    expect(roleHarness(config, "postmaster", "synthesis")).toBe(null);
   });
 });
