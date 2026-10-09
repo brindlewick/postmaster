@@ -1,0 +1,11 @@
+{"ts":"2026-10-04T18:32:00Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/run-times.ts:70","detail":"style P3 r1 style luna, verified by reading"}
+{"ts":"2026-10-04T18:32:00Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture.ts:991","detail":"style P3 r1 style mimo, verified by execution"}
+{"ts":"2026-10-04T18:32:00Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/run-times.ts:49","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:00Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture-time-oracle.test.ts:30","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:00Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture.test.ts:504","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:01Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture.ts:936","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:01Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture-time-oracle.test.ts:73","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:01Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/run-times.ts:190","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:01Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture.test.ts:194","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:01Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture.test.ts:75","detail":"style P3 r1 style mimo, verified by reading"}
+{"ts":"2026-10-04T18:32:01Z","project":"postmaster","run":"265","actor":"coachman","action":"finding","target":"scripts/fixture.ts:845","detail":"style P3 r1 style mimo, verified by reading"}

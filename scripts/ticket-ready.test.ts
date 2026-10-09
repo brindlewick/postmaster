@@ -124,13 +124,13 @@ describe("the readiness matrix on a local store", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("ready: 1");
     expect(r.out).toContain("turnpikes: style, bug, security");
-  }, 30000);
+  });
 
   test("an unmarked ticket names the missing mark", () => {
     const r = ready([repo, "2"]);
     expect(r.code).toBe(2);
     expect(r.out).toBe("ready label is missing\n");
-  }, 30000);
+  });
 
   test("a one-part ticket names the parts finding", () => {
     const r = ready([repo, "3"]);
@@ -138,14 +138,14 @@ describe("the readiness matrix on a local store", () => {
     expect(r.out).toContain("ticket-parts:");
     expect(r.out).toContain("For the agents");
     expect(r.out.includes("ready label is missing")).toBe(false);
-  }, 30000);
+  });
 
   test("a draft ticket names the draft line once", () => {
     const r = ready([repo, "4"]);
     expect(r.code).toBe(2);
     const drafts = r.out.split("\n").filter((l) => /draft/iu.test(l));
     expect(drafts.length).toBe(1);
-  }, 30000);
+  });
 
   test("a ticket failing several ways names every reason", () => {
     const e = join(tmp, "e.md");
@@ -156,12 +156,12 @@ describe("the readiness matrix on a local store", () => {
     expect(/draft/iu.test(r.out)).toBe(true);
     expect(/parts|for the agents/iu.test(r.out)).toBe(true);
     expect(/ready label is missing/iu.test(r.out)).toBe(true);
-  }, 30000);
+  });
 
   test("an unknown id exits 1", () => {
     const r = ready([repo, "9999"]);
     expect(r.code).toBe(1);
-  }, 30000);
+  });
 
   test("one label holding a comma is not the ready mark", () => {
     const n = local(["create", "Comma label", join(tmp, "a.md")]);
@@ -171,7 +171,7 @@ describe("the readiness matrix on a local store", () => {
     expect(r.out).toContain("ready label is missing");
     local(["label", n, "add", "ready"]);
     expect(ready([repo, n]).code).toBe(0);
-  }, 30000);
+  });
 });
 
 describe("the marking and queue verbs", () => {
@@ -184,7 +184,7 @@ describe("the marking and queue verbs", () => {
     expect(before.out.split("\n").find((l) => l.startsWith("labels:"))).toBe(
       after.out.split("\n").find((l) => l.startsWith("labels:")),
     );
-  }, 30000);
+  });
 
   test("marking a passing ticket labels, notes and queues it", () => {
     const r = ready(["mark", repo, "2"]);
@@ -198,7 +198,7 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain("label add ready");
     expect(ready([repo, "2"]).code).toBe(0);
     expect(ready(["pending", repo]).out.split("\n")).toContain("2");
-  }, 30000);
+  });
 
   test("mark writes a draft body and title through the adapter", () => {
     const n = local(["create", "Old title", join(tmp, "c.md")]);
@@ -214,7 +214,7 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain("body updated");
     expect(ledger).toContain("title updated");
     expect(ledger).toContain("label add ready");
-  }, 30000);
+  });
 
   test("marking a commented ticket writes the draft against the stored body", () => {
     const n = local(["create", "Old title", join(tmp, "c.md")]);
@@ -230,7 +230,7 @@ describe("the marking and queue verbs", () => {
     expect(read).toContain("labels: ready");
     expect(read).toContain("## For the agents");
     expect(ready([repo, n]).code).toBe(0);
-  }, 30000);
+  });
 
   test("a genuine Log-shaped tail binds fully: editing it refuses", () => {
     const f = join(tmp, "tailed.md");
@@ -247,7 +247,7 @@ describe("the marking and queue verbs", () => {
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
-  }, 60000);
+  });
 
   test("a post-sign-off turnpikes edit refuses until the ticket is signed off again", () => {
     const n = local(["create", "Bound text", join(tmp, "a.md")]);
@@ -283,7 +283,7 @@ describe("the marking and queue verbs", () => {
     const again = ready([repo, n]);
     expect(again.code).toBe(0);
     expect(again.out).toContain("turnpikes: none");
-  }, 60000);
+  });
 
   test("a malformed marker fails closed instead of reading unbound", () => {
     const n = local(["create", "Ragged marker", join(tmp, "a.md")]);
@@ -303,7 +303,7 @@ describe("the marking and queue verbs", () => {
     expect(ready(["unmark", repo, n]).code).toBe(0);
     expect(ready(["mark", repo, n]).code).toBe(0);
     expect(ready([repo, n]).code).toBe(0);
-  }, 60000);
+  });
 
   test("a comment after sign-off stays ready, and an edit under it still refuses", () => {
     const n = local(["create", "Commented text", join(tmp, "a.md")]);
@@ -326,7 +326,7 @@ describe("the marking and queue verbs", () => {
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
-  }, 60000);
+  });
 
   test("storedMatches compares with the adapter's own base check", () => {
     const n = local(["create", "Match probe", join(tmp, "a.md")]);
@@ -341,7 +341,7 @@ describe("the marking and queue verbs", () => {
     expect(reason).toContain("changed since");
     // The mark-time rollback on a mismatch needs a concurrent edit mid-mark
     // and stays untested; every mark test exercises the match path.
-  }, 30000);
+  });
 
   test("a post-sign-off title edit refuses as well", () => {
     const n = local(["create", "Bound title", join(tmp, "a.md")]);
@@ -350,7 +350,7 @@ describe("the marking and queue verbs", () => {
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
-  }, 60000);
+  });
 
   test("unmark drops the label and the marker, consume drops only the marker", () => {
     const r = ready(["unmark", repo, "2"]);
@@ -364,14 +364,14 @@ describe("the marking and queue verbs", () => {
     expect(ready(["consume", repo, "2"]).code).toBe(0);
     expect(run(localSh, ["local", repo, "read", "2"]).out).toContain("labels: ready");
     expect(ready(["pending", repo]).out.split("\n").includes("2")).toBe(false);
-  }, 30000);
+  });
 
   test("queue checks before it queues", () => {
     expect(ready(["queue", repo, "3"]).code).toBe(2);
     expect(ready(["pending", repo]).out.split("\n").includes("3")).toBe(false);
     expect(ready(["queue", repo, "1"]).code).toBe(0);
     expect(ready(["pending", repo]).out.split("\n")).toContain("1");
-  }, 30000);
+  });
 });
 
 describe("a tracker of kind other", () => {
@@ -404,7 +404,7 @@ describe("a tracker of kind other", () => {
     ]);
     expect(bad.code).toBe(2);
     expect(bad.out).toContain("ready label is missing");
-  }, 30000);
+  });
 
   test("each --labels flag names one label, and a lone comma flag is refused", () => {
     const a = join(tmp, "a.md");
@@ -419,7 +419,7 @@ describe("a tracker of kind other", () => {
     expect(marked.code).toBe(0);
     const plain = ready([...base, "--labels", "ready"]);
     expect(plain.code).toBe(0);
-  }, 30000);
+  });
 
   test("mark records the marking once the label is applied outside", () => {
     const a = join(tmp, "a.md");
@@ -429,7 +429,7 @@ describe("a tracker of kind other", () => {
     const r = ready(["mark", "--body", a, "--labels", "ready", "--repo", repo, "--id", "EXT-1"]);
     expect(r.code).toBe(0);
     expect(ready(["pending", repo]).out.split("\n")).toContain("EXT-1");
-  }, 30000);
+  });
 
   test("a body changed after marking refuses until marked again", () => {
     const f = join(tmp, "bind-other.md");
@@ -472,7 +472,7 @@ describe("a tracker of kind other", () => {
     const again = ready(checkArgs(f));
     expect(again.code).toBe(0);
     expect(again.out).toContain("turnpikes: none");
-  }, 60000);
+  });
 
   test("a malformed marker on the body form names the external recovery", () => {
     const a = join(tmp, "a.md");
@@ -508,13 +508,13 @@ describe("a tracker of kind other", () => {
     expect(bad.code).toBe(2);
     expect(bad.out).toContain("is malformed");
     expect(bad.out).toContain("through the tracker's own tooling");
-  }, 60000);
+  });
 
   test("the check without a project or id is refused", () => {
     const a = join(tmp, "a.md");
     expect(ready(["--body", a, "--labels", "ready", "--project", repo]).code).toBe(1);
     expect(ready(["--body", a, "--labels", "ready", "--id", "EXT-9"]).code).toBe(1);
-  }, 30000);
+  });
 
   test("the adapter verbs refuse with the body-and-labels form", () => {
     const otherRepo = join(tmp, "other-repo");
@@ -538,7 +538,7 @@ describe("a tracker of kind other", () => {
       "run ticket-ready mark --body <file>",
     );
     expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain("run ticket-ready consume ");
-  }, 60000);
+  });
 });
 
 describe("usage", () => {
@@ -546,7 +546,7 @@ describe("usage", () => {
     expect(ready([]).code).toBe(1);
     expect(ready(["mark", repo]).code).toBe(1);
     expect(ready([repo]).code).toBe(1);
-  }, 30000);
+  });
 
   test("a flag in a value's place is refused", () => {
     const a = join(tmp, "a.md");
@@ -556,7 +556,7 @@ describe("usage", () => {
     const m = ready(["mark", repo, "1", "--title", "--body", a]);
     expect(m.code).toBe(1);
     expect(m.out).toContain("--title needs a value; got --body");
-  }, 30000);
+  });
 });
 
 // --- the same matrix through the github and plane test doubles ---
@@ -664,7 +664,7 @@ describe("the matrix through the github double", () => {
     // semantics: the no-op edit must match.
     expect(ready(["mark", repoGh, "1"], env).code).toBe(0);
     expect(ready([repoGh, "1"], env).code).toBe(0);
-  }, 60000);
+  });
 });
 
 type StubItem = {
@@ -784,7 +784,7 @@ describe("the matrix through the plane double", () => {
     } finally {
       server.stop(true);
     }
-  }, 60000);
+  });
 });
 
 async function readyAsync(args: string[], env?: Record<string, string | undefined>) {
