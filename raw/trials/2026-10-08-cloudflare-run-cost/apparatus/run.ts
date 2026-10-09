@@ -9,7 +9,21 @@ import { dirname, join, resolve } from "node:path";
 import type { Extract } from "../../2026-10-03-lane-audit/apparatus/extract.ts";
 import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
 import { covered, runTime, type RunTime, summarizeRole } from "./instance-time.ts";
-import { dollars, perRunTable, rateTable, type Scenario, scenarioCost, scenarioTable, timeTable } from "./tables.ts";
+import { PLAN_FEE_PER_MONTH } from "./cost.ts";
+import {
+  auditTotals,
+  breakEven,
+  dollars,
+  isoSpan,
+  perRunTable,
+  rateTable,
+  type Scenario,
+  scenarioCost,
+  scenarioTable,
+  timeTable,
+  totalsCost,
+  totalsTable,
+} from "./tables.ts";
 import type { RunUptime } from "./uptime.ts";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -45,6 +59,23 @@ ${hoursOf(ceilingSameRuns)} hours. The ${real.length - uptime.length} runs witho
 ${real.length} runs the ceiling's median is ${hoursOf(ceilingAllRuns)} hours, which would raise the top of every cell
 below (the largest cell, all standard-4 with every vCPU busy, from $${dollars(scenarioCost(real, biggest, 1, ceilingSameRuns).total)}
 to $${dollars(scenarioCost(real, biggest, 1, ceilingAllRuns).total)}). The cost tables use the floor and the ceiling of the same ${uptime.length} runs.`;
+
+const uptimeSeconds = new Map(uptime.map((u) => [u.run, u.seconds]));
+const totals = auditTotals(real, uptimeSeconds);
+const span = isoSpan(covered(data.runs, "real"));
+const TOTAL_SIZES = ["standard-2", "standard-3", "standard-4"];
+const FLAT_PRICES = [25, 50, 100, 200];
+const averageAt = (size: string): number => totalsCost(totals, size, 0.25).average;
+const evens = (size: string): number[] => breakEven(FLAT_PRICES, averageAt(size), PLAN_FEE_PER_MONTH);
+const breakEvenRows = FLAT_PRICES.map(
+  (price, i) => `| $${price} | ${(evens("standard-3")[i] as number).toFixed(0)} | ${(evens("standard-4")[i] as number).toFixed(0)} |`,
+).join("\n");
+const allRuns = `The ${totals.runs} runs' records run from ${span?.first.slice(0, 10) ?? "?"} to ${span?.last.slice(0, 10) ?? "?"}. Together they hold
+${hoursOf(totals.lanesAndReviewers)} hours of lanes and reviewers, the coachman's floor of ${hoursOf(totals.coachmanFloor)} hours over the
+${totals.coachmanFloorRuns} runs with session exports, and a coachman ceiling of ${hoursOf(totals.coachmanCeiling)} hours over all ${totals.runs}. "Low" is lanes
+and reviewers plus the coachman's floor, which leaves out the coachman of the ${totals.runs - totals.coachmanFloorRuns} runs without exports; "high" is
+lanes and reviewers plus every stage hour of the coachman in every run, the user's waits included. "Average run" is the
+high figure divided by ${totals.runs}. List rates, with no monthly allowance taken off.`;
 
 const SCENARIOS: Scenario[] = [
   { name: "all standard-2", lanes: "standard-2", reviewers: "standard-2", coachman: "standard-2" },
@@ -94,6 +125,24 @@ The gates run inside these launches and add nothing of their own. List rates, wi
 allowance taken off. Each cell reads "coachman at its floor to coachman at its ceiling".
 
 ${scenarioTable(real, SCENARIOS, coachman)}
+
+## All ${real.length} runs together
+
+${allRuns}
+
+${totalsTable(totals, TOTAL_SIZES)}
+
+## Against a flat monthly price
+
+A machine billed by the month costs the same however many runs it does. Cloudflare costs the $${PLAN_FEE_PER_MONTH} plan fee plus
+the average run's cost for each run. The table gives the runs a month at which the two cost the same, for flat
+prices that are only examples; a reader's own price replaces them. The average run is the high end of the table above
+at a quarter of the CPU busy: $${dollars(averageAt("standard-3"))} on standard-3 and $${dollars(averageAt("standard-4"))} on standard-4. Neither side's model bill is in
+it, and a machine of the right size for the work is assumed.
+
+| Flat price a month | Runs a month, standard-3 | Runs a month, standard-4 |
+| --- | --- | --- |
+${breakEvenRows}
 
 ## The median fixture run
 

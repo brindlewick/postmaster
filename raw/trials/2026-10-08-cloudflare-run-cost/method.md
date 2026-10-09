@@ -10,7 +10,9 @@ date: 2026-10-08
 Cloudflare, with Workers as the control plane and Containers for the lanes. Its third criterion asks what a run
 would cost there: instance-hours from the lane audit's times, and the model bill if API keys replace subscription
 logins, from the audit's token counts. This trial computes those two figures and the controls that could have
-made them come out wrong. It answers a question about arithmetic on the fleet's own records. It does not show
+made them come out wrong. The comparison it serves is Cloudflare against a flat-priced server, so the container-time
+figures lead, with the totals for all the runs and a break-even against a flat monthly price, and the model bill, which
+is the same on any host, is a side note. It answers a question about arithmetic on the fleet's own records. It does not show
 that the flow runs on Cloudflare, which needs a trial of its own.
 
 **Inputs.**
@@ -45,6 +47,13 @@ that the flow runs on Cloudflare, which needs a trial of its own.
   (planning, workhorses running, synthesis, checkpoint, review), which counts the user's wait for a spec review. The cost
   tables use the median of both over the same 14 runs that have session exports; the ceiling over all 18 runs, which
   includes the four longest, is reported beside them and in what the largest cell would read.
+- *All runs together*: the lanes' and reviewers' seconds summed over the 18 runs, and the coachman's seconds summed two
+  ways, the floor over the 14 runs that have session exports and the ceiling over all 18. "Low" is lanes and reviewers
+  plus the floor; "high" is lanes and reviewers plus the ceiling; "average run" is "high" divided by 18. The records of
+  the 18 runs span 2026-09-28 to 2026-10-03, read from the earliest and latest timestamp in them.
+- *Break-even against a flat monthly price*: the runs a month at which the $5 plan fee plus the average run's cost for
+  each run equals the flat price, for example prices. It assumes the flat machine is big enough for the work, which
+  this trial does not size.
 - *Cost of container time*: seconds times the per-second rate of an instance type, memory and disk for what the type
   provisions and CPU for active use only, from the Containers pricing page. The audit holds no CPU measurement, so
   CPU use is bracketed at none, a quarter and all vCPUs busy. List rates; the monthly allowance is not taken off,
@@ -60,7 +69,7 @@ that the flow runs on Cloudflare, which needs a trial of its own.
   since the two differ twelvefold in input price.
 
 **Counts and controls.** Every count has a control, listed with its result in
-[results/controls.md](results/controls.md), 20 in all, and `apparatus/controls.test.ts` runs them against the
+[results/controls.md](results/controls.md), 23 in all, and `apparatus/controls.test.ts` runs them against the
 committed data. They include: the audit's own published gate totals reproduced through the new code (36 lane-branch
 gate runs, 6.5 hours; 260 synthesis runs, 43.5 hours); one lane's seconds recomputed from its two timestamps; that
 lane's cost recomputed by hand; a run with nothing in it reading zero everywhere; the coachman's floor below its
@@ -70,8 +79,9 @@ codex workhorses 18 launches and 438M in, Opus 71 launches and $644.17); and Cla
 recomputed from each launch's own per-model tokens at the published Opus 5.5 prices, inside the bracket from all
 cache writes at five minutes to all at one hour for 61 of 61 launches that used one model, against 0 launches when
 the same arithmetic uses Opus 4.1's prices; and the coachman's dollars at Meta's standard tier summed launch by launch
-and recomputed from the summed tokens, against the same re-pricing of a model no launch used, which moves nothing. The
-unit tests beside each module hold the other positive and negative cases, 82 tests in all. For the scan of scripts they
+and recomputed from the summed tokens, against the same re-pricing of a model no launch used, which moves nothing; and the totals for all the runs, as hours
+times the hourly rate and as the cost summed run by run, with the totals over no runs reading zero. The
+unit tests beside each module hold the other positive and negative cases, 94 tests in all. For the scan of scripts they
 include a package-manager lock file and a process's own `.pid` property, which must not count as marker files, and
 another tool's `worktree` command, which must not count as a `git worktree` call; a hand count of calls to `git` with a
 worktree verb in the 69 scripts finds the same six scripts as the scan. They show the code applies a rule the same way on a case that must read non-zero and one that
@@ -98,7 +108,7 @@ the ten captures.
 
 **Limits.**
 
-- Every figure is the fleet's own, for 18 real runs of one repository over about a week, on the flow as it stood
+- Every figure is the fleet's own, for 18 real runs of one repository whose records span 2026-09-28 to 2026-10-03, on the flow as it stood
   then. A different ticket mix gives different seconds.
 - The costing puts every launch in a container of its own and starts none early or late. A design that shares a
   container between roles, or keeps one warm, costs differently.

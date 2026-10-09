@@ -145,3 +145,96 @@ export function scenarioTable(
   }
   return lines.join("\n");
 }
+
+/** Seconds across every audited run, by what a container would be running. */
+export type AuditTotals = {
+  runs: number;
+  /** workhorse lanes and reviewers, which have a recorded time */
+  lanesAndReviewers: number;
+  /** the coachman's floor (its last process's uptime) over the runs that have a session export */
+  coachmanFloor: number;
+  /** how many runs the floor covers */
+  coachmanFloorRuns: number;
+  /** the coachman's ceiling (every stage a leg can run in) over all the runs */
+  coachmanCeiling: number;
+};
+
+/** Sum the container seconds of all runs; `uptimeSeconds` maps a run to its coachman's floor, where it has one. */
+export function auditTotals(times: readonly RunTime[], uptimeSeconds: ReadonlyMap<string, number>): AuditTotals {
+  const totals: AuditTotals = {
+    runs: times.length,
+    lanesAndReviewers: 0,
+    coachmanFloor: 0,
+    coachmanFloorRuns: 0,
+    coachmanCeiling: 0,
+  };
+  for (const t of times) {
+    totals.lanesAndReviewers += seconds(t.lanes) + seconds(t.reviewers);
+    totals.coachmanCeiling += t.coachmanUpper;
+    const floor = uptimeSeconds.get(t.run);
+    if (floor !== undefined) {
+      totals.coachmanFloor += floor;
+      totals.coachmanFloorRuns += 1;
+    }
+  }
+  return totals;
+}
+
+/**
+ * What all the runs together cost on one instance type at one CPU use. `low` counts the coachman at its
+ * floor, for the runs that have one; `high` counts every stage hour of every run; `average` is `high` per run.
+ */
+export function totalsCost(
+  totals: AuditTotals,
+  size: string,
+  cpuUse: number,
+): { low: number; high: number; average: number } {
+  const type = INSTANCE_TYPES[size] as InstanceType;
+  const rest = cost(totals.lanesAndReviewers, type, cpuUse);
+  const low = rest + cost(totals.coachmanFloor, type, cpuUse);
+  const high = rest + cost(totals.coachmanCeiling, type, cpuUse);
+  return { low, high, average: totals.runs === 0 ? 0 : high / totals.runs };
+}
+
+/** The totals by size and CPU use, as "low to high" for all the runs and the average run at the high end. */
+export function totalsTable(totals: AuditTotals, sizes: readonly string[]): string {
+  const lines = [
+    row(["Size", "CPU busy", `All ${totals.runs} runs, $`, "Average run, $"]),
+    row(["---", "---", "---", "---"]),
+  ];
+  for (const size of sizes) {
+    const t = INSTANCE_TYPES[size] as InstanceType;
+    for (const u of CPU_USES) {
+      const c = totalsCost(totals, size, u);
+      lines.push(
+        row([`${size} (${t.vcpu} vCPU, ${t.memoryGib} GiB)`, `${u * 100}%`, `${dollars(c.low)} to ${dollars(c.high)}`, dollars(c.average)]),
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+/** Runs a month at which Cloudflare (the plan fee plus `perRun` for each run) costs the same as a flat monthly price. */
+export function breakEven(prices: readonly number[], perRun: number, planFee: number): number[] {
+  return prices.map((p) => (perRun <= 0 ? 0 : Math.max(0, (p - planFee) / perRun)));
+}
+
+/** The earliest and latest ISO timestamps found anywhere in a value, or null where there are none. */
+export function isoSpan(value: unknown): { first: string; last: string } | null {
+  let first: string | null = null;
+  let last: string | null = null;
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") {
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u.test(v)) {
+        if (first === null || v < first) first = v;
+        if (last === null || v > last) last = v;
+      }
+    } else if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+    } else if (v !== null && typeof v === "object") {
+      for (const x of Object.values(v)) walk(x);
+    }
+  };
+  walk(value);
+  return first === null || last === null ? null : { first, last };
+}

@@ -13,9 +13,9 @@ container for each lane, reviewer and coachman leg. A Worker alone cannot run a 
 Claude Code, Codex and Pi headless in a container with the model key held in the Worker. They use API credentials; an
 earlier example in Cloudflare's sandbox repository held a Claude subscription token the same way, and is gone from the
 current examples. Whether a Worker may hold a subscription login and use it from a vendor-neutral cloud container is not
-settled by any vendor's words: each documents a login on its own runner, and the terms leave the rest open. Container time
-is the small part of the cost. The large part is the model bill at pay-per-token prices, and most of that is the Opus
-security review: 92% while the coachman runs on Meta's contributor tier, 63% on its standard tier.
+settled by any vendor's words: each documents a login on its own runner, and the terms leave the rest open. The Cloudflare
+bill is container time, with the control plane at cents: about $1 to $4.50 for a typical run, and up to about $4 to $7 for
+the average run. The model bill is the same on any host, so it is a side note at the end of [Cost](#cost).
 [Issue #341](https://github.com/brindlewick/postmaster/issues/341), "Research: could postmaster's
 flow run on Cloudflare, with Workers as the control plane and Containers for the lanes?", asks the question.
 
@@ -52,11 +52,13 @@ standing.
    routing or intermediating plan credentials. Meta limits a subscription credential to its own harness. Xiaomi limits a
    Token Plan to programming tools and gives "automated scripts" as an example of a use it bars. Details in
    [Logins and terms](#logins-and-terms).
-5. **Container time costs little.** A median real run, with every launch in a container of its own, is $0.50 to $9.60 at
-   list rates, and $0.65 to $4.43 with a quarter of the CPU busy. The widest uncertainty is the coachman's process time,
-   which the records bracket at 3.6 to 18.8 hours; instance size and CPU use come next. The same run's model tokens at API
-   prices are $16 (median) or $39 (mean), of which the Opus security review is $14.56 (median) or $35.79 (mean)
-   [@trials/2026-10-08-cloudflare-run-cost/results/cost.md] [@trials/2026-10-08-cloudflare-run-cost/results/model-bill.md].
+5. **The Cloudflare bill is container time, and it is small.** A typical (median) real run, with every launch in a
+   container of its own, costs $0.98 to $2.68 on 2 vCPU, 8 GiB machines and $1.61 to $4.43 on 4 vCPU, 12 GiB machines, with a
+   quarter of the CPU busy; over every size and CPU use the extremes are $0.50 and $9.60. The average run costs more, up to
+   about $4 or $7, because a few long runs dominate, and the 18 audited runs together, which span 2026-09-28 to 2026-10-03,
+   would have cost roughly $20 to $125. The widest uncertainty is the coachman's process time, which the records bracket at
+   3.6 to 18.8 hours. The control plane is cents, and the plan is $5 a month
+   [@trials/2026-10-08-cloudflare-run-cost/results/cost.md]. The model bill is the same on any host and is a side note.
 6. **A container per lane would stop every reach the isolation scan found inside the machine**, by the documented design
    (argued, not tried), and leaves open the destinations the network handler allows, the git remote, the hand-back of work and
    where the blind tests live ([Isolation](#isolation)).
@@ -164,6 +166,21 @@ self-hosted environments (public beta) on Team and Enterprise
 
 ## Cost
 
+### What Cloudflare would charge
+
+The model bill is left out here; it is the same on any host and is at the end of this section. What Cloudflare itself
+charges, at list rates read on 2026-10-08:
+
+| Part | What it charges | What it comes to |
+| --- | --- | --- |
+| Plan | Workers Paid, $5 a month. It includes 25 GiB-hours of container memory, 375 vCPU-minutes and 200 GB-hours of disk, which is 2 to 3 container-hours (A10.1, B7) | $5 a month; list rates apply from the first run |
+| Containers | Memory and disk as the instance type provisions them, for as long as the instance runs, idle or not, and CPU for active use only, in 10 ms steps (A10.1) | nearly all of the bill, below |
+| Durable Object in front of a container | 128 MB for each active second, $12.50 per million GB-s with 400,000 GB-s a month included; each request or alarm is a billed request, $0.15 per million after the first million (A8.5) | $0.0056 an hour while active, about $0.13 for 24 hours |
+| Workers and Workflows | Workers: 10 million requests a month then $0.30 per million, 30 million CPU ms then $0.02 per million. Workflows: 500,000 steps then $0.80 per 100,000 (B6, B7) | cents at this scale; request counts were not measured |
+| R2, D1, Queues | Read for limits, not priced here (B18 to B20) | argued to be cents: a few JSON-lines segments a run |
+| Egress | 1 TB a month included in North America and Europe (A10.1) | far below it (argued) |
+| AI Gateway | Core features are free; a 5% fee applies only to credits bought through Cloudflare (B14, B17) | none with your own keys |
+
 ### Container time
 
 Every launch in a container of its own, from the lane audit's times
@@ -213,9 +230,52 @@ cap and the cap raised to 16 GiB [@trials/2026-10-03-lane-audit/results/incident
 instance has 12 GiB, so the standard-2 and standard-3 rows, at 6 and 8 GiB, may not fit a coachman or a gate.
 Whether either fits was not measured.
 
-### The model bill, if API keys replace subscription logins
+### All 18 audited runs together
 
-From the audit's token counts, split by kind from each launch's own stream, at each vendor's published price
+The 18 runs' records span 2026-09-28 to 2026-10-03. Together they hold 188 hours of lanes and reviewers and 48 to 477
+hours of coachman: 48 is the floor over the 14 runs with session exports, and 477 is every stage hour of all 18. At list
+rates, with no allowance taken off [@trials/2026-10-08-cloudflare-run-cost/results/cost.md]:
+
+| Size | CPU busy | All 18 runs | Average run |
+| --- | --- | --- | --- |
+| standard-3 (2 vCPU, 8 GiB) | none | $18 to $51 | $2.81 |
+| standard-3 | a quarter | $26 to $74 | $4.14 |
+| standard-3 | all | $52 to $146 | $8.12 |
+| standard-4 (4 vCPU, 12 GiB) | none | $27 to $75 | $4.17 |
+| standard-4 | a quarter | $44 to $123 | $6.83 |
+| standard-4 | all | $95 to $267 | $15 |
+
+The low end leaves out the coachman of the four runs with no session export. The average run is the high end divided by
+18. It is above the median run's cost because a few long runs dominate: the four longest by coachman stage time run 40 to
+68 hours. CPU use was not measured. An agent that mostly waits on a model is likely nearer a quarter busy than all busy,
+which is argued, not measured. The results file also has standard-2 (1 vCPU, 6 GiB), which may not fit a coachman. The
+totals agree to a cent when summed from hours and when summed run by run, and read zero for no runs
+([controls](../../raw/trials/2026-10-08-cloudflare-run-cost/results/controls.md), C21 to C23).
+
+### Against a flat monthly price
+
+A machine billed by the month costs the same however many runs it does. Cloudflare costs the $5 plan fee plus the average
+run's cost for each run, which is $4.14 on standard-3 and $6.83 on standard-4 with a quarter of the CPU busy. The runs a
+month at which the two cost the same, for example prices that a reader's own price replaces:
+
+| Flat price a month | Runs a month, standard-3 | Runs a month, standard-4 |
+| --- | --- | --- |
+| $25 | 5 | 3 |
+| $50 | 11 | 7 |
+| $100 | 23 | 14 |
+| $200 | 47 | 29 |
+
+Below that many runs a month Cloudflare is cheaper, because idle time costs nothing; above it the flat machine is. The
+table assumes the flat machine is big enough for the work, and this trial did not size that: the most launches running at
+once was not measured. Cost is not the only difference. A flat machine runs the scripts as they are, has no 12 GiB ceiling
+and needs none of the port work under [What breaks](#what-breaks-or-must-be-ported). Subscription logins sit on that one
+machine, as they do today; the terms table's question about a cloud machine applies to it as it does to a container, but
+the question of a Worker holding the token does not arise.
+
+### The model bill, a side note
+
+The same tokens cost the same on any host, so this does not bear on a comparison of Cloudflare with a flat-priced machine.
+It is here because it is the larger figure. From the audit's token counts, split by kind from each launch's own stream, at each vendor's published price
 [@trials/2026-10-08-cloudflare-run-cost/results/model-bill.md] [@articles/model-api-prices/passages.md]. About 95% of input
 is cache reads, so the price of a cache read matters more than the plain input price.
 
@@ -357,9 +417,10 @@ One lane of one fixture run in a sandbox. What to build is a ticket's work, not 
 Prerequisites that are the user's to decide: a Cloudflare account on the Workers Paid plan ($5 a month), a model
 credential in AI Gateway (Cloudflare credits carry a 5% fee on what is bought), and which harness. Of the audited lanes whose
 harness Cloudflare has a tutorial for (claude and codex), the cheapest is codex on `gpt-6-luna`, at $0.10 per million input
-tokens and $0.01 cached; the Muse contributor and MiMo flash lanes cost less per token and have no tutorial. At the audit's fixture medians the
-model cost of a lane is a few cents and its container time is cents, so a first trial costs the $5 plan fee and a credit
-top-up of a few dollars, with the 5% fee on the top-up. The effort to build it was not estimated.
+tokens and $0.01 cached; the Muse contributor and MiMo flash lanes cost less per token and have no tutorial. At the audit's
+fixture medians a lane's container time is cents, so the Cloudflare cost of a first trial is the $5 plan fee and cents.
+The model spend for one lane is a few cents more, paid from a few dollars of credit (with the 5% fee on the top-up) or on
+the user's own key. The effort to build it was not estimated.
 
 It would not show parallel lanes, a coachman, a lane over an hour, a forced deploy, the gate on 4 vCPU, or a subscription
 login. A second trial would cover a 90-minute lane and a deploy during it, which is what the lifetime pages say matters.
@@ -393,7 +454,8 @@ login. A second trial would cover a 90-minute lane and a deploy during it, which
 - A trial on Cloudflare that runs a fixture lane to a passing score with the key outside the sandbox: toward supported
   for the lane. A trial that cannot keep a 90-minute lane alive through a deploy names what the lifetime pages lack.
 - A vendor's written answer on a subscription login in a cloud container, for Anthropic or OpenAI. Either answer
-  changes the cost line more than any other fact here.
+  changes what the lanes' model access costs, and whether the Cloudflare pattern can carry a subscription login at all,
+  more than any other fact here.
 - The `durable_object` policy and snapshots leaving beta, or Cloudflare adding an SSH egress proxy or placement
   constraints for that policy.
 
@@ -407,11 +469,11 @@ None is filed. Titles are in the form the repository uses.
    (an action log, event streams, markers), before any role moves off the machine it runs on. It helps any second
    machine, not only Cloudflare.
 3. **A run chooses, for each role, a subscription login or an API key, and the choice is checked before the run starts.**
-   The decision the terms leave open, made visible. The Opus security review is the line that decides it at $14.56 to
-   $35.79 a run at API prices.
+   The decision the terms leave open, made visible. This is model-side, the same on any host. The Opus security review is
+   the line that decides it, at $14.56 to $35.79 a run at API prices.
 4. **The security review runs only where a change touches a risk surface.** From the lane audit's candidate list, now
-   with a price: 92% of the model dollars at list price while the coachman is on Meta's contributor tier, 63% on its
-   standard tier.
+   with a price (model-side, the same on any host): 92% of the model dollars at list price while the coachman is on Meta's
+   contributor tier, 63% on its standard tier.
 5. **The gate is timed on a machine with 4 vCPU and nothing else running.** Any cloud machine will do. It separates the
    gate's own time from the machine's load, which is half of the reason for this research.
 6. **Not new: finish #203, #221 and #342 first.** They give most of the isolation locally and are filed.

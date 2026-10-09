@@ -22,6 +22,6 @@ A quotation not found is formatting, read by hand: A-ORIENT-1 joins the three it
 
 A second check ran the other way (`bun apparatus/quotes.ts --page <page.md> --capture <passages.md> ...`): every double-quoted string
 of twenty characters or more in the concept page and the source pages, a wrapped quotation read whole, was looked for in the ten
-passages files. The concept page has 37 and 36 are found; the one not found is the ticket's own title, quoted from the ticket. The
+passages files. The concept page has 38 and 37 are found; the one not found is the ticket's own title, quoted from the ticket. The
 source pages have 28 and all 28 are found. The unit tests hold a positive case, a made-up sentence that must be reported missing, and
 a short quotation that must not throw off the pairing of the long one after it.

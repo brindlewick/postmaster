@@ -143,9 +143,10 @@ What it would take to run the flow on someone else's machines, and what the harn
   subscription logins](concepts/running-the-flow-on-cloudflare.md): **claimed**. A Worker cannot run a lane; a container can, and
   Cloudflare's tutorials show Claude Code, Codex and Pi in one with the model key held outside it, for API credentials; an
   earlier example in its sandbox repository did the same for a Claude subscription token. No vendor's terms settle a
-  subscription login held by a Worker for a cloud container. A median run's container time is $0.50 to $9.60; its model
-  tokens at API prices are $16 to $39, 92% of it the Opus security review. A container per lane would stop every reach the
-  isolation scan found inside the machine, by the documented design.
+  subscription login held by a Worker for a cloud container. On Cloudflare alone a typical run costs about $1 to $4.50 in
+  container time and the average run up to about $4 to $7, with the control plane at cents; the model bill, the same on any
+  host, is a side note. A container per lane would stop every reach the isolation scan found inside the machine, by the
+  documented design.
 
 ## Sources
 

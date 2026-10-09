@@ -5,10 +5,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Extract } from "../../2026-10-03-lane-audit/apparatus/extract.ts";
 import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
-import { cost, INSTANCE_TYPES, type InstanceType } from "./cost.ts";
+import { cost, INSTANCE_TYPES, type InstanceType, perHour } from "./cost.ts";
 import { covered, runTime, seconds, summarizeRole } from "./instance-time.ts";
 import type { Launch } from "./measure.ts";
 import { CONTRIBUTOR_TIER, type Prices, roleDollars, STANDARD_TIER, withRatesOf } from "./model-bill.ts";
+import { auditTotals, totalsCost } from "./tables.ts";
 import { totalInput } from "./tokens.ts";
 import type { RunUptime } from "./uptime.ts";
 
@@ -306,6 +307,39 @@ export function runControls(inp: Inputs): Control[] {
     expected: "median of 1, 2, 9 is 2 and of 1, 2, 3, 10 is 2.5",
     got: `${median([9, 1, 2])} and ${median([10, 3, 2, 1])}`,
     pass: median([9, 1, 2]) === 2 && median([10, 3, 2, 1]) === 2.5,
+  });
+
+  // 10. the Cloudflare cost of all the runs together
+  const uptimeSeconds = new Map(inp.uptime.map((u) => [u.run, u.seconds]));
+  const allTotals = auditTotals(real, uptimeSeconds);
+  const standard3 = INSTANCE_TYPES["standard-3"] as InstanceType;
+  const viaCost = cost(allTotals.lanesAndReviewers, standard3, 0.25);
+  const viaHours = (allTotals.lanesAndReviewers / 3600) * perHour(standard3, 0.25);
+  add({
+    id: "C21",
+    kind: "positive",
+    what: "the lanes' and reviewers' hours of all the runs at standard-3 with a quarter of the CPU busy, through cost() and as hours times the hourly rate",
+    expected: "the two agree to a cent",
+    got: `$${viaCost.toFixed(2)} and $${viaHours.toFixed(2)} (${fmt(allTotals.lanesAndReviewers / 3600)} hours)`,
+    pass: viaCost > 0 && within(viaCost, viaHours, 0.01),
+  });
+  const runByRun = sum(real.map((t) => cost(seconds(t.lanes) + seconds(t.reviewers) + t.coachmanUpper, standard3, 0.25)));
+  add({
+    id: "C22",
+    kind: "positive",
+    what: "the high end of all the runs together, against the same cost summed run by run",
+    expected: "the two agree to within a millionth of a dollar",
+    got: `$${totalsCost(allTotals, "standard-3", 0.25).high.toFixed(4)} and $${runByRun.toFixed(4)}`,
+    pass: within(totalsCost(allTotals, "standard-3", 0.25).high, runByRun, 1e-6),
+  });
+  const empty = totalsCost(auditTotals([], new Map()), "standard-3", 0.25);
+  add({
+    id: "C23",
+    kind: "negative",
+    what: "the totals over no runs, through the same code",
+    expected: "$0 low, $0 high and an average of 0, not NaN",
+    got: `$${empty.low} low, $${empty.high} high, average ${empty.average}`,
+    pass: empty.low === 0 && empty.high === 0 && empty.average === 0,
   });
   return out;
 }

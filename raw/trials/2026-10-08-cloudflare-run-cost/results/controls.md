@@ -25,3 +25,6 @@ through the same code. `bun controls.ts` writes this file; `controls.test.ts` ru
 | C19 | positive | the coachman's dollars at Meta's standard tier, summed launch by launch and recomputed from the summed tokens | the two agree to a cent | $330.89 and $330.89 (14 runs) | pass |
 | C20 | negative | the same re-pricing for a model no launch used | the coachman's dollars do not move | $11.75 before and $11.75 after | pass |
 | C18 | positive | median of the audit helper on a case worked by hand | median of 1, 2, 9 is 2 and of 1, 2, 3, 10 is 2.5 | 2 and 2.5 | pass |
+| C21 | positive | the lanes' and reviewers' hours of all the runs at standard-3 with a quarter of the CPU busy, through cost() and as hours times the hourly rate | the two agree to a cent | $21.07 and $21.07 (188.1 hours) | pass |
+| C22 | positive | the high end of all the runs together, against the same cost summed run by run | the two agree to within a millionth of a dollar | $74.4528 and $74.4528 | pass |
+| C23 | negative | the totals over no runs, through the same code | $0 low, $0 high and an average of 0, not NaN | $0 low, $0 high, average 0 | pass |

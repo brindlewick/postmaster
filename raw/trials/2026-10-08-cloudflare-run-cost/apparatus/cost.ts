@@ -40,6 +40,9 @@ export const INCLUDED_PER_MONTH = {
   diskGbHours: 200,
 } as const;
 
+/** The Workers Paid plan's monthly minimum, in dollars (docs/workers/platform/pricing.mdx, read 2026-10-08). */
+export const PLAN_FEE_PER_MONTH = 5;
+
 /**
  * Dollars per second of one running instance. Memory and disk are charged for what the type
  * provisions; CPU for `cpuUse`, the fraction (0 to 1) of the type's vCPUs that are busy.

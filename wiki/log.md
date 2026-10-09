@@ -8,6 +8,14 @@ updated: 2026-10-08
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-09] query | what the flow would cost on Cloudflare alone
+
+The user is comparing Cloudflare with a flat-priced server, so the model bill, which is the same on any host, is out of the
+comparison. Recast the cost section of [running the flow on Cloudflare](concepts/running-the-flow-on-cloudflare.md) to lead with
+the Cloudflare bill: what each part charges, the container time of a typical run, the totals for the 18 audited runs
+and the runs a month at which a flat monthly price breaks even, with the model bill as a side note. Added three controls
+to the trial `2026-10-08-cloudflare-run-cost`. No standing changed.
+
 ## [2026-10-08] query | could the flow run on Cloudflare
 
 Issue #341. Read Cloudflare's documentation for Containers, Sandboxes, Workers, Durable Objects, Workflows, the Agents SDK, R2,

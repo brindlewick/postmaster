@@ -36,6 +36,42 @@ allowance taken off. Each cell reads "coachman at its floor to coachman at its c
 | all standard-4 | standard-4 | standard-4 | standard-4 | 0.98 to 2.71 | 1.61 to 4.43 | 3.49 to 9.60 |
 | lanes and reviewers standard-3, coachman standard-4 | standard-3 | standard-3 | standard-4 | 0.79 to 2.52 | 1.24 to 4.06 | 2.56 to 8.67 |
 
+## All 18 runs together
+
+The 18 runs' records run from 2026-09-28 to 2026-10-03. Together they hold
+188.1 hours of lanes and reviewers, the coachman's floor of 48.2 hours over the
+14 runs with session exports, and a coachman ceiling of 476.5 hours over all 18. "Low" is lanes
+and reviewers plus the coachman's floor, which leaves out the coachman of the 4 runs without exports; "high" is
+lanes and reviewers plus every stage hour of the coachman in every run, the user's waits included. "Average run" is the
+high figure divided by 18. List rates, with no monthly allowance taken off.
+
+| Size | CPU busy | All 18 runs, $ | Average run, $ |
+| --- | --- | --- | --- |
+| standard-2 (1 vCPU, 6 GiB) | 0% | 13 to 38 | 2.11 |
+| standard-2 (1 vCPU, 6 GiB) | 25% | 18 to 50 | 2.77 |
+| standard-2 (1 vCPU, 6 GiB) | 100% | 30 to 86 | 4.76 |
+| standard-3 (2 vCPU, 8 GiB) | 0% | 18 to 51 | 2.81 |
+| standard-3 (2 vCPU, 8 GiB) | 25% | 26 to 74 | 4.14 |
+| standard-3 (2 vCPU, 8 GiB) | 100% | 52 to 146 | 8.12 |
+| standard-4 (4 vCPU, 12 GiB) | 0% | 27 to 75 | 4.17 |
+| standard-4 (4 vCPU, 12 GiB) | 25% | 44 to 123 | 6.83 |
+| standard-4 (4 vCPU, 12 GiB) | 100% | 95 to 267 | 15 |
+
+## Against a flat monthly price
+
+A machine billed by the month costs the same however many runs it does. Cloudflare costs the $5 plan fee plus
+the average run's cost for each run. The table gives the runs a month at which the two cost the same, for flat
+prices that are only examples; a reader's own price replaces them. The average run is the high end of the table above
+at a quarter of the CPU busy: $4.14 on standard-3 and $6.83 on standard-4. Neither side's model bill is in
+it, and a machine of the right size for the work is assumed.
+
+| Flat price a month | Runs a month, standard-3 | Runs a month, standard-4 |
+| --- | --- | --- |
+| $25 | 5 | 3 |
+| $50 | 11 | 7 |
+| $100 | 23 | 14 |
+| $200 | 47 | 29 |
+
 ## The median fixture run
 
 The audit holds no session uptime for fixture runs, so the coachman is bracketed by zero and the
