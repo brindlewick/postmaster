@@ -491,6 +491,205 @@ answers that. When a branch has no upstream, pass the branch itself: with nothin
 tracking it there is no fresher ref, and remote movement it does not track can be
 missed.
 
+Before every pull-request description written for this run, save the exact draft in a
+file and scan it with the run-pinned `env -u SCRUB_CHECK_DISABLE
+<rt>/scripts/run scrub-check --pr-description <draft>` while
+`POSTMASTER_DETECTIONS_LOG=<dispatch>/detections.jsonl` is set: the test hook must not
+leak into a production scan. If it finds anything, reword the draft and scan it again;
+post only after exit 0. Do the same for every ticket comment: save the exact text and
+scan it with `env -u SCRUB_CHECK_DISABLE <rt>/scripts/run scrub-check --pr-description
+<comment>` under the same log, reword on any finding, and post only after exit 0. Do the
+same for the exact pull-request title: the provider sends it separately from the
+description, so save the exact title and scan it with `env -u SCRUB_CHECK_DISABLE
+<rt>/scripts/run scrub-check --pr-description <title>` under the same log, reword on any
+finding, and post only after exit 0. Markers are inert in posted text. This applies in
+every project and does not change that project's gate.
+
+1. **Verify the card's claims against the code**, never against the card. Land nothing while
+   a wall has no ruling: `<tool>/scripts/run walls open <dispatch>` must exit 0 before this
+   stage's first call, and on exit 1 each open wall goes to the user (Stage D, WALL) and
+   nothing is landed (D8). Then
+   `<tool>/scripts/run landing fresh --repo <repo> --default <branch> --ticket
+   <ticket-branch> --dispatch <dispatch> --wt <synthesis-wt>` must print `fresh`: the
+   ticket branch holds the current default branch and the record shows the gate passing at
+   its head. The postmaster runs no gate of its own; log what the call printed. On `head:`,
+   the worktree is not at the ticket's head: move the synthesis worktree to the ticket
+   branch's head and ask `fresh` again. On `gate:`, the record shows the gate not passing
+   at the head: withhold under the claim-fail clause below with the gate result as the
+   exact discrepancy. On `stale`,
+   withhold: remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`,
+   then resume that last leg to merge the default branch into the ticket branch, never
+   rebasing, run its gates again and raise the card again, and wait for the corrected card.
+   For a change to the coachman contract, that merge means a new fixture run from the final
+   branch only when what the merge brought in changes the coachman contract; otherwise the
+   earlier fixture result stands. That is what the contract checker says: run the dispatch
+   BASE's copy on what the merge brought in, as the classify step below does; a yes repeats
+   the fixture from the final branch, a no lets the recorded clean score stand. Then
+   `<tool>/scripts/run landing card-results <dispatch> <synthesis-wt> <the leg's
+   checkpoint> <dispatch>/card.md`
+   must print `match`: the card holds the rendered block exactly once (the leg's
+   checkpoint is `<dispatch>/checkpoint-review.md` after a review leg,
+   `<dispatch>/checkpoint-1.md` otherwise). Then
+   `<tool>/scripts/run landing private-data-card <dispatch> <dispatch>/card.md` must print
+   `match`; withhold the card if a finding or resolution is missing or the card text is not
+   clean. Then
+   `<tool>/scripts/run landing journey <dispatch> <synthesis-wt> <dispatch>/brief.md` must
+   not print `blocked`: a journey with no report, or one that did not run where the
+   waybill mentions a user journey, holds landing until the journey runs or the user
+   rules. The postmaster judges
+   every other non-pass with its evidence, as before: on `judge`, and on any other check
+   but the gate that is not pass, weigh the result and put it to the user.
+   **Classify the final branch.** The index is a list of files; any change to a
+   listed file is a contract change, and the checker names each listed file the
+   change touched. The index names the checker in its detector field; read that
+   path from BASE's index, never the branch tip's. Each comparison first checks
+   the index at both revs: neither has one, and there is no contract change, so
+   record `no` (a target that does not carry the contract lands here); only the
+   older has one, and the branch deleted the contract, an error to resolve. If
+   dispatch BASE lacks the detector file, the branch introduces the checker:
+   every comparison, the first and every repeat, ends in a fixture run without
+   classifying. Else run BASE's copy through the detector's BASE mode —
+   `<tool>/scripts/run coachman-contract --at-base <repo> <BASE> <ticket-branch>` —
+   and record its command, result, and checked commit: replace `coachman
+   contract fixture: pending` on the waybill with `yes` or `no`, fill `contract fixture
+   check:` with the command, the commit and the score (`-` when no fixture runs), and log
+   a `note` with the same. BASE's logic is the last honest one: a
+   change that weakens the checker is itself caught as a contract change, since the
+   detector file is covered whole, while the file list compared comes from both revs.
+   Exit 1 means yes: make a fresh fixture repo with `<tool>/scripts/run fixture new
+   <fixture-name> <fixture-ticket>`, dispatch its ticket with the postmaster tool checked
+   out at the final branch, and withhold landing until `<tool>/scripts/run fixture score
+   <fixture-dispatch> <fixture-repo>` exits 0. Exit 0 from the contract checker means no;
+   any other exit is an error to resolve before landing.
+
+   Record the commit that the clean fixture score covered, on the waybill's check line and
+   in a `note`. Before landing, check the final branch again if it moved. With no clean
+   fixture score yet, compare dispatch BASE to the final branch; a yes requires the first
+   fixture. With a clean score, compare its commit to the final branch, still running the
+   dispatch BASE's copy, never the scored commit's; a yes repeats the fixture from the
+   final branch, made with `<tool>/scripts/run fixture new`, while a no lets the recorded
+   clean score stand. This is the check for a merge of main into the ticket branch after
+   the earlier score. Where dispatch BASE has no copy to run, the no-copy rule above ends
+   the comparison in a fixture without classifying.
+   Verify that every branch the card
+   lists exists and has the stated state; `run-log.md`'s SYNTHESIS line accounts for each
+   workhorse in synthesis mode, or says `mode=single-thread` with no workhorses in single-thread
+   mode; the mode in `run.json`, the waybill and the card agree; every DEGRADED lane matches `degrade` actions; the
+   turnpikes match the waybill, `actions.jsonl` has `review-launch` lines under each review lens
+   the run's legs name and under no other lens, and each other turnpike's result on the card is
+   in the record its step writes; when `<tool>/scripts/run turnpikes short '<the waybill's
+   turnpikes: line>'` names any default turnpike, the ledger holds the user's word on this
+   ticket's turnpikes; where the run has a review leg, `checkpoint-review.md` exists and
+   `<tool>/scripts/run landing card-findings <dispatch> <synthesis-wt>
+   <dispatch>/checkpoint-review.md <dispatch>/card.md` prints `match`, and the card names
+   the checkpoint's final round with
+   the same round counts; `<tool>/scripts/run landing card-open <the leg's checkpoint>`
+   prints `none`: with an open P1 or P2 the postmaster withholds as a failed claim below
+   (resume the last leg with the open findings as the exact discrepancy, not with a
+   default-branch merge), whatever the card matches — open P3 residue lands; the blind
+   acceptance
+   tests are the first commit or the hand-off records why they were not written; the Style
+   residue's count is what
+   `<tool>/scripts/run style-findings count <dispatch>` prints, and the residues the card
+   lists are exactly what `<tool>/scripts/run style-findings list <dispatch>` prints; all
+   open findings, browser suite and QA when present, the review link, and every run-created
+   branch. If a claim
+   fails, remove `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then
+   resume that last leg with the exact discrepancy and wait for its corrected card.
+
+   Check switch-offs after the claims and before step 2's landing route, on both routes:
+   `<tool>/scripts/run landing switch-offs --repo <repo> --default <branch>
+   --ticket <the ticket ref> --dispatch <dispatch>`. Exit 0, the branch is clear. Exit 2,
+   put each listed entry to the user with the ship card: its file, line, form, the rules it
+   names and the reason beside it — or, for a settings entry, its file, its change and its
+   diff. For each entry they approve, record the word with
+   `<tool>/scripts/run log-action <dispatch> postmaster switch-off <its identity> approved
+   <the entry> <the user's words>`; for each entry they refuse, record it the same way with
+   `refused`, then withhold at once under the claim-fail clause above, with the refused
+   entry as the exact discrepancy. Run the check again after recording: a held remainder
+   repeats the ask, and anything still unapproved after the user's word withholds the same
+   way. While an ask is outstanding, the question sits in the run's `.waiting-on-user`;
+   remove it when the user's word arrives. Exit 3, entries miss their reasons: withhold
+   under the claim-fail clause with the listed entries as the exact discrepancy; the leg
+   gives each its reason, or removes what it should not switch off. Exit 4 is a recorded
+   refusal: withhold the same way. Runs dispatched before this check existed are held the
+   same way at landing; only their cards lack the list.
+   The merge authority never approves these entries and never unholds them: where
+   it is the postmaster itself, it still asks and records the word before it opens a
+   pull request or merges. Compare the card's `## Switch-offs` section with the
+   fresh output, approval marks aside, and withhold on any difference with the
+   mismatch as the exact discrepancy; a card from a run pinned before this check has
+   no such section, and those runs are judged by the live list alone. Any other exit
+   is an input fault: stop the stage, fix the inputs and re-run.
+2. **Follow the landing route in the waybill.** First ask whether the ticket already landed:
+   `<tool>/scripts/run landing already-landed --repo <repo> --default <branch> --ticket
+   <the ticket ref> --base <the manifest's base> --card-head <the card's final HEAD>`, adding
+   `--local-ticket <ticket-branch>` on the pull-request route, and `--pr-merge <sha>
+   --pr-head <sha>` with the merge commit and the head it merged at when the provider
+   reports a merged pull request for the ticket branch (for GitHub, `gh pr view <n> --json
+   state,mergeCommit,headRefOid`, taking the merge oid and the head oid where `state` is
+   `MERGED`), omitting each otherwise. On `landed`, skip landing
+   and close instead: log `merge` noting the branch was already merged, move the ticket to
+   done,
+   logging `ticket-state`, remove `.waiting-on-user` and `.card-ready` (either may already
+   be gone), set the stage with `<tool>/scripts/run stage <dispatch> shipped postmaster`,
+   and run current Stage G. On `unpushed`, the ticket branch is at the card's HEAD and only
+   the remote is behind: push the ticket branch, re-fetch, and ask `already-landed` again;
+   a push rejected because the remote contains work the pusher lacks (`[rejected]`, fetch
+   first or non-fast-forward) means the remote moved, so resume that last leg with that
+   discrepancy instead; any other push failure stops the stage like an input fault —
+   fix the inputs and re-run. On `re-verify`, the ticket ref and the card's HEAD differ,
+   or a reported merge named another head: remove
+   `.card-ready` and `.leg-<n>-done` for the manifest's current leg `<n>`, then resume that
+   last leg with the exact discrepancy and wait for its corrected card. Otherwise:
+   - For `landing: pull-request`, ask whether the branch holds anything to land:
+     `<tool>/scripts/run landing anything-to-land --repo <repo> --default <branch> --ticket
+     <the ticket ref> --base <the manifest's base>`. On `nothing-to-land`, write that to
+     `.waiting-on-user` and wait; on the user's word that there is
+     nothing to land, close as the already-merged paragraph above does, except the `merge`
+     line notes the user's word that there is nothing to land instead of an already-merged
+     branch. A squash merge the provider did not report answers `land`: the pull request
+     shows the person what is already there. On `land`, push the
+     ticket branch; where an open pull request already names it, adopt it instead of
+     opening another. Otherwise open the pull request against the default branch
+     (`gh pr create` on a GitHub project). Include the card, final checks, diff stat,
+     preview and review links, and thread ids. Log a `note` with the push and
+     pull-request URL, and leave a dated tracker comment linking the pull request and
+     summarizing the same evidence, logging `ticket-comment`. Put the pull-request URL and its
+     merge instructions in `.waiting-on-user`; the user merges it in the project's review
+     surface and says so, and that word is the answer step 3 waits on.
+     Do not use `MERGE_AUTHORITY` to merge a pull request on the user's behalf.
+   - For `landing: local`, obey `MERGE_AUTHORITY`. With `user`, put the card and
+     verification in front of the user, write the requested merge word to `.waiting-on-user`,
+     and wait. With `postmaster`, record the grant. After the required word or grant, remove
+     `.waiting-on-user` on the `user` path. Verify the default checkout is still clean and on
+     its default branch; if it is not, stop and tell the user. Leave a dated ready-to-merge
+     tracker comment with the evidence (what the change does, branch name, gate output summary,
+     diff stat, review link, thread ids), logging `ticket-comment`. Merge the ticket branch
+     with `git merge --no-ff`; never rebase. Log `merge`, move the ticket to done, logging
+     `ticket-state`, remove `.card-ready`, and set the stage with
+     `<tool>/scripts/run stage <dispatch> shipped postmaster`.
+   - An unknown landing route is a dispatch fault to resolve before this point. Do not infer
+     it from the presence of a remote.
+3. **When the user's word that they merged comes**, ask `already-landed` as in step 2, with
+   `--pr-merge --pr-head` from the report when the provider reports the merged pull request.
+   On `landed`, remove
+   `.waiting-on-user` and `.card-ready`, log `merge`, move the ticket to done, logging
+   `ticket-state`, and set the stage with `<tool>/scripts/run stage <dispatch> shipped
+   postmaster`. On `unpushed`, push the ticket branch, re-fetch, and ask again, as in step 2.
+   On `re-verify` the ticket ref and the card's HEAD differ: tell the user to
+   restore the branch to the card's HEAD, and wait; when their word comes, ask
+   `already-landed` again. If the user confirms the new HEAD instead, stop: re-verifying a
+   new HEAD needs a leg that has handed off, so put the decision to the user rather than
+   looping. On `not-landed` the merge is not there: tell the user and wait; when their word
+   comes, ask `already-landed` again, and if it still says `not-landed`, ask
+   `anything-to-land` with step 2's repo, default, ticket and base: on `nothing-to-land`,
+   close as `landed` above does, with the `merge` line noting the user's merge word and the
+   no-diff evidence; on `land`, keep waiting. For a local
+   merge, this is already done in step 2. Then run current Stage G.
+
+## Stage G (contract 2): after merge
+
 1. **Write what needs judgment.** Confirm the default branch contains the merge and the
    ticket is done — or, where the ticket closed on nothing-to-land with no merge, that
    `anything-to-land --repo <repo> --default <branch> --ticket <the ticket ref> --base
