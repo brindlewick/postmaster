@@ -1104,8 +1104,26 @@ function branchExists(repo: string, branch: string): boolean {
   return git(repo, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).code === 0;
 }
 
-/** The local default branch: main, else master, else null. */
-function landTarget(repo: string): string | null {
+/**
+ * The local branch landing targets: the default origin names, else main or
+ * master. It follows the same default the scope check compares against, so
+ * the merge or pull request never targets another history.
+ */
+export function landTarget(repo: string): string | null {
+  const sym = git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
+  if (sym.code === 0) {
+    const name = remoteFromSymbolicRef(sym.out);
+    if (
+      name !== null &&
+      name.startsWith("origin/") &&
+      git(repo, ["rev-parse", "--verify", "--quiet", name]).code === 0
+    ) {
+      const local = name.slice("origin/".length);
+      // The default is named but not checked out: refuse, since landing onto
+      // any other local branch would target the wrong history.
+      return branchExists(repo, local) ? local : null;
+    }
+  }
   for (const b of ["main", "master"]) {
     if (branchExists(repo, b)) return b;
   }

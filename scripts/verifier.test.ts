@@ -23,6 +23,7 @@ import {
   failureOutcome,
   handoverFresh,
   isSurface,
+  landTarget,
   lastLine,
   mergeAuthorityOf,
   normalizeFolder,
@@ -284,6 +285,72 @@ describe("defaultBase", () => {
       const empty = join(dir, "empty");
       initRepo(empty);
       expect(defaultBase(empty)).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("landTarget", () => {
+  const pointOriginHead = (repo: string, branch: string): void => {
+    const sha = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+    gitOrThrow(repo, "update-ref", `refs/remotes/origin/${branch}`, sha);
+    gitOrThrow(repo, "symbolic-ref", "refs/remotes/origin/HEAD", `refs/remotes/origin/${branch}`);
+  };
+
+  test("origin's head wins over a stale local main", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "master");
+      pointOriginHead(repo, "master");
+      expect(landTarget(repo)).toBe("master");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a trunk default lands onto trunk", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "-m", "main", "trunk");
+      pointOriginHead(repo, "trunk");
+      expect(landTarget(repo)).toBe("trunk");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("without an origin, main wins over master", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "master");
+      expect(landTarget(repo)).toBe("main");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a default that is not checked out lands nowhere", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      pointOriginHead(repo, "other");
+      expect(landTarget(repo)).toBe(null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
