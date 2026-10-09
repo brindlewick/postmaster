@@ -2,7 +2,7 @@
 // detection and the wall scan. The live session stays out; acceptance-323 covers the
 // command boundary as a subprocess.
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
@@ -31,7 +31,10 @@ import {
 } from "./verifier.ts";
 
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "verifier-"));
+  // Resolved: on macOS the temporary folder sits behind a link (/var to
+  // /private/var) and git prints the resolved path, so an unresolved expected
+  // path never matches it. host, local and reach already do this.
+  return realpathSync(mkdtempSync(join(tmpdir(), "verifier-")));
 }
 
 describe("parseArgs", () => {
