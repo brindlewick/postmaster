@@ -21,11 +21,6 @@ import { findOnPath, IMPORT, TEST_CALL } from "./verify-library.ts";
 
 const SELF = join(import.meta.dir, "run");
 const spacedDone = process.env.POSTMASTER_SPACED_DONE === "1";
-if (spacedDone) {
-  console.log(
-    "skip the self-test passes from a path with a space: POSTMASTER_SPACED_DONE is set (nested run)",
-  );
-}
 
 let tmp = "";
 let lib = "";
@@ -217,19 +212,19 @@ describe("positive controls", () => {
     const r = run(SELF, ["verify-library", "--list", lib]);
     const list = r.out.trim().split("\n").filter(Boolean).join(" ");
     expect(list).toBe("test/helped.test.js test/public.test.js");
-  }, 30000);
+  });
 
   test("those tests pass through the package's exports", () => {
     const r = runProject("lib");
     expect(r.code).toBe(0);
     expect(r.out.includes("the tests through sample-lib's public interface passed")).toBe(true);
-  }, 60000);
+  });
 
   test("a build script runs first", () => {
     const r = runProject("built");
     expect(r.code).toBe(0);
     expect(r.out.includes("passed")).toBe(true);
-  }, 60000);
+  });
 
   test("and it did run", () => {
     expect(existsSync(join(tmp, "built", "built.flag"))).toBe(true);
@@ -241,43 +236,43 @@ describe("negative controls", () => {
     const r = runProject("broken");
     expect(r.code).toBe(1);
     expect(r.out.includes("failed")).toBe(true);
-  }, 60000);
+  });
 
   test("a failed build fails", () => {
     const r = runProject("badbuild");
     expect(r.code).toBe(1);
     expect(r.out.includes("the build failed")).toBe(true);
-  }, 60000);
+  });
 
   test("a library tested only by path is not run", () => {
     const r = runProject("internal");
     expect(r.code).toBe(3);
     expect(r.out.includes("no test imports sample-lib by its name")).toBe(true);
-  }, 60000);
+  });
 
   test("a package with no name is not run", () => {
     const r = runProject("noname");
     expect(r.code).toBe(3);
     expect(r.out.includes("has no name")).toBe(true);
-  }, 60000);
+  });
 
   test("a project with no package.json is not run", () => {
     const r = runProject("nopkg");
     expect(r.code).toBe(3);
     expect(r.out.includes("no package.json")).toBe(true);
-  }, 60000);
+  });
 
   test("a runner the project names but has not installed is not run", () => {
     const r = runProject("vitest");
     expect(r.code).toBe(3);
     expect(r.out.includes("which is not installed")).toBe(true);
-  }, 60000);
+  });
 
   test("a library whose only by-name import is in a helper is not run", () => {
     const r = runProject("helperonly");
     expect(r.code).toBe(3);
     expect(r.out.includes("no test imports sample-lib by its name")).toBe(true);
-  }, 60000);
+  });
 
   test("tests with no node to run them are not run", () => {
     const r = run(SELF, ["verify-library", lib], {
@@ -286,7 +281,7 @@ describe("negative controls", () => {
     const out = r.out + r.err;
     expect(r.code).toBe(3);
     expect(out.includes("node is not on PATH")).toBe(true);
-  }, 60000);
+  });
 
   test.skipIf(spacedDone)(
     "the self-test passes from a path with a space",

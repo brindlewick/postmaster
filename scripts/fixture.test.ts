@@ -6,6 +6,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   cpSync,
   existsSync,
@@ -24,9 +25,11 @@ import {
 import { machine, release, tmpdir, type as osType } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  appCached,
   appFiles,
   checkWaybillEfforts,
   checkPremisesOrder,
+  checkMode,
   FIXTURE_MARKER,
   HIDDEN_RE,
   gitVersionNumber,
@@ -38,6 +41,7 @@ import {
   makeRepo,
   makeScoreDir,
   onPath,
+  runMode,
   score,
   sectionOf,
   sh,
@@ -216,6 +220,7 @@ function record(
   t: string,
   shipped: "reference" | "app" | "broken",
   legs = 2,
+  mode: "synthesis" | "single-thread" = "synthesis",
 ): number {
   const repo = join(tmp, name, "repo");
   const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
@@ -255,7 +260,12 @@ function record(
     join(d, "brief.md"),
     `# Waybill: 7\n${turnpikes}\n\n## Ticket\n\n${ticketBody(t)}\n## Project profile\nrepo: ${repo}\n`,
   );
-  run(join(HERE, "run"), ["run-meta", d, repo]);
+  run(join(HERE, "run"), [
+    "run-meta",
+    d,
+    repo,
+    ...(mode === "single-thread" ? ["--mode", "single-thread"] : []),
+  ]);
   const recordedConfig = JSON.parse(readFileSync(join(d, "run.json"), "utf8")).config;
   const workhorses = (recordedConfig.team.workhorses ?? [])
     .map((name: string) => {
@@ -265,9 +275,10 @@ function record(
     .join(", ");
   const coachman = recordedConfig.team.coachman;
   const efforts = run(join(HERE, "run"), ["run-meta", "efforts", d]).out.trim();
+  const workhorsesLine = mode === "single-thread" ? "" : `workhorses: ${workhorses}\n`;
   writeFileSync(
     join(d, "brief.md"),
-    `${readFileSync(join(d, "brief.md"), "utf8")}\n## Team\nworkhorses: ${workhorses}\ncoachman: ${coachman.harness}/${coachman.model}/${coachman.effort ?? ""}\n${efforts}\n`,
+    `${readFileSync(join(d, "brief.md"), "utf8")}\n## Team\nmode: ${mode}\n${workhorsesLine}coachman: ${coachman.harness}/${coachman.model}/${coachman.effort ?? ""}\n${efforts}\n`,
   );
   if (legs === 3) {
     const runJson = JSON.parse(readFileSync(join(d, "run.json"), "utf-8"));
@@ -288,18 +299,25 @@ function record(
   )
     return 1;
   for (const lane of recordedConfig.team.workhorses as string[]) {
+    if (mode === "single-thread") continue;
     if (
       run("bash", [join(HERE, "run"), "log-action", d, "coachman", "dispatch", lane, "workhorse"])
         .code !== 0
     )
       return 1;
+    // The harvested archive branch each workhorse keeps; a synthesis run has one per lane and
+    // a single-thread run none.
+    if (run("git", ["-C", repo, "branch", `wb/7-${lane}`, "7"]).code !== 0) return 1;
   }
 
   const stageList = stages.split("\n").filter(Boolean);
   // Leg 1 enters every stage through checkpoint-1; each later leg its own slice of the rest;
   // the postmaster closes. A current run's shipped is the postmaster's; a pre-change ship leg
-  // sets its own, as the runbooks have it.
-  const walked = legs === 1 ? stageList.filter((s) => s !== "review") : stageList;
+  // sets its own, as the runbooks have it. A single-thread run never enters
+  // workhorses-running, so its walk leaves that stage out.
+  const schedule =
+    mode === "single-thread" ? stageList.filter((s) => s !== "workhorses-running") : stageList;
+  const walked = legs === 1 ? schedule.filter((s) => s !== "review") : schedule;
   const cpIdx = walked.indexOf("checkpoint-1");
   const through1 = cpIdx < 0 ? [...walked] : walked.slice(0, cpIdx + 1);
   const rest = cpIdx < 0 ? [] : walked.slice(cpIdx + 1);
@@ -342,6 +360,33 @@ function record(
     manifest.coachman.legs[String(n)] = { thread_id: `thread-${n}` };
   }
   writeFileSync(join(d, "manifest.json"), JSON.stringify(manifest, null, 2));
+
+  const point = (name: string, lanes: Array<Record<string, string>>): void => {
+    const detail = JSON.stringify({ kind: "point", point: name, result: "clean", lanes });
+    const logged = run(join(HERE, "run"), ["log-action", d, "coachman", "reach", name, detail]);
+    if (logged.code !== 0) throw new Error(`could not make fixture reach record: ${logged.err}`);
+  };
+  const laneRecords = (names: string[]) =>
+    names.map((name: string) => ({
+      lane: name,
+      lens: "",
+      harness: recordedConfig.lanes[name]?.harness ?? "codex",
+      status: "checked",
+      reason: "",
+    }));
+  const workhorseNames: string[] = recordedConfig.team.workhorses ?? [];
+  // A single-thread run never runs "Check lane reach before synthesis", so its
+  // record holds no workhorses point; the builder mirrors real runs here.
+  if (mode === "synthesis") point("workhorses", laneRecords(workhorseNames));
+  if (legs >= 2) {
+    const reviewer = workhorseNames[0] ?? "one";
+    writeFileSync(
+      join(d, "logs", "review-r1.json"),
+      JSON.stringify({ reviewers: [["bug", reviewer]] }),
+    );
+    point("r1", laneRecords([reviewer]));
+  }
+  point("card", laneRecords(workhorseNames));
   return 0;
 }
 
@@ -423,6 +468,38 @@ function breaks(cleanDir: string, repo: string): void {
     readFileSync(join(d, "brief.md"), "utf-8").replace(/^efforts:.*$/mu, "efforts: one=wrong"),
   );
 
+  // A synthesis run with its workhorse dispatch lines removed: the mode check fails it (D14).
+  d = brokenCopy("break-syn-dispatch", cleanDir);
+  const noDispatchPath = join(d, "actions.jsonl");
+  const noDispatch = readFileSync(noDispatchPath, "utf-8")
+    .split("\n")
+    .filter((line) => {
+      if (!line.trim()) return false;
+      try {
+        const e = JSON.parse(line) as Record<string, unknown>;
+        return !(e.action === "dispatch" && e.actor === "coachman");
+      } catch {
+        return true;
+      }
+    });
+  writeFileSync(noDispatchPath, `${noDispatch.join("\n")}\n`);
+
+  // A synthesis run that never entered workhorses-running: the stages check fails it.
+  d = brokenCopy("break-syn-stages", cleanDir);
+  const noStagePath = join(d, "actions.jsonl");
+  const noStage = readFileSync(noStagePath, "utf-8")
+    .split("\n")
+    .filter((line) => {
+      if (!line.trim()) return false;
+      try {
+        const e = JSON.parse(line) as Record<string, unknown>;
+        return !(e.action === "stage" && e.target === "workhorses-running");
+      } catch {
+        return true;
+      }
+    });
+  writeFileSync(noStagePath, `${noStage.join("\n")}\n`);
+
   for (const b of [
     "stages",
     "notime",
@@ -433,6 +510,8 @@ function breaks(cleanDir: string, repo: string): void {
     "waybill",
     "legs",
     "efforts",
+    "syn-dispatch",
+    "syn-stages",
   ]) {
     background(`break-${b}`, () =>
       score(join(tmp, `break-${b}`, "repo", ".postmaster", "runs", "7"), repo),
@@ -440,13 +519,76 @@ function breaks(cleanDir: string, repo: string): void {
   }
 }
 
+/** The single-thread run's negatives, scored against its own repo: a workhorse dispatch line,
+ * a wb/ branch, or the workhorses-running stage each fail the run that records single-thread.
+ * The branch is removed again so later re-scores of the clean record stay clean. */
+function singleThreadBreaks(cleanDir: string, repo: string): void {
+  const copy = (name: string): string => {
+    const d = join(tmp, name, "repo", ".postmaster", "runs", "7");
+    mkdirSync(dirname(d), { recursive: true });
+    cpSync(cleanDir, d, { recursive: true });
+    return d;
+  };
+
+  let d = copy("break-st-dispatch");
+  const dispatchPath = join(d, "actions.jsonl");
+  appendFileSync(
+    dispatchPath,
+    `${JSON.stringify({
+      ts: "2026-01-01T00:00:00Z",
+      actor: "coachman",
+      action: "dispatch",
+      target: "one",
+      detail: "workhorse",
+    })}\n`,
+  );
+  background("break-st-dispatch", () => score(d, repo));
+
+  // The branch control copies the repo whole, so the clean record's own refs never change.
+  const branchRepo = join(tmp, "break-st-branch", "repo");
+  mkdirSync(dirname(branchRepo), { recursive: true });
+  cpSync(repo, branchRepo, { recursive: true });
+  d = join(branchRepo, ".postmaster", "runs", "7");
+  if (run("git", ["-C", branchRepo, "branch", "wb/7-one", "7"]).code !== 0) {
+    console.log("could not make wb/7-one for the single-thread branch control");
+  }
+  background("break-st-branch", () => score(d, branchRepo));
+
+  d = copy("break-st-stages");
+  const stagePath = join(d, "actions.jsonl");
+  // Insert a workhorses-running stage line after bootstrapped, as a run that entered it logs.
+  const rows: string[] = [];
+  for (const line of readFileSync(stagePath, "utf-8").split("\n")) {
+    if (line.trim()) rows.push(line);
+    try {
+      const e = JSON.parse(line) as Record<string, unknown>;
+      if (e.action === "stage" && e.target === "bootstrapped") {
+        rows.push(
+          JSON.stringify({
+            ts: "2026-01-01T00:00:01Z",
+            actor: "coachman",
+            action: "stage",
+            target: "workhorses-running",
+            detail: "from bootstrapped",
+          }),
+        );
+      }
+    } catch {
+      /* keep */
+    }
+  }
+  writeFileSync(stagePath, `${rows.join("\n")}\n`);
+  background("break-st-stages", () => score(d, repo));
+}
+
 function recorded(
   name: string,
   t: string,
   shipped: "reference" | "app" | "broken",
   legs = 2,
+  mode: "synthesis" | "single-thread" = "synthesis",
 ): number | { code: number; out: string } {
-  const rc = record(name, t, shipped, legs);
+  const rc = record(name, t, shipped, legs, mode);
   if (rc !== 0) {
     console.log(`the record could not be built for ${name}`);
     return 1;
@@ -500,9 +642,11 @@ function expectScore(key: string, failing: string, failText?: string): void {
   const lines = out.split("\n").filter((l) => l.trim());
   expect(rc).toBe(failing === "none" ? 0 : 2);
   expect(failingChecks).toBe(failing);
-  // platform + nine check lines, then the score's time section (#265)
-  expect(lines.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(9);
-  expect(lines.length).toBeGreaterThanOrEqual(11);
+  // platform + eleven check lines, then the score's time section (#265); with no
+  // run.json the pinned tool is unknown, so the reach check prints no line
+  const checks = failing === "run.json" ? 10 : 11;
+  expect(lines.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(checks);
+  expect(lines.length).toBeGreaterThanOrEqual(checks + 2);
   expect(
     lines[0]?.startsWith(
       `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git `,
@@ -568,6 +712,207 @@ function runScore(
   return { code: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
+describe("ticket #202 fixture reach score", () => {
+  test("C16 a clean fixture score includes the reach check", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const result = runScore(dispatch, repo);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("ok   reach");
+    const scored = result.out.split("\n").filter(Boolean);
+    expect(scored.filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL"))).toHaveLength(11);
+    expect(
+      scored.slice(12).some((l) => l.startsWith("stage ") || l.includes("could not be timed")),
+    ).toBe(true);
+  }, 120000);
+
+  test("C17 findings, missing points and supported-reader gaps fail fixture score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const actionsPath = join(dispatch, "actions.jsonl");
+    const originalActions = readFileSync(actionsPath, "utf8");
+    try {
+      const finding = run("bash", [
+        wrapper,
+        "log-action",
+        dispatch,
+        "lane:one",
+        "reach",
+        "workhorses",
+        JSON.stringify({
+          kind: "finding",
+          point: "workhorses",
+          lane: "one",
+          access: "write",
+          path: "/tmp/out.txt",
+        }),
+      ]);
+      expect(finding.code).toBe(0);
+      const found = runScore(dispatch, repo);
+      expect(found.code).toBe(2);
+      expect(found.out).toContain("FAIL reach");
+
+      const cleanLines = readFileSync(actionsPath, "utf8").split("\n").filter(Boolean);
+      writeFileSync(
+        actionsPath,
+        `${cleanLines
+          .filter((line) => {
+            const row = JSON.parse(line) as Record<string, unknown>;
+            if (row.action !== "reach") return true;
+            const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+            return !(event.kind === "finding" && event.point === "workhorses");
+          })
+          .join("\n")}\n`,
+      );
+      const withoutRound = readFileSync(actionsPath, "utf8").split("\n").filter(Boolean);
+      writeFileSync(
+        actionsPath,
+        `${withoutRound
+          .filter((line) => {
+            const row = JSON.parse(line) as Record<string, unknown>;
+            if (row.action !== "reach") return true;
+            const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+            return !(event.kind === "point" && event.point === "r1");
+          })
+          .join("\n")}\n`,
+      );
+      const missing = runScore(dispatch, repo);
+      expect(missing.code).toBe(2);
+      expect(missing.out).toContain("FAIL reach");
+      expect(missing.out).toContain("not checked: r1");
+
+      const laneGap = run("bash", [
+        wrapper,
+        "log-action",
+        dispatch,
+        "coachman",
+        "reach",
+        "r1",
+        JSON.stringify({
+          kind: "point",
+          point: "r1",
+          result: "note",
+          lanes: [{ lane: "mimo", harness: "mimo", status: "not checked" }],
+        }),
+      ]);
+      expect(laneGap.code).toBe(0);
+      const unchecked = runScore(dispatch, repo);
+      expect(unchecked.code).toBe(2);
+      expect(unchecked.out).toContain("not checked: mimo at r1");
+    } finally {
+      writeFileSync(actionsPath, originalActions);
+    }
+  }, 240000);
+
+  function withPostmaster(
+    dispatch: string,
+    mutate: (postmaster: Record<string, unknown>) => void,
+  ): string {
+    const runPath = join(dispatch, "run.json");
+    const original = readFileSync(runPath, "utf8");
+    const run = JSON.parse(original) as Record<string, unknown>;
+    mutate(run.postmaster as Record<string, unknown>);
+    writeFileSync(runPath, JSON.stringify(run));
+    return original;
+  }
+
+  test("a run whose pin directory is gone is still scored on reach", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const head = run("git", ["-C", TOOL, "rev-parse", "HEAD"]).out.trim();
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.checkout = join(tmp, "no-such-pin");
+      postmaster.commit = head;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("ok   reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit without reach.ts scores no reach item", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const root = run("git", ["-C", TOOL, "rev-list", "--max-parents=0", "HEAD"])
+      .out.trim()
+      .split("\n")[0]!;
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = root;
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+
+  test("a recorded commit git cannot read fails the score", () => {
+    const dispatch = join(tmp, `clean-${first}`, "repo", ".postmaster", "runs", "7");
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const runPath = join(dispatch, "run.json");
+    const original = withPostmaster(dispatch, (postmaster) => {
+      postmaster.commit = "0".repeat(40);
+    });
+    try {
+      const result = runScore(dispatch, repo);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("fixture:");
+      expect(result.out).toContain("reach");
+    } finally {
+      writeFileSync(runPath, original);
+    }
+  }, 120000);
+});
+
+describe("the reach item reads the run's mode", () => {
+  const dispatchOf = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+  const repoOf = (name: string): string => join(tmp, name, "repo");
+
+  function withoutPoint(d: string, point: string): void {
+    const actionsPath = join(d, "actions.jsonl");
+    const kept = readFileSync(actionsPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => {
+        const row = JSON.parse(line) as Record<string, unknown>;
+        if (row.action !== "reach") return true;
+        const event = JSON.parse(String(row.detail)) as Record<string, unknown>;
+        return !(event.kind === "point" && event.point === point);
+      });
+    writeFileSync(actionsPath, `${kept.join("\n")}\n`);
+  }
+
+  test("a single-thread record with round and card points scores the reach item ok", () => {
+    const output = bgResults.get("clean-single")?.out ?? "";
+    expect(output).toContain("ok   reach");
+  }, 30000);
+
+  test("a synthesis record without the workhorses point still fails the reach item", () => {
+    const d = brokenCopy("st-syn-no-workhorses", dispatchOf(`clean-${first}`));
+    withoutPoint(d, "workhorses");
+    const result = runScore(d, repoOf(`clean-${first}`));
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("FAIL reach");
+    expect(result.out).toContain("not checked: workhorses");
+  }, 120000);
+
+  test("a single-thread record without the card point still fails the reach item", () => {
+    const d = brokenCopy("st-single-no-card", dispatchOf("clean-single"));
+    withoutPoint(d, "card");
+    const result = runScore(d, repoOf("clean-single"));
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("FAIL reach");
+    expect(result.out).toContain("not checked: card");
+  }, 120000);
+});
+
 function captureStderr<T>(fn: () => T): { value: T; errs: string[] } {
   const errs: string[] = [];
   const origErr = console.error;
@@ -594,6 +939,7 @@ beforeAll(() => {
     "HOME",
     "LOCAL_SH",
     "POSTMASTER_FIXTURES",
+    "POSTMASTER_FIXTURE_APP_CACHE",
   ]) {
     savedEnv[k] = process.env[k];
   }
@@ -612,6 +958,9 @@ beforeAll(() => {
   process.env.GIT_AUTHOR_EMAIL = "fixture@example.invalid";
   process.env.GIT_COMMITTER_NAME = "fixture";
   process.env.GIT_COMMITTER_EMAIL = "fixture@example.invalid";
+  // The example app's own checks (hidden tests, lanes, gate) cost about 17 s per score and come out
+  // the same for every record of one app, so the records below share them. See appCached.
+  process.env.POSTMASTER_FIXTURE_APP_CACHE = join(tmp, "app-cache");
 
   uni = mkdtempSync(join(tmpdir(), "fixture-uni-"));
   uni2 = mkdtempSync(join(tmpdir(), "fixture-uni2-"));
@@ -662,6 +1011,13 @@ beforeAll(() => {
   background("timing-missing-marker", () => runScore(missingMarkerDispatch, missingMarkerRepo));
   background("break-hidden", () => recorded("break-hidden", first, "app"));
   background("break-gate", () => recorded("break-gate", first, "broken"));
+  background("clean-single", () =>
+    recorded("clean-single", first, "reference", 2, "single-thread"),
+  );
+  singleThreadBreaks(
+    join(tmp, "clean-single", "repo", ".postmaster", "runs", "7"),
+    join(tmp, "clean-single", "repo"),
+  );
 
   for (const t of tickets()) {
     const appDir = join(tmp, `app-${t}`);
@@ -679,7 +1035,7 @@ beforeAll(() => {
       return h.passed ? 0 : 2;
     });
   }
-}, 900000);
+}, 1800000);
 
 afterAll(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
@@ -690,6 +1046,69 @@ afterAll(() => {
   rmSync(uni, { recursive: true, force: true });
   rmSync(uni2, { recursive: true, force: true });
   rmSync(uni3, { recursive: true, force: true });
+});
+
+describe("the app result cache", () => {
+  /** Run fn with POSTMASTER_FIXTURE_APP_CACHE set to value (undefined removes it), then put it back. */
+  function withCache<T>(value: string | undefined, fn: () => T): T {
+    const before = process.env.POSTMASTER_FIXTURE_APP_CACHE;
+    if (value === undefined) delete process.env.POSTMASTER_FIXTURE_APP_CACHE;
+    else process.env.POSTMASTER_FIXTURE_APP_CACHE = value;
+    try {
+      return fn();
+    } finally {
+      if (before === undefined) delete process.env.POSTMASTER_FIXTURE_APP_CACHE;
+      else process.env.POSTMASTER_FIXTURE_APP_CACHE = before;
+    }
+  }
+
+  test("a result is computed once per key and read back afterwards", () => {
+    const dir = join(tmp, "cache-unit");
+    let computed = 0;
+    const compute = (): { n: number } => ({ n: ++computed });
+    withCache(dir, () => {
+      expect(appCached("k1", compute)).toEqual({ n: 1 });
+      expect(appCached("k1", compute)).toEqual({ n: 1 });
+      expect(computed).toBe(1);
+      expect(appCached("k2", compute)).toEqual({ n: 2 });
+      expect(readdirSync(dir).filter((f) => f.endsWith(".json"))).toHaveLength(2);
+    });
+  }, 30000);
+
+  test("with no cache set every call computes, and nothing is written", () => {
+    let computed = 0;
+    withCache(undefined, () => {
+      appCached("k1", () => ++computed);
+      appCached("k1", () => ++computed);
+    });
+    expect(computed).toBe(2);
+  }, 30000);
+
+  test("a stored result that cannot be read is computed again, and a directory that cannot be written costs only time", () => {
+    const dir = join(tmp, "cache-bad");
+    mkdirSync(dir, { recursive: true });
+    let computed = 0;
+    withCache(dir, () => {
+      appCached("k1", () => ++computed);
+      for (const f of readdirSync(dir)) writeFileSync(join(dir, f), "{ not json");
+      expect(appCached("k1", () => ++computed)).toBe(2);
+    });
+    const file = join(tmp, "cache-is-a-file");
+    writeFileSync(file, "");
+    withCache(file, () => {
+      expect(appCached("k1", () => 7)).toBe(7);
+    });
+  }, 30000);
+
+  test("a score reads the same from the cache as from a run of the app's own checks", () => {
+    const repo = join(tmp, `clean-${first}`, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "7");
+    const shared = score(dispatch, repo);
+    const fresh = withCache(undefined, () => score(dispatch, repo));
+    expect(fresh.code).toBe(shared.code);
+    expect(fresh.out).toBe(shared.out);
+    expect(shared.code).toBe(0);
+  }, 120000);
 });
 
 describe("unicode text edges", () => {
@@ -835,10 +1254,13 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
     expect(status).toBe("");
   }, 30000);
   test("it holds the app's files as git sees them, symlink included, and nothing else", () => {
-    const listed2 = run("bash", [
-      "-c",
-      `git -C "${APP}" ls-files --cached --others --exclude-standard`,
-    ])
+    // Under the same HOME the fresh repo was made with: global git ignores
+    // shape --exclude-standard, and the runner's own would list differently.
+    const listed2 = run(
+      "bash",
+      ["-c", `git -C "${APP}" ls-files --cached --others --exclude-standard`],
+      { env: { HOME: join(tmp, "home") } },
+    )
       .out.trim()
       .split("\n")
       .sort();
@@ -854,10 +1276,13 @@ describe("new: a fresh repo outside every other, with its ticket in its own stor
         if (cmp.code !== 0) same = false;
       }
     }
+    // Byte order, like the JS sort below: the stock BSD sort follows the
+    // locale (case-insensitive on the runner) and would list CLAUDE.md and
+    // README.md among the lowercase names.
     const heldFiles = run("bash", [
       "-c",
       `cd "${dest}" && find . -path ./.git -prune -o \\( -type f -o -type l \\) -print | ` +
-        `sed 's|^\\./||' | sort`,
+        `sed 's|^\\./||' | LC_ALL=C sort`,
     ]).out.trim();
     const isSymlink =
       existsSync(join(dest, "CLAUDE.md")) && lstatSync(join(dest, "CLAUDE.md")).isSymbolicLink();
@@ -1048,27 +1473,41 @@ describe("score: a recorded run that meets every check scores clean", () => {
   test("a three-leg run dispatched before this change scores clean", () => {
     expectScore("clean-three", "none");
   }, 30000);
+  test("a single-thread run scores clean and its hidden suite reports no lane", () => {
+    expectScore("clean-single", "none");
+    const output = bgResults.get("clean-single")?.out ?? "";
+    const hidden = output.split("\n").find((line) => line.includes("hidden-tests")) ?? "";
+    expect(hidden).toContain("on main");
+    expect(hidden).not.toContain("; one:");
+    expect(hidden).not.toContain("; two:");
+  }, 30000);
 
   test("fixture score passes without jq on PATH and still requires npm", () => {
     const repo = join(tmp, `clean-${first}`, "repo");
     const dispatch = join(repo, ".postmaster", "runs", "7");
     const path = scorePath(["jq"]);
     expect(run("bash", ["-c", "command -v jq"], { env: { PATH: path } }).code).toBe(1);
-    const clean = runScore(dispatch, repo, { ...process.env, PATH: path });
+    // This test is about what the example app's checks need from PATH, so they must really run.
+    const uncached = (extra: Record<string, string>): Record<string, string | undefined> => ({
+      ...process.env,
+      POSTMASTER_FIXTURE_APP_CACHE: undefined,
+      ...extra,
+    });
+    const clean = runScore(dispatch, repo, uncached({ PATH: path }));
     expect(clean.code).toBe(0);
     const lines = clean.out.trim().split("\n");
-    expect(lines.slice(1, 10).every((line) => line.startsWith("ok  "))).toBe(true);
-    expect(lines[10]?.startsWith("stage ")).toBe(true);
-    expect(lines.length).toBeGreaterThan(10);
+    expect(lines.slice(1, 12).every((line) => line.startsWith("ok  "))).toBe(true);
+    expect(lines[12]?.startsWith("stage ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(12);
     console.log(`score without jq:\n${clean.out.trimEnd()}`);
 
     const withoutNpm = scorePath(["jq", "npm"]);
-    const missing = runScore(dispatch, repo, { ...process.env, PATH: withoutNpm });
+    const missing = runScore(dispatch, repo, uncached({ PATH: withoutNpm }));
     expect(missing.code).toBe(1);
     expect(missing.out).toContain("fixture: npm is not on PATH");
 
     const withoutNode = scorePath(["jq", "node"]);
-    const missingNode = runScore(dispatch, repo, { ...process.env, PATH: withoutNode });
+    const missingNode = runScore(dispatch, repo, uncached({ PATH: withoutNode }));
     expect(missingNode.code).toBe(1);
     expect(missingNode.out).toContain("fixture: node is not on PATH");
   }, 120000);
@@ -1092,7 +1531,7 @@ describe("score: a recorded run that meets every check scores clean", () => {
     expect(out.split("\n", 1)[0]).toBe(cleanOut.split("\n", 1)[0]);
     expect(
       out.split("\n").filter((l) => l.startsWith("ok  ") || l.startsWith("FAIL")),
-    ).toHaveLength(9);
+    ).toHaveLength(11);
     console.log(`failing score:\n${out.trimEnd()}`);
   });
 
@@ -1197,7 +1636,8 @@ describe("score: timing on whole copied runs with ticket-figure timelines (#265)
 
   test("a one-leg run has no review-round timing line", () => {
     const scored = bgResults.get("clean-one")!;
-    expect(scored.out).not.toContain("review round");
+    // The timing line is `review round N:`; the reach summary shares the words.
+    expect(scored.out).not.toContain("review round ");
   }, 30000);
 });
 
@@ -1244,6 +1684,80 @@ describe("score: premises are checked before workhorse dispatch", () => {
     const result = checkPremisesOrder(recordOrder("stopped", [premise]));
     expect(result.ok).toBe(true);
     expect(result.detail).toContain("no workhorse dispatched");
+  });
+});
+
+describe("score: the run kept its mode (D14)", () => {
+  const dispatchOf = (name: string): string => join(tmp, name, "repo", ".postmaster", "runs", "7");
+  const repoOf = (name: string): string => join(tmp, name, "repo");
+
+  test("a single-thread run with a workhorse dispatch line fails the mode check", () => {
+    expectScore("break-st-dispatch", "mode", "workhorse dispatch");
+  }, 30000);
+  test("a single-thread run with a wb/ branch fails the mode check", () => {
+    expectScore("break-st-branch", "mode", "workhorse branches");
+  }, 30000);
+  test("a synthesis run with its workhorse dispatch lines removed fails the mode check", () => {
+    expectScore("break-syn-dispatch", "mode", "never dispatched");
+  }, 30000);
+  test("a single-thread run that entered workhorses-running fails the stages check", () => {
+    expectScore("break-st-stages", "stages", "workhorses-running");
+  }, 30000);
+  test("a synthesis run that never entered workhorses-running fails the stages check", () => {
+    expectScore("break-syn-stages", "stages", "workhorses-running");
+  }, 30000);
+  test("the recorded mode reads the schedule: single-thread skips workhorses-running", () => {
+    expect(runMode(dispatchOf("clean-single"))).toBe("single-thread");
+    expect(runMode(dispatchOf(`clean-${first}`))).toBe("synthesis");
+  });
+  test("a record with no mode reads as synthesis and keeps its lanes", () => {
+    const d = brokenCopy("no-mode", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    delete rec.mode;
+    delete rec.mode_source;
+    delete rec.mode_setting;
+    writeFileSync(path, JSON.stringify(rec));
+    expect(runMode(d)).toBe("synthesis");
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("dispatched and branched");
+  });
+  test("a record naming an unknown mode fails the mode check", () => {
+    const d = brokenCopy("bad-mode", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    rec.mode = "two-lanes";
+    writeFileSync(path, JSON.stringify(rec));
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("two-lanes");
+  });
+  test("a single-thread dispatch with nothing pulled passes the mode check", () => {
+    const result = checkMode(dispatchOf("clean-single"), repoOf("clean-single"));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no workhorse dispatch");
+  });
+  test("a dispatch without run.json skips the mode check", () => {
+    const d = join(tmp, "no-record", "repo", ".postmaster", "runs", "7");
+    mkdirSync(d, { recursive: true });
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("skipped");
+  });
+  test("the waybill fallback reads lanes from the Team section, ignoring a quoted line", () => {
+    const d = brokenCopy("fallback-team", dispatchOf(`clean-${first}`));
+    const path = join(d, "run.json");
+    const rec = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    const team = (rec.config as Record<string, unknown>).team as Record<string, unknown>;
+    delete team.workhorses;
+    writeFileSync(path, JSON.stringify(rec));
+    const briefPath = join(d, "brief.md");
+    const brief = readFileSync(briefPath, "utf-8");
+    writeFileSync(briefPath, brief.replace("\n", "\nworkhorses: phantom=h/x\n"));
+    const result = checkMode(d, repoOf(`clean-${first}`));
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("dispatched and branched");
   });
 });
 

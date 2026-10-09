@@ -15,14 +15,22 @@
 //   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
 //           than two lanes were given, a reviewer is not a lane, an answer was missing, a round
 //           time limit was not a whole number of seconds from 1 to 86400, a planning review link
-//           omitted {path}, or an existing config was not overwritten
+//           omitted {path}, a mode other than synthesis, single-thread or alternate, or an
+//           existing config was not overwritten
 //
 // Control: the written file is parsed back as TOML where a parser is available, and its reviewer
 // lanes are resolved through scripts/run reviewers, so a config that would fail to load is never
 // left on disk as if it were fine.
 import { existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  coachmanModelProblem,
+  harnessProblem,
+  laneCountProblem,
+  reviewerProblem,
+} from "./lib/config-check.ts";
 import { readTomlFile } from "./lib/data.ts";
+import { globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 
@@ -43,20 +51,14 @@ function roleExtra(effort: string, envFile: string): string {
   return s;
 }
 
-function installed(tool: string): boolean {
-  // command -v is a shell builtin: BASE ran it in the shell, so the port must too.
-  return run("bash", ["-c", 'command -v "$1" >/dev/null 2>&1', "_", tool]).code === 0;
-}
-
 function validTasks(v: string): boolean {
   if (!/^[1-9][0-9]*$/u.test(v)) return false;
   return v.length <= 10 && Number(v) <= 2147483647;
 }
 
 function needHarness(h: string): void {
-  if (!installed(h)) {
-    die(`setup: harness '${h}' is not on PATH; install it or choose another`, 1);
-  }
+  const problem = harnessProblem(h);
+  if (problem !== null) die(problem, 1);
 }
 
 interface AskOpts {
@@ -137,7 +139,7 @@ const argv = process.argv.slice(2);
 const onLinux = run("uname", ["-s"]).out.replace(/\n+$/u, "") === "Linux";
 let DRY = 0;
 let ANSWERS = "";
-let CONFIG = join(process.env.HOME ?? "~", ".postmaster", "config.toml");
+let CONFIG = globalConfigPath();
 let ADD_CLERK = false;
 let i = 0;
 while (i < argv.length) {
@@ -183,6 +185,7 @@ clerk.model
 clerk.effort?              (none)
 clerk.env_file?            (none)             env file for its key or backend
 max_runs                   2                  concurrent runs per project
+mode                       synthesis          dispatch mode: synthesis, single-thread or alternate
 poll_seconds               120                postmaster poll interval${
       onLinux
         ? `
@@ -224,17 +227,18 @@ const opts: AskOpts = { answers: ANSWERS };
 if (ADD_CLERK) {
   if (!existsSync(CONFIG)) die(`setup: no config at ${CONFIG}; run normal setup first`, 1);
   let original = "";
-  let parsed: Record<string, any>;
+  let parsed: Record<string, unknown>;
   try {
     original = readFileSync(CONFIG, "utf8");
-    parsed = readTomlFile(CONFIG) as Record<string, any>;
+    parsed = readTomlFile(CONFIG);
   } catch {
     die(`setup: ${CONFIG} does not parse`, 1);
   }
   const team = parsed!.team;
   if (!team || typeof team !== "object" || Array.isArray(team))
     die(`setup: [team] is missing in ${CONFIG}`, 1);
-  if (team.clerk !== undefined) die(`setup: ${CONFIG} already has team.clerk`, 1);
+  if ((team as Record<string, unknown>).clerk !== undefined)
+    die(`setup: ${CONFIG} already has team.clerk`, 1);
   console.log("== The booking clerk: prepares a ticket with the user. ==");
   const harness = ask("  clerk: harness", "", "clerk.harness", opts);
   needHarness(harness);
@@ -261,7 +265,9 @@ if (ADD_CLERK) {
   }
   writeFileSync(CONFIG, changed, "utf8");
   try {
-    const reread = readTomlFile(CONFIG) as Record<string, any>;
+    const reread = readTomlFile(CONFIG) as {
+      team?: { clerk?: { harness?: unknown; model?: unknown } };
+    };
     if (reread.team?.clerk?.harness !== harness || reread.team?.clerk?.model !== model)
       throw new Error("mismatch");
   } catch {
@@ -288,7 +294,8 @@ const LANES = ask("Lane names, comma separated", "alpha, beta", "lanes", opts);
 const laneList = LANES.split(",")
   .map((x) => x.trim())
   .filter((x) => x !== "");
-if (laneList.length < 2) die("setup: at least two lanes are needed", 1);
+const laneIssue = laneCountProblem(laneList);
+if (laneIssue !== null) die(laneIssue, 1);
 let LANE_BLOCKS = "";
 const LANE_MODELS: string[] = [];
 const LANE_HARNESSES: string[] = [];
@@ -339,7 +346,8 @@ const REVIEWERS = ask("Reviewer lanes, comma separated", WORKHORSES, "reviewers"
 for (const rv of REVIEWERS.split(",")
   .map((x) => x.trim())
   .filter((x) => x !== "")) {
-  if (!laneList.includes(rv)) die(`setup: reviewer '${rv}' is not one of the lanes (${LANES})`, 1);
+  const reviewerIssue = reviewerProblem(rv, laneList, LANES);
+  if (reviewerIssue !== null) die(reviewerIssue, 1);
 }
 let LENS_TABLE = "";
 let BUG_REVIEWERS = REVIEWERS;
@@ -360,8 +368,8 @@ for (const lens of lenses) {
   for (const rv of LR.split(",")
     .map((x) => x.trim())
     .filter((x) => x !== "")) {
-    if (!laneList.includes(rv))
-      die(`setup: ${lens} reviewer '${rv}' is not one of the lanes (${LANES})`, 1);
+    const lensIssue = reviewerProblem(rv, laneList, LANES, lens);
+    if (lensIssue !== null) die(lensIssue, 1);
   }
   LENS_TABLE += `${lens} = ${tomlList(LR)}\n`;
 }
@@ -399,7 +407,8 @@ console.log(
 const CH = ask("  coachman: harness", "", "coachman.harness", opts);
 needHarness(CH);
 const CM = ask("  coachman: model id", "", "coachman.model", opts);
-if (LANE_MODELS.includes(CM)) die(`setup: the coachman cannot run on a lane's model (${CM})`, 1);
+const coachmanIssue = coachmanModelProblem(CM, LANE_MODELS, "the coachman");
+if (coachmanIssue !== null) die(coachmanIssue, 1);
 const CE = ask("  coachman: effort (blank if none)", "", "coachman.effort?", opts);
 const CEF = ask(
   "  coachman: env file for its key or backend (blank if none)",
@@ -414,8 +423,8 @@ console.log(
 const FH = ask("  fallback: harness", "", "fallback.harness", opts);
 needHarness(FH);
 const FM = ask("  fallback: model id", "", "fallback.model", opts);
-if (LANE_MODELS.includes(FM))
-  die(`setup: the fallback coachman cannot run on a lane's model (${FM})`, 1);
+const fallbackIssue = coachmanModelProblem(FM, LANE_MODELS, "the fallback coachman");
+if (fallbackIssue !== null) die(fallbackIssue, 1);
 const FE = ask("  fallback: effort (blank if none)", "", "fallback.effort?", opts);
 const FEF = ask(
   "  fallback: env file for its key or backend (blank if none)",
@@ -449,6 +458,15 @@ const CLEF = ask(
   opts,
 );
 const MR = ask("  concurrent runs per project", "2", "max_runs", opts);
+const MODE = ask(
+  "  dispatch mode (synthesis, single-thread or alternate)",
+  "synthesis",
+  "mode",
+  opts,
+);
+if (MODE !== "synthesis" && MODE !== "single-thread" && MODE !== "alternate") {
+  die(`setup: mode must be synthesis, single-thread or alternate, not ${MODE}`, 1);
+}
 const PS = ask("  postmaster poll interval, seconds", "120", "poll_seconds", opts);
 
 console.log("");
@@ -616,6 +634,7 @@ coachman_fallback = { harness = "${FH}", model = "${FM}"${roleExtra(FE, FEF)} }
 postmaster = { harness = "${PH}", model = "${PM}"${roleExtra(PE, PEF)} }
 clerk = { harness = "${CLH}", model = "${CLM}"${roleExtra(CLE, CLEF)} }
 max_runs = ${MR}
+mode = "${MODE}"
 ${LENS_TABLE}
 
 ${LIMITS_BLOCK}[postmaster]

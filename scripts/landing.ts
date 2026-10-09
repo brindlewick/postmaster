@@ -29,6 +29,11 @@
 //       results` shows the gate passing at that head. Otherwise one fault line each for the
 //       head the worktree is not at, the default branch the ticket lacks, and the gate
 //       that is not passing.
+//   run landing pull-request-checks --repo <repo> --pr <pull-request> --card-head <sha>
+//       whether GitHub's current pull-request head matches the card and every reported check
+//       passes. Prints `pass`, `pending: ...`, `fail: ... <link>`, or `none` when no checks
+//       exist. A head mismatch is a failure, never a pass. A skipped check counts as
+//       passed, as it does for GitHub's own merge readiness.
 //   run landing results <dispatch> <synthesis-wt>
 //       every recorded check's result at the worktree's HEAD, one `name: result` line each,
 //       as the cards carry them. This is the one place the vocabulary mapping lives:
@@ -66,10 +71,24 @@
 //       evidence, not a result to weigh. `judge` when the waybill mentions none, or the
 //       journey check failed with its report written: the postmaster weighs it like any
 //       other non-pass.
+//   run landing switch-offs --repo <repo> --default <branch> --ticket <ref>
+//       [--dispatch <dispatch>]
+//       every switch-off comment the run adds, and every change to the settings of
+//       the project's checks, compared between the ticket head and its merge base
+//       with the default branch. The first line is `clear` when the branch adds
+//       nothing or every entry carries the user's recorded approval, `held` when
+//       entries wait on the user's word, `no reason` when any lacks its reason,
+//       and `refused` when the user refused any. The rest is the `## Switch-offs`
+//       section: one line per comment with its file, line, form, rules, reason
+//       and identity, and one per settings change with its diff; approved entries
+//       are marked. Without --dispatch no approval can match, so any entry holds.
+//       An approval names the run, the identity and the user's words, written
+//       through `run log-action` so it sits in the run's actions and the
+//       project's ledger alike.
 //
-//   exit 0  already-landed, anything-to-land, results, card-block, card-open: the answer,
+//   exit 0  already-landed, anything-to-land, pull-request-checks, results, card-block, card-open: the answer,
 //           printed; card-results, card-findings: `match`; journey: `clear` or `judge`;
-//           fresh: `fresh`
+//           fresh: `fresh`; switch-offs: `clear`
 //   exit 1  usage; a resolving input that does not resolve (--default, --base,
 //           --card-head, --local-ticket, --pr-merge, and --ticket without a
 //           report: --pr-head answers `re-verify` instead); a file that cannot
@@ -79,11 +98,16 @@
 //           be read (a duplicate id, a finding-shaped line that is not a finding, an
 //           unreadable state, a fence marker line, or a quoted line); a card holding an
 //           HTML comment or not holding the rendered block exactly once
-//   exit 2  fresh: the faults, one line each; journey: `blocked`
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+//   exit 2  fresh: the faults, one line each; journey: `blocked`; switch-offs: `held`
+//   exit 3  switch-offs: `no reason`
+//   exit 4  switch-offs: `refused`
+import { readFileSync, readdirSync } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { inspectSwitchOffs } from "./lib/switch-offs.ts";
 import { run } from "./lib/proc.ts";
+import { runMode } from "./lib/run-mode.ts";
+import { physical, reachActions } from "./reach.ts";
 import {
   D_CLASS,
   END_OF_STRING,
@@ -341,6 +365,119 @@ function checkpointStates(path: string): CheckpointFinding[] {
   return out;
 }
 
+/** Card-safe path text: no comment opener, no code-span break, one line. */
+function escapeCardPath(shown: string): string {
+  return shown
+    .replace(/<!--/gu, "&lt;!--")
+    .replace(/`/gu, "'")
+    .replace(/\r\n|\r|\n/gu, "\\n");
+}
+
+function reachPath(dispatch: string, path: unknown): string {
+  if (typeof path !== "string" || path === "") return "unknown path";
+  if (path.startsWith("refs/")) {
+    // Only a clean ref prints verbatim: a refs/-shaped unresolved token can
+    // smuggle machine paths past the non-absolute redaction below (bug-64).
+    // None of these characters occur in the run refs the check records.
+    if (path.includes("..") || /[~$*?[\]`'"\\]/u.test(path)) return "outside the project";
+    return escapeCardPath(path);
+  }
+  // Only an unresolved token reaches the card non-absolute; its raw text can
+  // name a home folder or another project, so it never prints raw (D18, C14).
+  if (!isAbsolute(path)) return "outside the project";
+  const repo = physical(join(dispatch, "..", "..", ".."));
+  const rel = relative(repo, path);
+  const shown =
+    rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)
+      ? "outside the project"
+      : rel.split(sep).join("/");
+  return escapeCardPath(shown);
+}
+
+/**
+ * Card-safe not-checked text: the lane and the kind of problem, never the
+ * raw path or text. Detail stays in the run's log. A reason is `<kind>:
+ * <detail>`; colon-free reasons are fixed diagnostics shown whole.
+ */
+function notCheckedShown(reason: string): string {
+  const detail = reason.startsWith("not checked:")
+    ? reason.slice("not checked:".length).trim()
+    : reason;
+  const head = detail.split(":", 1)[0]?.trim() ?? "";
+  return escapeCardPath(head || "not checked");
+}
+
+function reachBlock(dispatch: string): string {
+  const actions = reachActions(dispatch);
+  if (actions.length === 0) return "";
+  const pointRows = actions.filter(({ event }) => event.kind === "point");
+  const lastPoint = new Map<string, (typeof pointRows)[number]["event"]>();
+  for (const row of pointRows) lastPoint.set(row.event.point, row.event);
+  const roundNumbers = new Set<number>();
+  try {
+    for (const name of readdirSync(join(dispatch, "logs"))) {
+      const m = /^review-r([1-9][0-9]*)\.json$/u.exec(name);
+      if (m) roundNumbers.add(Number(m[1]));
+    }
+  } catch {
+    die(`cannot list review round records in ${dispatch}/logs`);
+  }
+  for (const { event } of actions) {
+    const m = /^r([1-9][0-9]*)$/u.exec(event.point);
+    if (m) roundNumbers.add(Number(m[1]));
+  }
+  // A single-thread run has no workhorses point to show: it never runs "Check lane
+  // reach before synthesis", and the fixture reach item does not expect one of it.
+  const points = [
+    ...(runMode(dispatch) === "single-thread" ? [] : ["workhorses"]),
+    ...[...roundNumbers].sort((a, b) => a - b).map((n) => `r${n}`),
+    "card",
+  ];
+  const lines = ["## Reach", ""];
+  lines.push("- Writes outside the repository are not detected here; preventing them is #221.");
+  const card = lastPoint.get("card");
+  const main = card?.main;
+  if (main !== null && typeof main === "object" && !Array.isArray(main)) {
+    const state = main as Record<string, unknown>;
+    lines.push(
+      `- Main checkout: branch ${String(state.branch ?? "unknown")} (default ${String(state.defaultBranch ?? "unknown")})`,
+    );
+    const changed = Array.isArray(state.changed) ? state.changed : [];
+    if (changed.length === 0) lines.push("  - clean at the card check");
+    else for (const path of changed) lines.push(`  - changed: \`${reachPath(dispatch, path)}\``);
+  }
+  for (const point of points) {
+    const record = lastPoint.get(point);
+    const result = record?.result ?? "not checked";
+    const title =
+      point === "workhorses" ? point : point === "card" ? point : `round ${point.slice(1)}`;
+    lines.push(`- ${title}: ${result}`);
+    const incidents = actions.filter(
+      ({ event }) => event.point === point && ["finding", "note", "void"].includes(event.kind),
+    );
+    for (const { event } of incidents) {
+      if (event.kind === "void") {
+        lines.push(
+          `  - voided verdict: ${event.lens ?? "review"} reviewer ${event.lane ?? "unknown"} (${event.reason ?? "reach"})`,
+        );
+        continue;
+      }
+      if (typeof event.reason === "string" && event.reason.startsWith("not checked:")) {
+        lines.push(`  - ${event.lane ?? "lane"}: not checked: ${notCheckedShown(event.reason)}`);
+        continue;
+      }
+      const lane = event.lane ? `${event.lane}: ` : "";
+      const access =
+        event.access === "write" ? "write" : event.access === "names" ? "names" : "read";
+      const place = event.place ? ` (${event.place})` : "";
+      const path = reachPath(dispatch, event.path);
+      const reason = event.reason ? ` — ${escapeCardPath(event.reason)}` : "";
+      lines.push(`  - ${event.kind}: ${lane}${access} \`${path}\`${place}${reason}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 /** The card's checked sections, byte-exact. */
 function renderBlock(dispatch: string, wt: string, checkpoint: string): string {
   const checks = recordedResults(dispatch, wt);
@@ -356,7 +493,9 @@ function renderBlock(dispatch: string, wt: string, checkpoint: string): string {
       .filter((f) => f.state === "user-applied")
       .map((f) => `- [${f.sev}] ${f.fid}`)
       .join("\n") || "none";
-  return `## Checks\n\n${b1}\n\n## Open findings\n\n${b2}\n\n## Not re-reviewed\n\n${b3}\n`;
+  const base = `## Checks\n\n${b1}\n\n## Open findings\n\n${b2}\n\n## Not re-reviewed\n\n${b3}\n`;
+  const reach = reachBlock(dispatch);
+  return reach ? `${base}\n${reach}` : base;
 }
 
 /** match iff the card holds the block once. */
@@ -375,10 +514,12 @@ const TOP_USAGE =
   "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>] | anything-to-land " +
   "--repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> " +
-  "--ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | " +
+  "--ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | pull-request-checks --repo <repo> " +
+  "--pr <pull-request> --card-head <sha> | results <dispatch> <synthesis-wt> | " +
   "card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> " +
   "<checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | " +
-  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill>";
+  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | switch-offs " +
+  "--repo <repo> --default <branch> --ticket <ref> [--dispatch <dispatch>]";
 const ALREADY_USAGE =
   "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>]";
@@ -395,6 +536,121 @@ const CFINDINGS_USAGE =
   "usage: run landing card-findings <dispatch> <synthesis-wt> <checkpoint> <card>";
 const OPEN_USAGE = "usage: run landing card-open <checkpoint>";
 const JOURNEY_USAGE = "usage: run landing journey <dispatch> <synthesis-wt> <waybill>";
+const PR_CHECKS_USAGE =
+  "usage: run landing pull-request-checks --repo <repo> --pr <pull-request> --card-head <sha>";
+
+type PullRequestCheck = {
+  name?: unknown;
+  state?: unknown;
+  bucket?: unknown;
+  link?: unknown;
+};
+
+function pullRequestChecks(o: string[]): number {
+  if (
+    o.length !== 6 ||
+    o[0] !== "--repo" ||
+    o[2] !== "--pr" ||
+    o[4] !== "--card-head" ||
+    o[1] === "" ||
+    o[3] === "" ||
+    o[5] === ""
+  ) {
+    usage(PR_CHECKS_USAGE);
+  }
+  const repo = o[1]!;
+  const pr = o[3]!;
+  const cardHead = commitOf(repo, o[5]!, "--card-head");
+  const readPullRequestHead = (): string => {
+    const view = run("gh", ["pr", "view", pr, "--json", "headRefOid"], { cwd: repo });
+    if (view.code !== 0) die(`cannot read pull request head: ${pyTrim(view.err || view.out)}`);
+    try {
+      const head = (JSON.parse(view.out) as { headRefOid?: unknown }).headRefOid;
+      if (typeof head === "string" && head !== "") return head;
+    } catch {
+      // Use the same closed failure below for an absent or malformed head.
+    }
+    die("GitHub did not report a pull request head");
+  };
+  const printHeadMismatch = (head: string): void => {
+    console.log(`fail: pull request head ${head} does not match card ${cardHead} ${pr}`);
+  };
+  const initialHead = readPullRequestHead();
+  if (initialHead !== cardHead) {
+    printHeadMismatch(initialHead);
+    return 0;
+  }
+
+  const result = run("gh", ["pr", "checks", pr, "--json", "name,state,bucket,link"], {
+    cwd: repo,
+  });
+  if (![0, 1, 8].includes(result.code)) {
+    die(`cannot read pull request checks: ${pyTrim(result.err || result.out)}`);
+  }
+  // A pull request with no checks is exit 1 with empty stdout and "no checks
+  // reported ..." on stderr (gh 2.101.0): that is none, not a failure. Any
+  // other empty report is a failure, never none: an unknown pull request and
+  // a refused login fail the same way, with their own message.
+  const empty = result.out.trim() === "";
+  if (empty && !/no checks reported/u.test(result.err ?? "")) {
+    die(`cannot read pull request checks: ${pyTrim(result.err || result.out)}`);
+  }
+  let checks: PullRequestCheck[];
+  try {
+    const parsed: unknown = empty ? [] : JSON.parse(result.out);
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    checks = parsed as PullRequestCheck[];
+  } catch {
+    die(
+      `cannot read pull request checks: ${pyTrim(result.err || "GitHub returned malformed JSON")}`,
+    );
+  }
+  const finalHead = readPullRequestHead();
+  if (finalHead !== cardHead) {
+    printHeadMismatch(finalHead);
+    return 0;
+  }
+  if (checks.length === 0) {
+    console.log("none");
+    return 0;
+  }
+
+  const bucketOf = (check: PullRequestCheck): "pass" | "pending" | "fail" => {
+    if (check.bucket === "pass") return "pass";
+    if (check.bucket === "pending") return "pending";
+    if (check.bucket === "fail") return "fail";
+    // A skipped check satisfies the merge the way it satisfies GitHub: it is not
+    // a failure and there is nothing to wait for.
+    if (check.bucket === "skipping") return "pass";
+    if (check.state === "SUCCESS") return "pass";
+    if (check.state === "SKIPPED" || check.state === "NEUTRAL") return "pass";
+    if (["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"].includes(String(check.state)))
+      return "pending";
+    return "fail";
+  };
+  const failing = checks.find((check) => bucketOf(check) === "fail");
+  if (failing !== undefined) {
+    const name =
+      typeof failing.name === "string" && failing.name !== "" ? failing.name : "unnamed check";
+    const state = String(failing.state ?? failing.bucket ?? "did not pass");
+    const link = typeof failing.link === "string" && failing.link !== "" ? failing.link : pr;
+    console.log(`fail: ${name} (${state}) ${link}`);
+    return 0;
+  }
+  const pending = checks.filter((check) => bucketOf(check) === "pending");
+  if (pending.length > 0) {
+    const names = pending.map((check) =>
+      typeof check.name === "string" && check.name !== "" ? check.name : "unnamed check",
+    );
+    console.log(`pending: ${names.join(", ")}`);
+    return 0;
+  }
+  console.log("pass");
+  return 0;
+}
+
+const SWITCH_OFFS_USAGE =
+  "usage: run landing switch-offs --repo <repo> --default <branch> --ticket <ref> [--dispatch <dispatch>]";
 
 function alreadyLanded(o: string[]): number {
   if (
@@ -619,12 +875,43 @@ function journey(dispatch: string, wt: string, waybill: string): number {
   return 0;
 }
 
+function switchOffs(o: string[]): number {
+  if (
+    (o.length !== 6 && o.length !== 8) ||
+    o[0] !== "--repo" ||
+    o[2] !== "--default" ||
+    o[4] !== "--ticket" ||
+    (o.length === 8 && o[6] !== "--dispatch")
+  ) {
+    usage(SWITCH_OFFS_USAGE);
+  }
+  try {
+    const report = inspectSwitchOffs({
+      repo: o[1]!,
+      defaultRef: o[3]!,
+      ticketRef: o[5]!,
+      ...(o.length === 8 ? { dispatch: o[7]! } : {}),
+    });
+    process.stdout.write(`${report.status}\n${report.output}`);
+    return report.status === "clear"
+      ? 0
+      : report.status === "held"
+        ? 2
+        : report.status === "no reason"
+          ? 3
+          : 4;
+  } catch (e) {
+    throw new LandingFailure(`switch-offs: ${e instanceof Error ? e.message : String(e)}`, 1);
+  }
+}
+
 function main(argv: string[]): number {
   try {
     const mode = argv[0];
     if (mode === "already-landed") return alreadyLanded(argv.slice(1));
     if (mode === "anything-to-land") return anythingToLand(argv.slice(1));
     if (mode === "fresh") return fresh(argv.slice(1));
+    if (mode === "pull-request-checks") return pullRequestChecks(argv.slice(1));
     if (mode === "results") {
       if (argv.length !== 3) usage(RESULTS_USAGE);
       for (const [name, result] of recordedResults(argv[1]!, argv[2]!)) {
@@ -653,6 +940,7 @@ function main(argv: string[]): number {
       if (argv.length !== 4) usage(JOURNEY_USAGE);
       return journey(argv[1]!, argv[2]!, argv[3]!);
     }
+    if (mode === "switch-offs") return switchOffs(argv.slice(1));
     usage(TOP_USAGE);
   } catch (e) {
     if (e instanceof LandingFailure) {

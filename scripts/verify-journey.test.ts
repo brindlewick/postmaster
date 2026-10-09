@@ -2,7 +2,7 @@
 // The self-test staged shared state between controls (armed reports, a second commit); each
 // test below stages its own directories so it passes alone as well as in file order.
 // The spaced-path control re-runs this file with bun test instead of --self-test. Conditional
-// controls are gated by test.skipIf with a top notice.
+// controls are gated by test.skipIf; skips.toml carries the reasons.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,20 +26,12 @@ import {
 const SELF = join(import.meta.dir, "run");
 const BASE_BLOB = "bb782a973e69427c820ce16a676718e87f51995b:scripts/verify-journey.sh";
 
-const hasPy = run("sh", ["-c", "command -v python3"]).code === 0;
+const hasPy =
+  run("python3", ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"])
+    .code === 0;
 const baseShown = run("git", ["-C", toolRoot(import.meta), "show", BASE_BLOB]);
 const foldSkip = !hasPy || baseShown.code !== 0;
-if (foldSkip) {
-  console.log(
-    `skip step matching folds as BASE's norm does: ${!hasPy ? "python3 not on PATH: the casefold step match was not compared" : "BASE could not be extracted here: the casefold step match was not compared"}`,
-  );
-}
 const spacedDone = process.env.POSTMASTER_SPACED_DONE === "1";
-if (spacedDone) {
-  console.log(
-    "skip the self-test passes from a path with a space: POSTMASTER_SPACED_DONE is set (nested run)",
-  );
-}
 
 let tmp = "";
 let wt = "";
@@ -342,44 +334,40 @@ describe("negative controls", () => {
     expect(out.includes("no journey report at")).toBe(true);
   });
 
-  test.skipIf(foldSkip)(
-    "step matching folds as BASE's norm does, ß/İ/ς alike",
-    () => {
-      const baseVj = join(tmp, "base-verify-journey.sh");
-      writeFileSync(baseVj, baseShown.out);
-      writeFileSync(
-        join(tmp, "fold-ticket.md"),
-        "## User journey\n1. Visit the STRASSE kiosk.\n2. Read the ςummary on DBΣ.\n3. Tap İleri.\n",
-        "utf8",
-      );
-      report(
-        join(tmp, "fold-report.md"),
-        "Visit the Straße kiosk",
-        "did",
-        "shots/1.png",
-        "Read the σummary on DBσ",
-        "did",
-        "shots/1.png",
-        "Tap İleri",
-        "did",
-        "shots/1.png",
-      );
-      const args = (bin: string): string[] => [
-        bin,
-        wt,
-        "--ticket",
-        join(tmp, "fold-ticket.md"),
-        "--report",
-        join(tmp, "fold-report.md"),
-      ];
-      const base = run("bash", args(baseVj));
-      const port = run(SELF, ["verify-journey", ...args(SELF).slice(1)]);
-      const walked = (r: { code: number; out: string; err: string }): boolean =>
-        r.code === 0 && `${r.out}${r.err}`.includes("all 3 steps walked");
-      expect(walked(base) && walked(port)).toBe(true);
-    },
-    60000,
-  );
+  test.skipIf(foldSkip)("step matching folds as BASE's norm does, ß/İ/ς alike", () => {
+    const baseVj = join(tmp, "base-verify-journey.sh");
+    writeFileSync(baseVj, baseShown.out);
+    writeFileSync(
+      join(tmp, "fold-ticket.md"),
+      "## User journey\n1. Visit the STRASSE kiosk.\n2. Read the ςummary on DBΣ.\n3. Tap İleri.\n",
+      "utf8",
+    );
+    report(
+      join(tmp, "fold-report.md"),
+      "Visit the Straße kiosk",
+      "did",
+      "shots/1.png",
+      "Read the σummary on DBσ",
+      "did",
+      "shots/1.png",
+      "Tap İleri",
+      "did",
+      "shots/1.png",
+    );
+    const args = (bin: string): string[] => [
+      bin,
+      wt,
+      "--ticket",
+      join(tmp, "fold-ticket.md"),
+      "--report",
+      join(tmp, "fold-report.md"),
+    ];
+    const base = run("bash", args(baseVj));
+    const port = run(SELF, ["verify-journey", ...args(SELF).slice(1)]);
+    const walked = (r: { code: number; out: string; err: string }): boolean =>
+      r.code === 0 && `${r.out}${r.err}`.includes("all 3 steps walked");
+    expect(walked(base) && walked(port)).toBe(true);
+  });
 
   test.skipIf(spacedDone)(
     "the self-test passes from a path with a space",

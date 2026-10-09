@@ -1,0 +1,27 @@
+item	run	round	severity	location	snapshot	description
+1	202	1	P2	scripts/reach.ts:886	3abedd7	the shell-group rewrite flips inside reads to notes
+2	252	2	P2	scripts/aftercare.ts:1035	e6ba844	reconcile substring matches a longer comment and skips the post
+3	252	2	P2	scripts/aftercare.ts:780	e6ba844	dry run exits 3 on a live preview the real run stops and closes
+4	252	1	P2	scripts/aftercare.ts:335	a793251	.worktrees read errors treated as empty, silently omitting unscanned folders
+5	216	4	P2	scripts/scrub-check-main.ts:654	cbd0384	pr-description/card scans log draft rows, TELL fires, block dies without resolution, landing stuck
+6	216	2	P2	scripts/scrub-core.ts:1514	16b8ea6	range scan misses UTF-16 content that --files finds
+7	268	1	P2	skills/postmaster/postmaster.md:568	8fe7775	switch-off ask never writes .waiting-on-user
+8	202	5	P2	skills/postmaster/coachman.md:943	665a99f	the round reach step restores after a faulted check
+9	202	1	P1	scripts/reach.ts:693	3abedd7	refusal attribution hides a successful write beside a denial
+10	252	3	P1	scripts/aftercare.ts:419	d2a5e88	inherited GIT_DIR/GIT_WORK_TREE override git -C, scanning the wrong checkout before removal
+11	216	4	P2	scripts/scrub-rewrite.ts:319	cbd0384	raw path in manual-reword refusal prints finding value, violates rule 10 and C10
+12	268	2	P2	scripts/lib/switch-offs.ts:194	7e07807	apostrophe in JSX text opens a fake string hiding directives
+13	268	2	P2	scripts/lib/switch-offs.ts:199	7e07807	strings and regexes end at U+2028 which ES2019 allows inside
+14	252	3	P2	scripts/aftercare.ts:673	d2a5e88	core.quotePath quoted paths fail hash-object, silently missing flags
+15	202	3	P2	scripts/reach.ts:595	4fcdacf	descriptor-duplication redirects invent a path write
+16	202	7	P2	scripts/reach.ts:1075	47e43ca	the sed long in-place form missed
+17	268	2	P2	scripts/lib/switch-offs.ts:248	7e07807	slash after a condition paren divide-read hides regex directives
+18	202	1	P2	scripts/reach.ts:733	3abedd7	the git block misses escapes (branch and tag names, dropped operands, redirects off git)
+19	216	1	P2	scripts/landing.ts:484	dab3bea	privateDataBlock freezes heldout scores + D1/D8/D9/D19 into every future card, check requires verbatim match
+20	216	1	P2	scripts/raw-promote-main.ts:345	dab3bea	symlinked dest ancestor escapes repo on mkdir+rename
+21	268	1	P2	skills/postmaster/coachman.md:1011	8fe7775	exit-2 paragraph misdescribes held and its remedy cannot clear it
+22	268	2	P2	scripts/lib/switch-offs.ts:408	7e07807	covered lines split Python-wide while the scanner counts tsc-narrow
+23	268	3	P2	scripts/lib/switch-offs.ts:771	b0f7d8a	block-comment next-line identity hashes a comment line not the covered code
+24	268	2	P2	scripts/lib/switch-offs.ts:308	7e07807	triple-slash TS suppressions honored but not parsed
+25	202	1	P1	scripts/reach.ts:374	3abedd7	a write after a newline reads as a read
+26	252	1	P1	scripts/aftercare.ts:821	a793251	a reused pid with an overwritten registry record passes the start check, signalling another launch's group

@@ -6,8 +6,8 @@
 //   exit 0  printed
 //   exit 1  usage; a report that cannot be read; a harvest that cannot be completed
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   BOUND_L,
   BOUND_R,
@@ -244,8 +244,6 @@ const CODEX_LINE = new RegExp(
   "u",
 );
 const PREFIX_SANITIZE = /[^A-Za-z0-9_.-]+/gu;
-export const SH_BLOCKS = new RegExp("```sh\\n(" + DOT_ALL + "*?)```", "gsu");
-export const FOR_LOOP = /for L in \$\([^;]*?; do/gu;
 const LEAD_HASH = /^#+/u;
 const JSON_NUM = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/uy;
 const HEX4 = /^[0-9a-fA-F]{4}$/u;
@@ -1280,6 +1278,7 @@ export function harvest(
   logsDir: string,
   prefix: string,
   taskRoot: string | null = null,
+  sessionRoot: string | null = null,
 ): string[] {
   const wanted: string[] = [];
   for (const event of readEvents(eventsPath)) {
@@ -1310,6 +1309,17 @@ export function harvest(
             pyResolve(join(tmpdir(), `claude-${uid()}`)),
           ]),
         ];
+  // Claude Code 2.1.295 keeps a task's output as a link, named inside a task root, to the
+  // session's transcript in its projects folder. That folder is the one place a link under a
+  // task root may lead; a link to anywhere else, and a path named inside the projects folder
+  // with no link under a task root, are still refused.
+  const sessions = pyResolve(
+    sessionRoot ?? join(process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"), "projects"),
+  );
+  const within = (root: string, target: string): boolean => {
+    const rel = relative(root, target);
+    return !(rel === ".." || rel.startsWith("../") || isAbsolute(rel));
+  };
   const planned: Array<[string, string]> = [];
   wanted.forEach((path, n) => {
     const index = n + 1;
@@ -1319,10 +1329,10 @@ export function harvest(
     } catch {
       fail(`Claude task output named by task_notification is missing: ${path}`);
     }
-    const inside = roots.some((root) => {
-      const rel = relative(root, resolved);
-      return !(rel === ".." || rel.startsWith("../") || isAbsolute(rel));
-    });
+    const named = join(realpathSync(dirname(path)), basename(path));
+    const inside =
+      roots.some((root) => within(root, resolved)) ||
+      (roots.some((root) => within(root, named)) && within(sessions, resolved));
     if (!inside) {
       fail(`Claude task output is outside ${roots[0]}: ${path}`);
     }

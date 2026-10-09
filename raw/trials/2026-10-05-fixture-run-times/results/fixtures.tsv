@@ -1,0 +1,71 @@
+dir	runs	written	toolcommit	uncommitted	ticket	first	last	dur_min	stage	lanes	stage_lines	review_rounds	card
+202-remove-2	2	2026-10-05T03:10:12Z	d58c10b		Remove tasks by id	2026-10-05T03:10:13Z	2026-10-05T03:39:49Z	29	done	luna+luna2	8	0	yes
+202-remove	2	2026-10-05T00:59:43Z	ea78220		Remove tasks by id	2026-10-05T00:59:44Z	2026-10-05T01:54:06Z	54	done	luna+luna2	8	0	yes
+217-remove	2	2026-10-04T07:46:27Z	db6d106		Remove tasks by id	2026-10-04T07:46:28Z	2026-10-04T08:58:06Z	71	done	luna+mimo	9	0	yes
+218-remove-final-2	1	2026-10-04T02:07:41Z	7b67ced		Remove tasks by id	2026-10-04T02:07:54Z	2026-10-04T03:14:25Z	66	done	luna+mimo	9	0	yes
+218-remove-final-3	1	2026-10-04T05:53:39Z	53eee1d		Remove tasks by id	2026-10-04T05:54:01Z	2026-10-04T06:36:23Z	42	done	luna+mimo	9	0	yes
+218-remove-final	1	2026-10-04T02:00:55Z	7b67ced		Remove tasks by id	2026-10-04T02:03:54Z	2026-10-04T02:07:30Z	3	abandoned		4	0	no
+218-remove	2	2026-10-03T21:05:19Z	bac250f		Remove tasks by id	2026-10-03T21:05:31Z	2026-10-03T21:43:40Z	38	abandoned	luna+mimo	3	0	no
+237-remove	2	2026-10-04T17:26:39Z	6ec9b4c		Remove tasks by id	2026-10-04T17:26:39Z	2026-10-04T18:20:25Z	53	done	luna+luna2	8	0	yes
+251-remove-final-2	2	2026-10-04T11:02:18Z	389bcd6		Remove tasks by id	2026-10-04T11:02:19Z	2026-10-04T11:52:42Z	50	done	luna+mimo	8	0	yes
+251-remove-final	2	2026-10-04T10:18:29Z	389bcd6		Remove tasks by id	2026-10-04T10:18:30Z	2026-10-04T11:00:44Z	42	done	luna+mimo	9	0	yes
+251-remove	2	2026-10-04T08:29:34Z	efa9d85		Remove tasks by id	2026-10-04T08:29:34Z	2026-10-04T09:18:39Z	49	done	luna+mimo	8	0	yes
+252-remove	2	2026-10-05T03:10:02Z	09a11ab		Remove tasks by id	2026-10-05T03:10:03Z	2026-10-05T03:29:49Z	19	done	luna+luna2	8	0	yes
+258-remove	2	2026-10-05T02:13:47Z	5d7b9c4		Remove tasks by id	2026-10-05T02:13:47Z	2026-10-05T02:49:12Z	35	done	luna+luna2	8	0	yes
+259-remove	2	2026-10-04T23:16:39Z	3156b8f		Remove tasks by id	2026-10-04T23:16:39Z	2026-10-04T23:52:10Z	35	done	luna+luna2	8	0	yes
+265-remove	2	2026-10-04T19:23:12Z	2c4032e		Remove tasks by id	2026-10-04T19:23:12Z	2026-10-04T19:48:16Z	25	done	luna+luna2	8	0	yes
+265-time	1	2026-10-04T13:34:11Z	ff0279c	true	Remove tasks by id	2026-10-04T13:35:45Z	2026-10-04T14:32:54Z	57	done	luna+mimo	8	0	yes
+266-remove	2	2026-10-04T16:41:08Z	9d50beb		Remove tasks by id	2026-10-04T16:41:12Z	2026-10-04T18:23:14Z	102	done	luna+mimo	9	0	yes
+268-contract	2	2026-10-04T12:10:36Z	06460be		Remove tasks by id	2026-10-04T12:10:48Z	2026-10-04T13:38:27Z	87	done	luna+mimo	9	0	yes
+270-single	2	2026-10-04T21:31:18Z	fed1ea0		Remove tasks by id	2026-10-04T21:31:27Z	2026-10-04T21:46:56Z	15	abandoned		5	0	no
+270-single2	2	2026-10-04T21:46:57Z	e134dd7		Remove tasks by id	2026-10-04T21:47:06Z	2026-10-04T22:28:59Z	41	done		7	0	yes
+270-single3	2	2026-10-04T22:37:19Z	9792b04		Remove tasks by id	2026-10-04T22:37:26Z	2026-10-04T22:54:58Z	17	abandoned		5	0	no
+270-single4	2	2026-10-04T22:47:56Z	1d0a234		Remove tasks by id	2026-10-04T22:48:04Z	2026-10-04T23:24:16Z	36	done		7	0	yes
+270-synth	2	2026-10-04T21:31:22Z	fed1ea0		Remove tasks by id	2026-10-04T21:31:33Z	2026-10-04T22:21:23Z	49	abandoned	luna+mimo	6	0	no
+270-synth2	2	2026-10-04T22:11:11Z	1b7eda6		Remove tasks by id	2026-10-04T22:11:24Z	2026-10-04T23:25:34Z	74	done	luna+mimo	9	0	yes
+270-synth3	2	2026-10-04T23:30:59Z	dc4a564		Remove tasks by id	2026-10-04T23:31:05Z	2026-10-05T00:50:03Z	78	abandoned	luna+mimo	7	0	yes
+270-synth4	2	2026-10-05T00:54:19Z	b609cb2		Remove tasks by id	2026-10-05T00:54:25Z	2026-10-05T02:07:20Z	72	done	luna+mimo	8	0	yes
+270fix-single	1	2026-10-05T04:20:39Z	8a38ca5		Remove tasks by id	2026-10-05T04:21:27Z	2026-10-05T04:50:21Z	28	done		7	0	yes
+270fix-synth	1	2026-10-05T04:20:42Z	8a38ca5		Remove tasks by id	2026-10-05T04:21:27Z	2026-10-05T04:50:21Z	28	done	luna+mimo	8	0	yes
+bare-name	NO-RUN-RECORD
+confine-trial	NO-RUN-RECORD
+todo-fixture-10	2	2026-09-29T11:24:06Z	5a6a14f		Remove tasks by id	2026-09-29T11:24:12Z	2026-09-29T12:55:35Z	91	done	luna+mimo	8	0	yes
+todo-fixture-11	2	2026-09-29T12:38:52Z	348b479		Remove tasks by id	2026-09-29T12:38:56Z	2026-09-29T13:24:22Z	45	abandoned	luna+mimo	6	0	no
+todo-fixture-12	2	2026-09-29T14:00:47Z	75eaf42		Remove tasks by id	2026-09-29T14:00:53Z	2026-09-29T15:17:35Z	76	done	luna+mimo	8	0	yes
+todo-fixture-13	2	2026-09-29T14:38:39Z	a0f8495		Remove tasks by id	2026-09-29T14:38:43Z	2026-09-29T20:50:39Z	371	abandoned	luna+mimo	3	0	no
+todo-fixture-14	2	2026-09-29T21:22:03Z	406abee		Remove tasks by id	2026-09-29T21:22:09Z	2026-09-29T22:28:57Z	66	done	luna+mimo	9	0	yes
+todo-fixture-15	2	2026-09-30T23:19:30Z	109e288		Remove tasks by id	2026-09-30T23:19:34Z	2026-10-01T00:43:18Z	83	done	luna+mimo	9	0	yes
+todo-fixture-16	2	2026-10-01T00:09:10Z	306b343		Remove tasks by id	2026-10-01T00:09:14Z	2026-10-01T00:45:29Z	36	abandoned	luna+mimo	7	0	no
+todo-fixture-17	2	2026-10-01T02:15:34Z	7d79dc1		Remove tasks by id	2026-10-01T02:15:40Z	2026-10-01T08:29:13Z	373	done	luna+mimo	9	0	yes
+todo-fixture-18	2	2026-10-01T02:31:20Z	3c92f10		Remove tasks by id	2026-10-01T02:31:26Z	2026-10-01T08:12:49Z	341	done	luna+mimo	9	0	yes
+todo-fixture-19	2	2026-10-01T09:05:13Z	ea2091e		Remove tasks by id	2026-10-01T09:05:17Z	2026-10-01T10:21:45Z	76	done	mimo+sol	9	0	yes
+todo-fixture-2	NO-RUN-RECORD
+todo-fixture-20	2	2026-10-01T09:13:15Z	47edfe3		Remove tasks by id	2026-10-01T09:13:18Z	2026-10-01T10:53:22Z	100	done	mimo+sol	9	0	yes
+todo-fixture-21	2	2026-10-01T09:52:27Z	6a1eb04		Remove tasks by id	2026-10-01T09:52:30Z	2026-10-01T11:05:42Z	73	done	mimo+sol	8	0	yes
+todo-fixture-22	NO-RUN-RECORD
+todo-fixture-23	2	2026-10-01T11:37:29Z	44f13b7		Remove tasks by id	2026-10-01T11:37:34Z	2026-10-01T13:04:18Z	86	done	mimo+sol	9	0	yes
+todo-fixture-24	2	2026-10-01T11:38:39Z	35e9972		Remove tasks by id	2026-10-01T11:38:40Z	2026-10-01T13:22:27Z	103	done	mimo+sol	9	0	yes
+todo-fixture-25	2	2026-10-01T11:58:43Z	a2b33f7		Remove tasks by id	2026-10-01T11:58:46Z	2026-10-01T12:55:47Z	57	done	mimo+sol	9	0	yes
+todo-fixture-26	2	2026-10-01T12:06:23Z	b445f45		Remove tasks by id	2026-10-01T12:06:27Z	2026-10-01T13:17:57Z	71	done	mimo+sol	9	0	yes
+todo-fixture-27	2	2026-10-01T14:03:41Z	283aa1e		Remove tasks by id	2026-10-01T14:03:45Z	2026-10-01T16:43:18Z	159	done	mimo+sol	9	0	yes
+todo-fixture-28	2	2026-10-01T14:03:53Z	6971d62		Remove tasks by id	2026-10-01T14:03:56Z	2026-10-01T16:08:47Z	124	done	mimo+sol	9	0	yes
+todo-fixture-29	2	2026-10-01T15:37:40Z	c0bb9ae		Remove tasks by id	2026-10-01T15:37:44Z	2026-10-01T17:15:55Z	98	done	mimo+sol	9	0	yes
+todo-fixture-3	NO-RUN-RECORD
+todo-fixture-30	2	2026-10-01T17:15:10Z	8399792		Remove tasks by id	2026-10-01T17:15:15Z	2026-10-01T18:48:19Z	93	done	mimo+sol	9	0	yes
+todo-fixture-31	2	2026-10-01T17:15:23Z	ce5d396		Remove tasks by id	2026-10-01T17:15:26Z	2026-10-01T19:22:34Z	127	done	mimo+sol	10	0	yes
+todo-fixture-32	2	2026-10-01T20:24:05Z	c84220e		Remove tasks by id	2026-10-01T20:24:10Z	2026-10-01T22:07:36Z	103	done	mimo+sol	9	0	yes
+todo-fixture-33	2	2026-10-01T20:24:20Z	ef931fc		Remove tasks by id	2026-10-01T20:24:20Z	2026-10-01T22:58:35Z	154	done	mimo+sol	9	0	yes
+todo-fixture-34	2	2026-10-01T22:40:43Z	5f0daf0		Remove tasks by id	2026-10-01T22:40:44Z	2026-10-02T00:38:36Z	117	done	mimo+sol	9	0	yes
+todo-fixture-35	2	2026-10-02T02:44:16Z	b6b070d		Remove tasks by id	2026-10-02T02:44:17Z	2026-10-02T04:26:09Z	101	done	mimo+sol	9	0	yes
+todo-fixture-36	2	2026-10-02T21:11:34Z	95f1f8c		Remove tasks by id	2026-10-02T21:11:34Z	2026-10-02T23:55:33Z	163	done	mimo+sol	9	0	yes
+todo-fixture-37	2	2026-10-02T22:45:46Z	d128641		Remove tasks by id	2026-10-02T22:45:46Z	2026-10-03T02:22:17Z	216	done	astra+mimo	9	0	yes
+todo-fixture-38	2	2026-10-03T03:56:44Z	ce6566c		Remove tasks by id	2026-10-03T03:56:44Z	2026-10-03T04:54:08Z	57	done	astra+mimo	9	0	yes
+todo-fixture-39	2	2026-10-03T07:44:04Z	754e7d9		Remove tasks by id	2026-10-03T07:44:04Z	2026-10-03T10:57:19Z	193	done	mimo+sol	9	0	yes
+todo-fixture-4	NO-RUN-RECORD
+todo-fixture-40	1	2026-10-04T06:16:04Z	1bca810		Remove tasks by id	2026-10-04T06:17:11Z	2026-10-04T06:29:00Z	11	abandoned	mimo+stub	4	0	no
+todo-fixture-41	2	2026-10-04T06:30:39Z	dfa45c5		Remove tasks by id	2026-10-04T06:30:41Z	2026-10-04T07:34:47Z	64	done	mimo+stub	9	0	yes
+todo-fixture-5	NO-RUN-RECORD
+todo-fixture-6	NO-RUN-RECORD
+todo-fixture-7	NO-RUN-RECORD
+todo-fixture-8	2	2026-09-29T05:19:10Z	cbe0e73		Remove tasks by id	2026-09-29T05:19:15Z	2026-09-29T07:35:47Z	136	done	luna+mimo	8	0	yes
+todo-fixture-9	NO-RUN-RECORD

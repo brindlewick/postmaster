@@ -70,6 +70,7 @@ beforeAll(() => {
     "env",
     "git",
     "bun",
+    "realpath",
     "readlink",
     "dirname",
     "basename",
@@ -189,11 +190,11 @@ function through(skillDir: string): { code: number; out: string } {
   return { code: r.code, out: r.out + r.err };
 }
 
-function expectNamedFailure(link: string): void {
+function expectNamedFailure(link: string, target: string): void {
   const r = through(link);
   expect(r.code).not.toBe(0);
-  expect(r.out).toContain(link);
-  expect(run("grep", ["-qi", "--", "no such file"], { input: r.out }).code).not.toBe(0);
+  // The resolution follows the link; whatever then fails names where it led.
+  expect(r.out).toContain(target);
   expect(r.out).not.toContain("projects/1");
 }
 
@@ -203,7 +204,7 @@ describe("harness lookup", () => {
     const found = harnessInstalled(`zz-nonexistent-$(touch ${marker})`);
     expect(found).toBe(false);
     expect(existsSync(marker)).toBe(false);
-  }, 30000);
+  });
 });
 
 describe("--check: the same command reports missing links and passes when complete", () => {
@@ -272,7 +273,7 @@ describe("--check: the same command reports missing links and passes when comple
     );
     expect(r.out).toContain(`run: ${checkRun}`);
     expect(stateAt(checkHome)).toBe(before);
-  }, 30000);
+  });
 
   test("a blocked path is named, the install command is shown, and --check changes nothing", () => {
     mkdirSync(dirname(blockedPath), { recursive: true });
@@ -283,7 +284,7 @@ describe("--check: the same command reports missing links and passes when comple
     expect(r.out).toContain(`IN THE WAY      ${blockedPath} is a file`);
     expect(r.out).toContain(`run: ${checkRun}`);
     expect(stateAt(checkHome)).toBe(before);
-  }, 30000);
+  });
 
   test("a complete set passes through the same --check command without changes", () => {
     rmSync(blockedPath);
@@ -295,7 +296,7 @@ describe("--check: the same command reports missing links and passes when comple
     expect(r.rc).toBe(0);
     expect(r.out).toContain("all skills are linked");
     expect(stateAt(checkHome)).toBe(before);
-  }, 30000);
+  });
 
   test("with no harness installed, --check says so and changes nothing", () => {
     // No harness installed: a PATH holding only plumbing (plus sh, which the
@@ -317,7 +318,7 @@ describe("--check: the same command reports missing links and passes when comple
     expect(r.rc).toBe(0);
     expect(r.out).toContain("no harness skills folders found");
     expect(stateAt(noneHome)).toBe(before);
-  }, 30000);
+  });
 });
 
 describe("installing: every skill, for every installed harness with a skills folder", () => {
@@ -336,21 +337,21 @@ describe("installing: every skill, for every installed harness with a skills fol
     expect(linksTo(join(C, "wiki"), join(TOOL, "skills", "wiki"))).toBe(true);
     expect(linksTo(join(A, "postmaster"), join(TOOL, "skills", "postmaster"))).toBe(true);
     expect(linksTo(join(A, "wiki"), join(TOOL, "skills", "wiki"))).toBe(true);
-  }, 30000);
+  });
 
   test("nothing else is made, for a harness not installed or with no skills folder", () => {
     expect(readdirSync(home).sort().join(" ")).toBe(".agents .claude");
-  }, 30000);
+  });
 
   test("harnesses that read one folder get one link there", () => {
     expect(installOut).toContain(`shared folder   pi reads ${A}, linked for another harness`);
-  }, 30000);
+  });
 
   test("a harness with no skills folder is named with the absolute path its brief gives", () => {
     expect(installOut).toContain(
       `no skills folder agy: its brief names ${join(TOOL, "skills", "postmaster", "SKILL.md")} by absolute path`,
     );
-  }, 30000);
+  });
 
   test("nothing in a skills folder is a copy", () => {
     let copies = "";
@@ -365,7 +366,7 @@ describe("installing: every skill, for every installed harness with a skills fol
       }
     }
     expect(copies).toBe("");
-  }, 30000);
+  });
 
   test("running it again changes nothing", () => {
     const before = state();
@@ -373,7 +374,7 @@ describe("installing: every skill, for every installed harness with a skills fol
     expect(c.ret).toBe(0);
     expect(state()).toBe(before);
     expect(c.out.split("\n").some((l) => l.startsWith("linked "))).toBe(false);
-  }, 30000);
+  });
 
   test("claude's folder moves with CLAUDE_CONFIG_DIR", () => {
     process.env.CLAUDE_CONFIG_DIR = join(tmp, "cfg");
@@ -385,7 +386,7 @@ describe("installing: every skill, for every installed harness with a skills fol
     expect(
       linksTo(join(tmp, "cfg", "skills", "postmaster"), join(TOOL, "skills", "postmaster")),
     ).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("positive control: from an unrelated directory, a documented command resolves through the link and runs", () => {
@@ -396,7 +397,8 @@ describe("positive control: from an unrelated directory, a documented command re
       resolver =
         readFileSync(skillMd, "utf8")
           .split("\n")
-          .find((l) => l.includes('test -x "$t/scripts/run"')) ?? "";
+          .find((l) => l.includes('realpath "<skill>/../.."'))
+          ?.match(/`(realpath "<skill>\/\.\.\/\.\.")/u)?.[1] ?? "";
       documented =
         readFileSync(trackersMd, "utf8")
           .split("\n")
@@ -432,7 +434,11 @@ esac
   test("SKILL.md documents how <tool> is found, and trackers.md the board command", () => {
     expect(resolver).not.toBe("");
     expect(documented).not.toBe("");
-  }, 30000);
+    const skillMd = readFileSync(join(TOOL, "skills", "postmaster", "SKILL.md"), "utf8");
+    // The command resolves the link; the prose tells the reader to stop when the checkout
+    // it leads into holds no scripts/run.
+    expect(skillMd).toContain("the skill was copied, or its link points somewhere else");
+  });
 
   test("<tool> is the checkout the link leads to", () => {
     const r = run("bash", ["-c", resolver.replace(/<skill>/gu, join(C, "postmaster"))], {
@@ -441,13 +447,13 @@ esac
     });
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe(TOOL);
-  }, 30000);
+  });
 
   test("the board command runs through the link", () => {
     const r = through(join(C, "postmaster"));
     expect(r.code).toBe(0);
     expect(r.out).toContain("https://github.com/users/o/projects/1");
-  }, 30000);
+  });
 
   test("a session in the checkout itself, sent to skills/postmaster, finds that checkout", () => {
     const r = run("bash", ["-c", resolver.replace(/<skill>/gu, "skills/postmaster")], {
@@ -456,10 +462,22 @@ esac
     });
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe(TOOL);
+  });
+
+  test("a skill path with spaces still resolves, through the documented quotes", () => {
+    const spaced = join(tmp, "with space");
+    mkdirSync(spaced, { recursive: true });
+    symlinkSync(join(TOOL, "skills", "postmaster"), join(spaced, "postmaster"));
+    const r = run("bash", ["-c", resolver.replace(/<skill>/gu, join(spaced, "postmaster"))], {
+      cwd: elsewhere,
+      env: { ...process.env, PATH: bin, HOME: home },
+    });
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe(TOOL);
   }, 30000);
 });
 
-describe("negative controls: the same command fails, naming the link, never a bare 'no such file'", () => {
+describe("negative controls: the same command fails, and what breaks names where the link led", () => {
   afterAll(() => {
     const link = join(C, "postmaster");
     rmSync(link, { force: true });
@@ -469,14 +487,15 @@ describe("negative controls: the same command fails, naming the link, never a ba
   test("with the link missing", () => {
     const link = join(C, "postmaster");
     rmSync(link, { force: true });
-    expectNamedFailure(link);
-  }, 30000);
+    expectNamedFailure(link, link);
+  });
 
   test("with the link pointing elsewhere", () => {
     const link = join(C, "postmaster");
     symlinkSync(elsewhere, link);
-    expectNamedFailure(link);
-  }, 30000);
+    // realpath <link>/../.. is the target's parent's parent.
+    expectNamedFailure(link, realpathSync(join(tmp, "..")));
+  });
 
   test("with the link pointing at a copy of the skill", () => {
     const link = join(C, "postmaster");
@@ -484,8 +503,9 @@ describe("negative controls: the same command fails, naming the link, never a ba
     mkdirSync(join(tmp, "copy"), { recursive: true });
     run("cp", ["-R", join(TOOL, "skills", "postmaster"), join(tmp, "copy", "postmaster")]);
     symlinkSync(join(tmp, "copy", "postmaster"), link);
-    expectNamedFailure(link);
-  }, 30000);
+    // realpath <link>/../.. is the copy's parent's parent.
+    expectNamedFailure(link, realpathSync(tmp));
+  });
 });
 
 describe("negative controls: nothing in the way is replaced, and nothing else changes", () => {
@@ -508,11 +528,11 @@ describe("negative controls: nothing in the way is replaced, and nothing else ch
     expect(r.rc).toBe(1);
     expect(r.out).toContain(`IN THE WAY      ${link}`);
     expect(state()).toBe(r.before);
-  }, 30000);
+  });
 
   test("a refusal makes no other link either", () => {
     expect(existsSync(join(A, "wiki"))).toBe(false);
-  }, 30000);
+  });
 
   test("a real file where a link belongs is named", () => {
     const link = join(C, "postmaster");
@@ -522,7 +542,7 @@ describe("negative controls: nothing in the way is replaced, and nothing else ch
     expect(r.rc).toBe(1);
     expect(r.out).toContain(`IN THE WAY      ${link}`);
     expect(state()).toBe(r.before);
-  }, 30000);
+  });
 
   test("a link that points elsewhere is named", () => {
     const link = join(C, "postmaster");
@@ -532,7 +552,7 @@ describe("negative controls: nothing in the way is replaced, and nothing else ch
     expect(r.rc).toBe(1);
     expect(r.out).toContain(`IN THE WAY      ${link}`);
     expect(state()).toBe(r.before);
-  }, 30000);
+  });
 
   test("a link that points nowhere is named", () => {
     const link = join(C, "postmaster");
@@ -542,7 +562,7 @@ describe("negative controls: nothing in the way is replaced, and nothing else ch
     expect(r.rc).toBe(1);
     expect(r.out).toContain(`IN THE WAY      ${link}`);
     expect(state()).toBe(r.before);
-  }, 30000);
+  });
 
   test("--dry-run names the links it would make, and makes none", () => {
     const link = join(C, "postmaster");
@@ -552,7 +572,7 @@ describe("negative controls: nothing in the way is replaced, and nothing else ch
     expect(isLink(link)).toBe(false);
     expect(isLink(join(A, "wiki"))).toBe(false);
     expect(c.out).toContain(`to link         ${link}`);
-  }, 30000);
+  });
 });
 
 describe("a skills folder that is itself a link into a checkout's skills", () => {
@@ -579,13 +599,13 @@ describe("a skills folder that is itself a link into a checkout's skills", () =>
     const c = withHome(fHome, () => capture(() => makeLinks(fixture, 0)));
     expect(c.ret).toBe(0);
     expect(c.out).toContain(`already linked  ${join(fHome, ".claude", "skills", "postmaster")}`);
-  }, 30000);
+  });
 
   test("--remove leaves it, and the checkout, alone", () => {
     withHome(fHome, () => capture(() => removeLinks(fixture)));
     expect(existsSync(join(fixture, "skills", "postmaster"))).toBe(true);
     expect(isLink(join(fHome, ".claude", "skills"))).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("--remove: only the links to this checkout's skills", () => {
@@ -600,7 +620,7 @@ describe("--remove: only the links to this checkout's skills", () => {
     expect(isLink(join(A, "postmaster"))).toBe(false);
     expect(isLink(join(C, "other"))).toBe(true);
     expect(isDirectory(join(A, "wiki"))).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("which checkout is linked", () => {
@@ -626,7 +646,9 @@ describe("which checkout is linked", () => {
       "first",
     ]);
     run("git", ["-C", repo, "worktree", "add", "-q", join(repo, ".worktrees", "wt"), "-b", "wt"]);
-    repoReal = resolve(repo);
+    // Physically, as git reports the main checkout; resolve() alone keeps a
+    // linked parent (as /tmp is on macOS) spelled the caller's way.
+    repoReal = realpathSync(repo);
     const pkg = join(tmp, "pkg");
     mkdirSync(pkg, { recursive: true });
     mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
@@ -636,19 +658,19 @@ describe("which checkout is linked", () => {
 
   test("from a worktree: the main checkout, never the worktree", () => {
     expect(checkoutRoot(join(repo, ".worktrees", "wt"))).toBe(repoReal);
-  }, 30000);
+  });
 
   test("from the main checkout: itself", () => {
     expect(checkoutRoot(repo)).toBe(repoReal);
-  }, 30000);
+  });
 
   test("from a tree outside git, such as an installed package: itself", () => {
     expect(checkoutRoot(pkgReal)).toBe(pkgReal);
-  }, 30000);
+  });
 
   test("from a package inside another project's checkout: the package, not the project", () => {
     expect(checkoutRoot(nestedReal)).toBe(nestedReal);
-  }, 30000);
+  });
 
   test("a bare main checkout is refused", () => {
     run("git", ["clone", "-q", "--bare", repo, join(tmp, "bare.git")]);
@@ -663,7 +685,7 @@ describe("which checkout is linked", () => {
     ]);
     const c = capture(() => checkoutRoot(resolve(join(tmp, "bare-wt"))));
     expect(c.ret).toBeNull();
-  }, 30000);
+  });
 });
 
 describe("this script and harnesses.md's Skills folders table agree", () => {
@@ -702,7 +724,7 @@ describe("this script and harnesses.md's Skills folders table agree", () => {
 
   test("harnesses.md has a Skills folders table", () => {
     expect(readSkillsTable()).not.toBe("");
-  }, 30000);
+  });
 
   const tableAtDef = readSkillsTable();
   for (const h of HARNESSES) {
@@ -712,6 +734,6 @@ describe("this script and harnesses.md's Skills folders table agree", () => {
       const scriptSays = skillsFolder(h) ?? "";
       expect(cell).not.toBe("");
       expect(scriptSays).toBe(want);
-    }, 30000);
+    });
   }
 });

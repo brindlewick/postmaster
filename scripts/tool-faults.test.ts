@@ -80,12 +80,12 @@ function plantLegacyTargets(copy: string): void {
   }
 }
 
-const skipPython = run("sh", ["-c", "command -v python3"]).code !== 0;
-if (skipPython) {
-  console.log(
-    "skip folding parity, unicode primitives, stub tracker search, planted-marker search: python3 not on PATH",
-  );
-}
+// The parity comparisons run BASE's pinned script through a python3 that runs;
+// a Command Line Tools stub that cannot run skips instead. skips.toml says so.
+const skipPython =
+  run("python3", ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"])
+    .code !== 0;
+const skipBaseParity = skipPython || process.platform === "darwin";
 
 // #163 deliberately reworded the draft's Notes on main; the pinned BASE still carries
 // the old sentence, so parity remaps BASE's drafts to the new wording before comparing.
@@ -329,6 +329,8 @@ function runPatternParity(tmp: string): void {
 }
 
 // bun:test's types omit the hook timeout, though the runtime honors it.
+// The setup below runs the whole tool many times and takes about 190 s on a quiet machine. Its limit
+// only catches a hang, so it is about ten times that: a loaded machine ran it past 300 s.
 
 beforeAll(() => {
   withTempDir((tmp) => {
@@ -369,6 +371,8 @@ if (a[0] === "api" && a[1] === "graphql") {
     console.log(JSON.stringify({ data: { repository: { viewerPermission: db.access } } }));
   } else if (q.includes("projectsV2")) {
     console.log(JSON.stringify({ data: { repository: { projectsV2: { nodes: [{ id: "PVT_1", number: 1, title: "postmaster", closed: false, url: "https://github.com/users/o/projects/1", owner: { login: "o" } }] } } } }));
+  } else if (q.includes("ProjectV2SingleSelectField")) {
+    console.log(JSON.stringify({ data: { node: { field: { id: "F1", options: [{ id: "o1", name: "Todo" }, { id: "o2", name: "In Progress" }, { id: "o3", name: "Done" }] } } } }));
   } else if (q.includes("issue(number:")) {
     const n = (a.find((x: string) => x.startsWith("number=")) ?? "").split("=")[1] ?? "";
     const i = db.issues[n];
@@ -390,8 +394,6 @@ if (a[0] === "api" && a[1] === "graphql") {
   console.log(JSON.stringify(hits));
 } else if (a[0] === "project" && a[1] === "item-list") {
   console.log('{"items": []}');
-} else if (a[0] === "project" && a[1] === "field-list") {
-  console.log('{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Todo"}, {"id": "o2", "name": "In Progress"}, {"id": "o3", "name": "Done"}]}]}');
 } else if (a[0] === "project" && a[1] === "item-add") {
   if (existsSync(d + "/no-item-add")) { console.error("stub gh: item-add refused"); process.exit(1); }
   console.log('{"id": "PVTI_new"}');
@@ -414,7 +416,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     run("chmod", ["+x", stubGh]);
 
     const db = (access: string, ...rest: string[]): void => {
-      const issues: Record<string, any> = {};
+      const issues: Record<
+        string,
+        { state: string; title: string; body: string; comments: unknown[] }
+      > = {};
       for (let i = 0; i < rest.length; i += 4) {
         issues[rest[i]!] = {
           state: rest[i + 1],
@@ -510,10 +515,16 @@ if (a[0] === "api" && a[1] === "graphql") {
     // casefold (it equates σ/ς/Σ but neither ß/s nor i/İ). Spawning the
     // same binary under the same environment is the only exact port, so
     // this runs grep itself, one marker at a time, matching on status.
-    // The markers parameter exists for the control; production passes
-    // the planted set.
+    // The haystack goes through a file, not a stdin pipe: grep -q exits
+    // on its first match, and feeding stdin to an early-exiting grep
+    // hangs the spawn under load. The markers parameter exists for the
+    // control; production passes the planted set.
     const leaks = (text: string, markers: string[] = PLANTED): string[] => {
-      return markers.filter((p) => run("grep", ["-qiF", "--", p], { input: text }).code === 0);
+      return withTempDir((dir) => {
+        const haystack = join(dir, "haystack.txt");
+        writeFileSync(haystack, text);
+        return markers.filter((p) => run("grep", ["-qiF", "--", p, haystack]).code === 0);
+      }, "tool-faults-leaks-");
     };
 
     const newrun = (project: string, ticket: string, stage: string): string => {
@@ -551,10 +562,12 @@ if (a[0] === "api" && a[1] === "graphql") {
 
     const stateOf = (d: string, id: string): string => {
       try {
-        const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8"));
+        const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8")) as {
+          faults?: Array<{ id?: unknown; state?: unknown }>;
+        };
         return (st.faults || [])
-          .filter((x: any) => x.id === id)
-          .map((x: any) => x.state)
+          .filter((x) => x.id === id)
+          .map((x) => x.state)
           .join(" ");
       } catch {
         return "";
@@ -562,8 +575,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     };
 
     const draftOf = (d: string, id: string): string => {
-      const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8"));
-      const x = (st.faults || []).filter((x: any) => x.id === id).pop();
+      const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8")) as {
+        faults?: Array<{ id?: unknown; draft?: string }>;
+      };
+      const x = (st.faults || []).filter((x) => x.id === id).pop() as { draft: string };
       return join(d, x.draft);
     };
 
@@ -2057,7 +2072,7 @@ if (a[0] === "api" && a[1] === "graphql") {
         );
       }
     }
-    if (!skipPython) {
+    if (!skipBaseParity) {
       const shown = run("git", [
         "-C",
         TOOL,
@@ -2163,9 +2178,13 @@ if (a[0] === "api" && a[1] === "graphql") {
       ];
       const mismatches: string[] = [];
       for (const text of texts) {
-        const want = markers.filter(
-          (p) => run("grep", ["-qiF", "--", p], { input: text }).code === 0,
-        );
+        // File-fed like leaks(): the same binary and matches, without the
+        // stdin pipe an early-exiting grep -q can hang (see leaks()).
+        const want = withTempDir((dir) => {
+          const haystack = join(dir, "haystack.txt");
+          writeFileSync(haystack, text);
+          return markers.filter((p) => run("grep", ["-qiF", "--", p, haystack]).code === 0);
+        }, "tool-faults-oracle-");
         const got = leaks(text, markers);
         if (JSON.stringify(got) !== JSON.stringify(want)) {
           mismatches.push(
@@ -2180,7 +2199,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       );
     }
   });
-}, 300000);
+}, 1800000);
 
 describe("positive controls", () => {
   test("seven fault lines are five faults: one seen three ways, and two naming different scripts kept apart", () => {
@@ -2329,7 +2348,7 @@ describe("negative controls", () => {
   test("casefold folds as Python's str.casefold", () => {
     assertControl("casefold folds as Python's str.casefold");
   });
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "folding parity: BASE and port harvests agree on ids and drafts, \u00df/\u0130/\u03c2 alike",
     () => {
       assertControl(
@@ -2337,7 +2356,7 @@ describe("negative controls", () => {
       );
     },
   );
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "unicode primitives: BASE and port harvests agree, email/digits/\u017f\u00df\u0130 alike",
     () => {
       assertControl(
@@ -2351,7 +2370,7 @@ describe("negative controls", () => {
   test("sameRepo folds remotes as BASE: own-repo waybill public, foreign withheld", () => {
     assertControl("sameRepo folds remotes as BASE: own-repo waybill public, foreign withheld");
   });
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "the stub tracker search folds as BASE's stub does, \u00df/\u0130/\u03c2 alike",
     () => {
       assertControl(
@@ -2359,7 +2378,7 @@ describe("negative controls", () => {
       );
     },
   );
-  test.skipIf(skipPython)(
+  test.skipIf(skipBaseParity)(
     "the planted-marker search matches grep -qiF marker for marker, \u00df/\u0130/\u03c2 alike",
     () => {
       assertControl(

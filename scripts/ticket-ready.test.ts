@@ -124,13 +124,13 @@ describe("the readiness matrix on a local store", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("ready: 1");
     expect(r.out).toContain("turnpikes: style, bug, security");
-  }, 30000);
+  });
 
   test("an unmarked ticket names the missing mark", () => {
     const r = ready([repo, "2"]);
     expect(r.code).toBe(2);
     expect(r.out).toBe("ready label is missing\n");
-  }, 30000);
+  });
 
   test("a one-part ticket names the parts finding", () => {
     const r = ready([repo, "3"]);
@@ -138,14 +138,14 @@ describe("the readiness matrix on a local store", () => {
     expect(r.out).toContain("ticket-parts:");
     expect(r.out).toContain("For the agents");
     expect(r.out.includes("ready label is missing")).toBe(false);
-  }, 30000);
+  });
 
   test("a draft ticket names the draft line once", () => {
     const r = ready([repo, "4"]);
     expect(r.code).toBe(2);
     const drafts = r.out.split("\n").filter((l) => /draft/iu.test(l));
     expect(drafts.length).toBe(1);
-  }, 30000);
+  });
 
   test("a ticket failing several ways names every reason", () => {
     const e = join(tmp, "e.md");
@@ -156,12 +156,12 @@ describe("the readiness matrix on a local store", () => {
     expect(/draft/iu.test(r.out)).toBe(true);
     expect(/parts|for the agents/iu.test(r.out)).toBe(true);
     expect(/ready label is missing/iu.test(r.out)).toBe(true);
-  }, 30000);
+  });
 
   test("an unknown id exits 1", () => {
     const r = ready([repo, "9999"]);
     expect(r.code).toBe(1);
-  }, 30000);
+  });
 
   test("one label holding a comma is not the ready mark", () => {
     const n = local(["create", "Comma label", join(tmp, "a.md")]);
@@ -171,7 +171,7 @@ describe("the readiness matrix on a local store", () => {
     expect(r.out).toContain("ready label is missing");
     local(["label", n, "add", "ready"]);
     expect(ready([repo, n]).code).toBe(0);
-  }, 30000);
+  });
 });
 
 describe("the marking and queue verbs", () => {
@@ -184,7 +184,7 @@ describe("the marking and queue verbs", () => {
     expect(before.out.split("\n").find((l) => l.startsWith("labels:"))).toBe(
       after.out.split("\n").find((l) => l.startsWith("labels:")),
     );
-  }, 30000);
+  });
 
   test("marking a passing ticket labels, notes and queues it", () => {
     const r = ready(["mark", repo, "2"]);
@@ -198,7 +198,7 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain("label add ready");
     expect(ready([repo, "2"]).code).toBe(0);
     expect(ready(["pending", repo]).out.split("\n")).toContain("2");
-  }, 30000);
+  });
 
   test("mark writes a draft body and title through the adapter", () => {
     const n = local(["create", "Old title", join(tmp, "c.md")]);
@@ -214,7 +214,7 @@ describe("the marking and queue verbs", () => {
     expect(ledger).toContain("body updated");
     expect(ledger).toContain("title updated");
     expect(ledger).toContain("label add ready");
-  }, 30000);
+  });
 
   test("marking a commented ticket writes the draft against the stored body", () => {
     const n = local(["create", "Old title", join(tmp, "c.md")]);
@@ -230,7 +230,7 @@ describe("the marking and queue verbs", () => {
     expect(read).toContain("labels: ready");
     expect(read).toContain("## For the agents");
     expect(ready([repo, n]).code).toBe(0);
-  }, 30000);
+  });
 
   test("a genuine Log-shaped tail binds fully: editing it refuses", () => {
     const f = join(tmp, "tailed.md");
@@ -247,7 +247,7 @@ describe("the marking and queue verbs", () => {
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
-  }, 60000);
+  });
 
   test("a post-sign-off turnpikes edit refuses until the ticket is signed off again", () => {
     const n = local(["create", "Bound text", join(tmp, "a.md")]);
@@ -283,7 +283,7 @@ describe("the marking and queue verbs", () => {
     const again = ready([repo, n]);
     expect(again.code).toBe(0);
     expect(again.out).toContain("turnpikes: none");
-  }, 60000);
+  });
 
   test("a malformed marker fails closed instead of reading unbound", () => {
     const n = local(["create", "Ragged marker", join(tmp, "a.md")]);
@@ -303,7 +303,7 @@ describe("the marking and queue verbs", () => {
     expect(ready(["unmark", repo, n]).code).toBe(0);
     expect(ready(["mark", repo, n]).code).toBe(0);
     expect(ready([repo, n]).code).toBe(0);
-  }, 60000);
+  });
 
   test("a comment after sign-off stays ready, and an edit under it still refuses", () => {
     const n = local(["create", "Commented text", join(tmp, "a.md")]);
@@ -326,7 +326,7 @@ describe("the marking and queue verbs", () => {
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
-  }, 60000);
+  });
 
   test("storedMatches compares with the adapter's own base check", () => {
     const n = local(["create", "Match probe", join(tmp, "a.md")]);
@@ -341,7 +341,7 @@ describe("the marking and queue verbs", () => {
     expect(reason).toContain("changed since");
     // The mark-time rollback on a mismatch needs a concurrent edit mid-mark
     // and stays untested; every mark test exercises the match path.
-  }, 30000);
+  });
 
   test("a post-sign-off title edit refuses as well", () => {
     const n = local(["create", "Bound title", join(tmp, "a.md")]);
@@ -350,7 +350,7 @@ describe("the marking and queue verbs", () => {
     const changed = ready([repo, n]);
     expect(changed.code).toBe(2);
     expect(changed.out).toContain("changed since it was signed off");
-  }, 60000);
+  });
 
   test("unmark drops the label and the marker, consume drops only the marker", () => {
     const r = ready(["unmark", repo, "2"]);
@@ -364,14 +364,14 @@ describe("the marking and queue verbs", () => {
     expect(ready(["consume", repo, "2"]).code).toBe(0);
     expect(run(localSh, ["local", repo, "read", "2"]).out).toContain("labels: ready");
     expect(ready(["pending", repo]).out.split("\n").includes("2")).toBe(false);
-  }, 30000);
+  });
 
   test("queue checks before it queues", () => {
     expect(ready(["queue", repo, "3"]).code).toBe(2);
     expect(ready(["pending", repo]).out.split("\n").includes("3")).toBe(false);
     expect(ready(["queue", repo, "1"]).code).toBe(0);
     expect(ready(["pending", repo]).out.split("\n")).toContain("1");
-  }, 30000);
+  });
 });
 
 describe("a tracker of kind other", () => {
@@ -404,7 +404,7 @@ describe("a tracker of kind other", () => {
     ]);
     expect(bad.code).toBe(2);
     expect(bad.out).toContain("ready label is missing");
-  }, 30000);
+  });
 
   test("each --labels flag names one label, and a lone comma flag is refused", () => {
     const a = join(tmp, "a.md");
@@ -419,7 +419,7 @@ describe("a tracker of kind other", () => {
     expect(marked.code).toBe(0);
     const plain = ready([...base, "--labels", "ready"]);
     expect(plain.code).toBe(0);
-  }, 30000);
+  });
 
   test("mark records the marking once the label is applied outside", () => {
     const a = join(tmp, "a.md");
@@ -429,7 +429,7 @@ describe("a tracker of kind other", () => {
     const r = ready(["mark", "--body", a, "--labels", "ready", "--repo", repo, "--id", "EXT-1"]);
     expect(r.code).toBe(0);
     expect(ready(["pending", repo]).out.split("\n")).toContain("EXT-1");
-  }, 30000);
+  });
 
   test("a body changed after marking refuses until marked again", () => {
     const f = join(tmp, "bind-other.md");
@@ -472,7 +472,7 @@ describe("a tracker of kind other", () => {
     const again = ready(checkArgs(f));
     expect(again.code).toBe(0);
     expect(again.out).toContain("turnpikes: none");
-  }, 60000);
+  });
 
   test("a malformed marker on the body form names the external recovery", () => {
     const a = join(tmp, "a.md");
@@ -508,13 +508,13 @@ describe("a tracker of kind other", () => {
     expect(bad.code).toBe(2);
     expect(bad.out).toContain("is malformed");
     expect(bad.out).toContain("through the tracker's own tooling");
-  }, 60000);
+  });
 
   test("the check without a project or id is refused", () => {
     const a = join(tmp, "a.md");
     expect(ready(["--body", a, "--labels", "ready", "--project", repo]).code).toBe(1);
     expect(ready(["--body", a, "--labels", "ready", "--id", "EXT-9"]).code).toBe(1);
-  }, 30000);
+  });
 
   test("the adapter verbs refuse with the body-and-labels form", () => {
     const otherRepo = join(tmp, "other-repo");
@@ -538,7 +538,7 @@ describe("a tracker of kind other", () => {
       "run ticket-ready mark --body <file>",
     );
     expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain("run ticket-ready consume ");
-  }, 60000);
+  });
 });
 
 describe("usage", () => {
@@ -546,7 +546,7 @@ describe("usage", () => {
     expect(ready([]).code).toBe(1);
     expect(ready(["mark", repo]).code).toBe(1);
     expect(ready([repo]).code).toBe(1);
-  }, 30000);
+  });
 
   test("a flag in a value's place is refused", () => {
     const a = join(tmp, "a.md");
@@ -556,7 +556,7 @@ describe("usage", () => {
     const m = ready(["mark", repo, "1", "--title", "--body", a]);
     expect(m.code).toBe(1);
     expect(m.out).toContain("--title needs a value; got --body");
-  }, 30000);
+  });
 });
 
 // --- the same matrix through the github and plane test doubles ---
@@ -580,8 +580,12 @@ case "$1 $2" in
     for a in "$@"; do [ "$prev" = --body-file ] && { f=$a; body=1; }; prev=$a; done
     printf 'call:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/edits.log"
     if [ $body = 1 ]; then cp -- "$f" "$d/edited-body"; fi ;;
-  "label list") echo '[{"name": "ready"}]' ;;
-  "label create") echo '{}' ;;
+  "api "*)
+    case "$*" in
+      "api repos/o/r/labels/"*) echo '{}' ;;
+      "api -X POST repos/o/r/issues/"*) echo '[]' ;;
+      *) echo "stub gh: unexpected REST call: $*" >&2; exit 1 ;;
+    esac ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
 esac
 `;
@@ -660,7 +664,7 @@ describe("the matrix through the github double", () => {
     // semantics: the no-op edit must match.
     expect(ready(["mark", repoGh, "1"], env).code).toBe(0);
     expect(ready([repoGh, "1"], env).code).toBe(0);
-  }, 60000);
+  });
 });
 
 type StubItem = {
@@ -780,7 +784,7 @@ describe("the matrix through the plane double", () => {
     } finally {
       server.stop(true);
     }
-  }, 60000);
+  });
 });
 
 async function readyAsync(args: string[], env?: Record<string, string | undefined>) {
@@ -797,3 +801,442 @@ async function readyAsync(args: string[], env?: Record<string, string | undefine
   ]);
   return { code, out: `${out}${err}` };
 }
+
+// --- the mark through a github double that keeps what is written to it ---
+//
+// STUB_GH above answers its REST label calls without changing anything and
+// never updates issue-<n>.json, so a mark followed by a check passes on the
+// newline bug. This double applies --body-file edits, --title edits and the
+// label calls to issue-<n>.json with python3, so the bytes on disk are what the
+// next read sees. GH_CORRUPT_BODY=1 stores each written body with one
+// trailing space added to its first line, GH_CORRUPT_TITLE=1 stores each
+// written title with one character added, a swap-once/swap-body pair
+// replaces the stored body once right after the next body write,
+// GH_SWAP_ON_READ=N replaces it once from swap-body before serving the
+// Nth issue read, and GH_REFUSE_FROM=N refuses every issue read from
+// the Nth one on.
+
+const STUB_GH_KEEPING = `#!/usr/bin/env bash
+d="$GITHUB_SH_STUB"
+py_json() {
+  python3 - "$@" <<'PYEOF' || return 1
+import json
+import sys
+
+
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def save(path, doc):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(doc, ensure_ascii=False) + "\\n")
+
+
+def ascii_lower(s):
+    return "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in s)
+
+
+op = sys.argv[1]
+path = sys.argv[2]
+doc = load(path)
+issue = doc["data"]["repository"]["issue"]
+if op == "body":
+    with open(sys.argv[3], "rb") as fh:
+        issue["body"] = fh.read().decode("utf-8")
+elif op == "title":
+    issue["title"] = sys.argv[3]
+elif op == "label-add":
+    name = sys.argv[3]
+    nodes = issue["labels"]["nodes"]
+    if not any(ascii_lower(n.get("name", "")) == ascii_lower(name) for n in nodes):
+        nodes.append({"name": name})
+elif op == "label-remove":
+    name = sys.argv[3]
+    issue["labels"]["nodes"] = [
+        n for n in issue["labels"]["nodes"] if ascii_lower(n.get("name", "")) != ascii_lower(name)
+    ]
+save(path, doc)
+PYEOF
+}
+case "$1 $2" in
+  "auth status") exit 0 ;;
+  "api graphql")
+    q="" n=""
+    for a in "$@"; do
+      case "$a" in
+        query=*) q="$a" ;;
+        number=*) n=$(echo "$a" | cut -d= -f2-) ;;
+      esac
+    done
+    case "$q" in
+      *projectsV2*) cat "$d/boards.json" ;;
+      *"issue(number:"*)
+        count_file="$d/read-count"
+        count=0
+        if [ -f "$count_file" ]; then count=$(cat "$count_file"); fi
+        count=$((count+1))
+        echo "$count" > "$count_file"
+        echo "read:$count:$n" >> "$d/reads.log"
+        if [ -n "$GH_REFUSE_FROM" ]; then
+          if [ "$count" -ge "$GH_REFUSE_FROM" ]; then
+            echo "stub gh: rate limit, refusing issue read" >&2
+            exit 1
+          fi
+        fi
+        if [ -n "$GH_SWAP_ON_READ" ] && [ "$count" -eq "$GH_SWAP_ON_READ" ] && [ ! -f "$d/swapped" ]; then
+          py_json body "$d/issue-$n.json" "$d/swap-body" || exit 1
+          touch "$d/swapped"
+        fi
+        if [ -f "$d/issue-$n.json" ]; then cat "$d/issue-$n.json"
+        else echo '{"data": {"repository": {"issue": null}}}'; fi ;;
+      *) echo "stub gh: unexpected query" >&2; exit 1 ;;
+    esac ;;
+  "project item-list") cat "$d/items.json" ;;
+  "issue edit")
+    n="$3"
+    bodyfile=""
+    title=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--body-file" ]; then bodyfile="$a"; fi
+      if [ "$prev" = "--title" ]; then title="$a"; fi
+      prev="$a"
+    done
+    printf 'call:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/edits.log"
+    if [ -n "$bodyfile" ]; then
+      src="$bodyfile"
+      if [ "$GH_CORRUPT_BODY" = "1" ]; then
+        corrupted="$d/corrupted-body-$n"
+        sed '1s/$/ /' "$bodyfile" > "$corrupted"
+        src="$corrupted"
+      fi
+      py_json body "$d/issue-$n.json" "$src" || exit 1
+      if [ -f "$d/swap-once" ]; then
+        py_json body "$d/issue-$n.json" "$d/swap-body" || exit 1
+        rm "$d/swap-once"
+      fi
+    fi
+    if [ -n "$title" ]; then
+      t="$title"
+      if [ "$GH_CORRUPT_TITLE" = "1" ]; then t="$t"X; fi
+      py_json title "$d/issue-$n.json" "$t" || exit 1
+    fi
+    ;;
+  "api "*)
+    case "$*" in
+      "api repos/o/r/labels/"*) echo '{}' ;;
+      "api -X POST repos/o/r/issues/"*)
+        n=""
+        name=""
+        for a in "$@"; do
+          case "$a" in
+            repos/o/r/issues/*/labels) n=$(echo "$a" | cut -d/ -f5) ;;
+            labels[]=*) name=$(echo "$a" | cut -d= -f2-) ;;
+          esac
+        done
+        py_json label-add "$d/issue-$n.json" "$name" || exit 1
+        echo '[]' ;;
+      "api -X DELETE repos/o/r/issues/"*)
+        n=""
+        name=""
+        for a in "$@"; do
+          case "$a" in
+            repos/o/r/issues/*/labels/*) n=$(echo "$a" | cut -d/ -f5); name=$(echo "$a" | cut -d/ -f7) ;;
+          esac
+        done
+        py_json label-remove "$d/issue-$n.json" "$name" || exit 1
+        echo '{}' ;;
+      *) echo "stub gh: unexpected REST call: $*" >&2; exit 1 ;;
+    esac ;;
+  *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
+esac
+`;
+
+function setupKeepingDouble(name: string): {
+  dir: string;
+  stub: string;
+  repoGh: string;
+  cfg: string;
+  env: Record<string, string | undefined>;
+} {
+  const dir = join(tmp, name);
+  const bin = join(dir, "bin");
+  const stub = join(dir, "stub");
+  const repoGh = join(dir, "repo");
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(stub, { recursive: true });
+  mkdirSync(repoGh, { recursive: true });
+  writeFileSync(join(bin, "gh"), STUB_GH_KEEPING);
+  chmodSync(join(bin, "gh"), 0o755);
+  if (run("git", ["init", "-q", repoGh]).code !== 0) throw new Error("git init failed");
+  if (
+    run("git", ["-C", repoGh, "remote", "add", "origin", "https://github.com/o/r.git"]).code !== 0
+  )
+    throw new Error("git remote add failed");
+  const cfg = join(dir, "config.toml");
+  writeFileSync(cfg, '[tracker]\nkind = "github"\n');
+  writeFileSync(
+    join(stub, "boards.json"),
+    '{"data": {"repository": {"projectsV2": {"nodes": [{"id": "PVT_1", "number": 1, "title": "r", "closed": false, "url": "https://github.com/users/o/projects/1", "owner": {"login": "o"}}]}}}}\n',
+  );
+  writeFileSync(join(stub, "items.json"), '{"items": []}\n');
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
+    POSTMASTER_CONFIG: cfg,
+    GITHUB_SH_STUB: stub,
+  };
+  return { dir, stub, repoGh, cfg, env };
+}
+
+function keepingIssue(
+  stub: string,
+  n: number,
+  body: string,
+  title: string,
+  labels: string[],
+): void {
+  const obj = {
+    data: {
+      repository: {
+        issue: {
+          number: n,
+          title,
+          body,
+          state: "OPEN",
+          stateReason: null,
+          url: `https://github.com/o/r/issues/${n}`,
+          createdAt: "2026-10-03T00:00:00Z",
+          labels: { nodes: labels.map((name) => ({ name })) },
+          comments: { nodes: [] },
+        },
+      },
+    },
+  };
+  writeFileSync(join(stub, `issue-${n}.json`), `${JSON.stringify(obj)}\n`);
+}
+
+function storedBody(stub: string, n: number): string {
+  const raw = readFileSync(join(stub, `issue-${n}.json`), "utf8");
+  const obj = JSON.parse(raw) as { data: { repository: { issue: { body: string } } } };
+  return obj.data.repository.issue.body;
+}
+
+function storedLabels(stub: string, n: number): string[] {
+  const raw = readFileSync(join(stub, `issue-${n}.json`), "utf8");
+  const obj = JSON.parse(raw) as {
+    data: { repository: { issue: { labels: { nodes: Array<{ name: string }> } } } };
+  };
+  return obj.data.repository.issue.labels.nodes.map((x) => x.name);
+}
+
+function hasMarker(repoGh: string, n: number | string): boolean {
+  try {
+    readFileSync(join(repoGh, ".postmaster", "runs", "postmaster", "ready", `${n}.ready`), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bodyWrites(stub: string, n: number): number {
+  let log = "";
+  try {
+    log = readFileSync(join(stub, "edits.log"), "utf8");
+  } catch {
+    return 0;
+  }
+  const needle1 = `[${n}]`;
+  const needle2 = "[--body-file]";
+  return log.split("\n").filter((l) => l.includes(needle1) && l.includes(needle2)).length;
+}
+
+function readCount(stub: string): number {
+  try {
+    return Number(readFileSync(join(stub, "read-count"), "utf8").trim() || "0");
+  } catch {
+    return 0;
+  }
+}
+
+describe("the mark through a github double that keeps writes (C1-C4, C7-C9)", () => {
+  test("C1+C2: marking adds no newline, and the check and queue pass right after", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-c1");
+    const draftFile = join(tmp, "gh-keeping-c1-draft.md");
+    writeFileSync(draftFile, TWO_PART);
+    keepingIssue(stub, 10, TWO_PART, "Ticket 10", []);
+    keepingIssue(stub, 11, TWO_PART.slice(0, -1), "Ticket 11", []);
+    keepingIssue(stub, 12, ONE_PART, "Ticket 12", []);
+    const beforeA = storedBody(stub, 10);
+    const beforeB = storedBody(stub, 11);
+    const ma = ready(["mark", repoGh, "10"], env);
+    expect(ma.code).toBe(0);
+    expect(storedBody(stub, 10)).toBe(beforeA);
+    const mb = ready(["mark", repoGh, "11", "--body", draftFile, "--title", "Ticket 11"], env);
+    expect(mb.code).toBe(0);
+    expect(storedBody(stub, 11)).toBe(beforeB);
+    const mc = ready(["mark", repoGh, "12", "--body", draftFile, "--title", "Ticket 12"], env);
+    expect(mc.code).toBe(0);
+    expect(storedBody(stub, 12)).toBe(TWO_PART);
+    expect(bodyWrites(stub, 12)).toBe(1);
+    expect(bodyWrites(stub, 10)).toBe(0);
+    expect(bodyWrites(stub, 11)).toBe(0);
+    const beforeA2 = storedBody(stub, 10);
+    const ma2 = ready(["mark", repoGh, "10"], env);
+    expect(ma2.code).toBe(0);
+    expect(storedBody(stub, 10)).toBe(beforeA2);
+    for (const n of ["10", "11", "12"]) {
+      const chk = ready([repoGh, n], env);
+      expect(chk.code).toBe(0);
+      expect(chk.out).toContain(`ready: ${n}`);
+      const q = ready(["queue", repoGh, n], env);
+      expect(q.code).toBe(0);
+    }
+  }, 120000);
+
+  test("C3: one added newline, or a changed title, still refuses", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-c3");
+    const draftFile = join(tmp, "gh-keeping-c3-draft.md");
+    writeFileSync(draftFile, TWO_PART);
+    keepingIssue(stub, 13, ONE_PART, "Ticket 13", []);
+    keepingIssue(stub, 14, ONE_PART, "Ticket 14", []);
+    expect(
+      ready(["mark", repoGh, "13", "--body", draftFile, "--title", "Ticket 13"], env).code,
+    ).toBe(0);
+    expect(
+      ready(["mark", repoGh, "14", "--body", draftFile, "--title", "Ticket 14"], env).code,
+    ).toBe(0);
+    expect(ready([repoGh, "13"], env).code).toBe(0);
+    const raw13 = readFileSync(join(stub, "issue-13.json"), "utf8");
+    const obj13 = JSON.parse(raw13) as { data: { repository: { issue: { body: string } } } };
+    obj13.data.repository.issue.body = `${obj13.data.repository.issue.body}\n`;
+    writeFileSync(join(stub, "issue-13.json"), `${JSON.stringify(obj13)}\n`);
+    const changed = ready([repoGh, "13"], env);
+    expect(changed.code).toBe(2);
+    expect(changed.out).toContain("changed since it was signed off");
+    const raw14 = readFileSync(join(stub, "issue-14.json"), "utf8");
+    const obj14 = JSON.parse(raw14) as { data: { repository: { issue: { title: string } } } };
+    obj14.data.repository.issue.title = `${obj14.data.repository.issue.title} revised`;
+    writeFileSync(join(stub, "issue-14.json"), `${JSON.stringify(obj14)}\n`);
+    const changedT = ready([repoGh, "14"], env);
+    expect(changedT.code).toBe(2);
+    expect(changedT.out).toContain("changed since it was signed off");
+  }, 120000);
+
+  test("C4: a concurrent edit during the mark undoes it", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-c4");
+    const draftFile = join(tmp, "gh-keeping-c4-draft.md");
+    writeFileSync(draftFile, TWO_PART);
+    keepingIssue(stub, 15, ONE_PART, "Ticket 15", []);
+    writeFileSync(join(stub, "swap-once"), "");
+    writeFileSync(
+      join(stub, "swap-body"),
+      TWO_PART.replace("## Turnpikes\n\ndefault", "## Turnpikes\n\nnone"),
+    );
+    const m = ready(["mark", repoGh, "15", "--body", draftFile, "--title", "Ticket 15"], env);
+    expect(m.code).toBe(1);
+    expect(m.out).toContain("changed while it was being marked");
+    expect(storedLabels(stub, 15).some((l) => l.toLowerCase() === "ready")).toBe(false);
+    expect(hasMarker(repoGh, 15)).toBe(false);
+  }, 60000);
+
+  test("C7+C9: a stored body or title differing by one character refuses with the place", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-c7");
+    const draftFile = join(tmp, "gh-keeping-c7-draft.md");
+    writeFileSync(draftFile, TWO_PART);
+    keepingIssue(stub, 16, ONE_PART, "Ticket 16", []);
+    keepingIssue(stub, 17, ONE_PART, "Old title", []);
+    const envBody = { ...env, GH_CORRUPT_BODY: "1" };
+    const mb = ready(["mark", repoGh, "16", "--body", draftFile, "--title", "Ticket 16"], envBody);
+    expect(mb.code).not.toBe(0);
+    expect(storedLabels(stub, 16).some((l) => l.toLowerCase() === "ready")).toBe(false);
+    expect(hasMarker(repoGh, 16)).toBe(false);
+    expect(mb.out.toLowerCase()).toContain("body");
+    expect(mb.out.toLowerCase()).toContain("line");
+    const envTitle = { ...env, GH_CORRUPT_TITLE: "1" };
+    const mt = ready(["mark", repoGh, "17", "--body", draftFile, "--title", "New title"], envTitle);
+    expect(mt.code).not.toBe(0);
+    expect(storedLabels(stub, 17).some((l) => l.toLowerCase() === "ready")).toBe(false);
+    expect(hasMarker(repoGh, 17)).toBe(false);
+    expect(mt.out.toLowerCase()).toContain("title");
+  }, 120000);
+
+  test("C8: a refused read leaves both the label and the marker, or neither", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-c8");
+    const draftFile = join(tmp, "gh-keeping-c8-draft.md");
+    writeFileSync(draftFile, TWO_PART);
+    for (let n = 20; n < 40; n++) keepingIssue(stub, n, ONE_PART, "Fresh title", []);
+    try {
+      rmSync(join(stub, "read-count"), { force: true });
+    } catch {
+      // Fresh double: nothing to reset.
+    }
+    try {
+      rmSync(join(stub, "reads.log"), { force: true });
+    } catch {
+      // Fresh double: nothing to reset.
+    }
+    const ok = ready(["mark", repoGh, "20", "--body", draftFile, "--title", "Fresh title"], env);
+    expect(ok.code).toBe(0);
+    const reads = readCount(stub);
+    expect(reads).toBeGreaterThan(0);
+    for (let n = 1; n <= reads + 1; n++) {
+      const ticket = 20 + n;
+      try {
+        rmSync(join(stub, "read-count"), { force: true });
+      } catch {
+        // Reset between marks.
+      }
+      const envN = { ...env, GH_REFUSE_FROM: String(n) };
+      const m = ready(
+        ["mark", repoGh, String(ticket), "--body", draftFile, "--title", "Fresh title"],
+        envN,
+      );
+      const labelled = storedLabels(stub, ticket).some((l) => l.toLowerCase() === "ready");
+      const marked = hasMarker(repoGh, ticket);
+      expect(labelled).toBe(marked);
+      if (m.code === 0) {
+        expect(labelled).toBe(true);
+        expect(storedBody(stub, ticket)).toBe(TWO_PART);
+      } else {
+        expect(labelled).toBe(false);
+        expect(m.out.toLowerCase()).toContain("could not");
+        expect(m.out.toLowerCase()).toContain("read");
+      }
+    }
+  }, 180000);
+
+  test("the keeping double marks with jq shadowed by a failing one", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-nojq");
+    const fakeBin = join(tmp, "gh-keeping-nojq-fakebin");
+    mkdirSync(fakeBin, { recursive: true });
+    const fakeJq = join(fakeBin, "jq");
+    writeFileSync(fakeJq, '#!/usr/bin/env bash\necho "jq: command not found" >&2\nexit 127\n');
+    chmodSync(fakeJq, 0o755);
+    keepingIssue(stub, 50, TWO_PART, "Ticket 50", []);
+    const envNoJq = { ...env, PATH: `${fakeBin}:${env.PATH ?? ""}` };
+    const m = ready(["mark", repoGh, "50"], envNoJq);
+    expect(m.code).toBe(0);
+    const chk = ready([repoGh, "50"], envNoJq);
+    expect(chk.code).toBe(0);
+    expect(chk.out).toContain("ready: 50");
+  }, 60000);
+
+  test("a no-write concurrent edit refuses with the differing line", () => {
+    const { stub, repoGh, env } = setupKeepingDouble("gh-keeping-nowrite");
+    keepingIssue(stub, 51, TWO_PART, "Ticket 51", []);
+    writeFileSync(
+      join(stub, "swap-body"),
+      TWO_PART.replace("## Problem / feature", "## Problem / FEATURE"),
+    );
+    const envSwap = { ...env, GH_SWAP_ON_READ: "3" };
+    const m = ready(["mark", repoGh, "51"], envSwap);
+    expect(m.code).toBe(1);
+    expect(m.out).toContain("changed while it was being marked");
+    expect(m.out).toContain("the body differs at line 1");
+    expect(storedLabels(stub, 51).some((l) => l.toLowerCase() === "ready")).toBe(false);
+    expect(hasMarker(repoGh, 51)).toBe(false);
+  }, 60000);
+});

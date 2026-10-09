@@ -9,9 +9,6 @@ import { join } from "node:path";
 import { countdown } from "./wait-for-markers";
 
 const isRoot = process.getuid?.() === 0;
-if (isRoot) {
-  console.log("skip a reader that cannot see its own planted marker: root writes anywhere");
-}
 
 const wrapper = join(import.meta.dir, "run");
 
@@ -53,7 +50,7 @@ describe("positive controls", () => {
     expect(rc).toBe(0);
     expect(out.trim()).toBe("all 2 markers present");
     expect(took).toBeLessThanOrEqual(1);
-  }, 10000);
+  });
 
   test("a marker that lands during the wait is collected by the timeout", () => {
     // The writer is detached: a synchronous spawn waits for its background jobs,
@@ -68,14 +65,14 @@ describe("positive controls", () => {
     const { out, rc } = invoke(d, "review-r2-*.done", "1", "3");
     expect(rc).toBe(0);
     expect(out.trim()).toBe("all 1 markers present");
-  }, 10000);
+  });
 
   test("a count with a leading zero is decimal: 010 is ten, which nine markers do not meet", () => {
     for (let i = 1; i <= 9; i++) writeFileSync(join(d, `review-r5-bug-${i}.done`), "");
     const { out, rc } = invoke(d, "review-r5-*.done", "010", "1");
     expect(rc).toBe(3);
     expect(out.includes("9 of 10 markers")).toBe(true);
-  }, 10000);
+  });
 });
 
 describe("negative controls", () => {
@@ -89,13 +86,13 @@ describe("negative controls", () => {
     );
     expect(out.includes(`present: ${join(d, "review-r3-bug-one.done")}`)).toBe(true);
     expect(out.includes("review-r4")).toBe(false);
-  }, 10000);
+  });
 
   test("the timeout is kept to the second, not the next 20-second look", () => {
     const { rc, took } = invoke(d, "review-r3-*.done", "2", "1");
     expect(rc).toBe(3);
     expect(took).toBeLessThanOrEqual(3);
-  }, 10000);
+  });
 
   test("a clock that jumps ahead does not end the wait early", () => {
     // The timeout counts slept seconds through the countdown alone: run it with
@@ -115,43 +112,39 @@ describe("negative controls", () => {
     expect(verdict).toBe("timeout");
     expect(naps).toEqual([20000, 15000]);
     expect(fakeNow).toBe(7200000);
-  }, 10000);
+  });
 
   test("a count that is not a number is refused, not read as every marker in", () => {
     const { out, rc } = invoke(d, "review-r1-*.done", "two", "5");
     expect(rc).toBe(1);
     expect(out.includes("markers present")).toBe(false);
-  }, 10000);
+  });
 
   test("a timeout that is not a number is refused", () => {
     const { rc } = invoke(d, "review-r1-*.done", "2", "soon");
     expect(rc).toBe(1);
-  }, 10000);
+  });
 
   test("a timeout past 9 digits is refused, never wrapped round to a past deadline", () => {
     const { out, rc } = invoke(d, "review-r1-*.done", "2", "9999999999999999999");
     expect(rc).toBe(1);
     expect(out.includes("more than 9 digits")).toBe(true);
-  }, 10000);
+  });
 
   test("a directory that does not exist is refused", () => {
     const { out, rc } = invoke(join(tmp, "nowhere"), "review-r1-*.done", "2", "1");
     expect(rc).toBe(1);
     expect(out.includes("no such dir")).toBe(true);
-  }, 10000);
+  });
 
-  test.skipIf(isRoot)(
-    "a reader that cannot see its own planted marker stops the wait",
-    () => {
-      chmodSync(d, 0o555);
-      try {
-        const { out, rc } = invoke(d, "review-r1-*.done", "2", "1");
-        expect(rc).toBe(1);
-        expect(out.includes("reader failed its control (positive=0")).toBe(true);
-      } finally {
-        chmodSync(d, 0o755);
-      }
-    },
-    10000,
-  );
+  test.skipIf(isRoot)("a reader that cannot see its own planted marker stops the wait", () => {
+    chmodSync(d, 0o555);
+    try {
+      const { out, rc } = invoke(d, "review-r1-*.done", "2", "1");
+      expect(rc).toBe(1);
+      expect(out.includes("reader failed its control (positive=0")).toBe(true);
+    } finally {
+      chmodSync(d, 0o755);
+    }
+  });
 });

@@ -198,7 +198,7 @@ beforeAll(() => {
   copyFileSync(join(HERE, "project-settings.ts"), join(tmp, "bin", "project-settings.ts"));
   copyFileSync(join(HERE, "tracker-kind.ts"), join(tmp, "bin", "tracker-kind.ts"));
   mkdirSync(join(tmp, "bin", "lib"), { recursive: true });
-  for (const f of ["paths.ts", "proc.ts", "data.ts", "text.ts"]) {
+  for (const f of ["paths.ts", "proc.ts", "data.ts", "text.ts", "effective-config.ts"]) {
     copyFileSync(join(HERE, "lib", f), join(tmp, "bin", "lib", f));
   }
   for (const name of ["github", "local"]) {
@@ -1398,5 +1398,31 @@ describe("--has-journey answers whether the ticket has a User journey", () => {
       K,
     );
     expectCheck(2, "problem / feature");
+  });
+});
+
+describe("--splice --out", () => {
+  test("the spliced body goes to the file, and stdout stays empty", () => {
+    const stdoutForm = sameSplice(
+      `${[P, A, K].join("\n\n")}\n\n${N}\n`,
+      `${D}\n`,
+      `${[P, A, D, K].join("\n\n")}\n\n${N}\n`,
+    );
+    const outPath = join(tmp, "spliced-out.md");
+    const r = run(
+      SELF,
+      [
+        "ticket-check",
+        "--splice",
+        join(tmp, "base.md"),
+        join(tmp, "sections.md"),
+        "--out",
+        outPath,
+      ],
+      { env: process.env as Record<string, string> },
+    );
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("");
+    expect(readFileSync(outPath, "utf8")).toBe(stdoutForm.out);
   });
 });

@@ -1,0 +1,8 @@
+folders 70; done 50; abandoned 10; no record 10
+done, all: n=50 min=19 median=73.5 mean=92 max=373
+done, a MiMo Code lane, written before 2026-10-04: n=27 min=57 median=101 mean=127 max=373
+done, a MiMo Code lane, written 2026-10-04 or later: n=13 min=28 median=64 mean=62 max=102
+done, both workhorses Codex (luna+luna2), written 2026-10-04 17:26 or later: n=7 min=19 median=35 mean=36 max=54
+done, no lanes (single-thread): n=3 min=28 median=36 mean=35 max=41
+abandoned: n=10 min=3 median=37.0 mean=66 max=371
+negative control: done on lane set zzqx: n=0

@@ -16,7 +16,7 @@
 //   exit 1  usage, a tool not on PATH, a refusal from new, or input that is not what it says
 //   exit 2  score, hidden: a check failed
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -26,17 +26,25 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, machine, release, tmpdir, type as osType } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { runMode } from "./lib/run-mode.ts";
 import { effortsLine } from "./run-meta.ts";
+import {
+  laneNamesFromBranches,
+  laneNamesFromWorkhorses,
+  ticketIdFromWaybill,
+} from "./fixture-lanes.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
+import { reachActions } from "./reach.ts";
 import { computeTimes, fmt, parseTs } from "./run-times.ts";
 import {
   DOT_ALL,
@@ -81,6 +89,7 @@ const _CHECKS = [
   "efforts",
   "ship-card",
 ];
+const REACH_READERS = new Set(["codex", "claude", "muse", "mimo", "pi"]);
 
 function usage(): never {
   die(
@@ -446,16 +455,40 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
   }
   const legs = legsOf(dispatch, manifest);
   const results: CheckResult[] = [
-    { name: "hidden-tests", ...checkHidden(dispatch, repo, app) },
+    { name: "hidden-tests", ...checkHidden(dispatch, repo, app, main) },
     { name: "gate", ...checkGate(app, repo, main) },
     { name: "stages", ...checkStages(dispatch), out: "" },
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
     { name: "handoffs", ...checkHandoffs(dispatch, legs), out: "" },
     { name: "run.json", ...checkRunJson(dispatch), out: "" },
     { name: "premises-order", ...checkPremisesOrder(dispatch), out: "" },
+    { name: "mode", ...checkMode(dispatch, repo), out: "" },
     { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
+  // The reach item follows the run's recorded commit, not its pin directory:
+  // aftercare may release the pin once the run is done, and the score must
+  // not pass by leaving the item out. No recorded commit (a run from before
+  // pins) scores no item, as before; an unreadable commit fails the score.
+  const postmaster = meta?.postmaster;
+  const recorded =
+    typeof postmaster === "object" && postmaster !== null && !Array.isArray(postmaster)
+      ? (postmaster as Record<string, unknown>).commit
+      : undefined;
+  if (typeof recorded === "string" && recorded) {
+    const known = sh(["git", "-C", TOOL, "rev-parse", "--verify", "-q", `${recorded}^{commit}`]);
+    if (known.code !== 0 || !(known.out ?? "").trim()) {
+      rmSync(scratch, { recursive: true, force: true });
+      return {
+        code: 1,
+        out: `fixture: cannot tell whether ${recorded.slice(0, 12)} holds the reach check: git cannot read that commit\n`,
+      };
+    }
+    const blob = sh(["git", "-C", TOOL, "cat-file", "-e", `${recorded}:scripts/reach.ts`]);
+    if (blob.code === 0) {
+      results.push({ name: "reach", ...checkReach(dispatch), out: "" });
+    }
+  }
   rmSync(scratch, { recursive: true, force: true });
   const scored = report(results);
   return { code: scored.code, out: `${platformLine()}\n${scored.out}${timeReport(dispatch)}` };
@@ -528,10 +561,61 @@ export function legsOf(dispatch: string, manifest: Record<string, unknown> | nul
   return Array.from({ length: max }, (_, i) => i + 1);
 }
 
+/** Scoring runs the example app's own checks: its hidden tests on main, on each lane's branch, and
+ * its gate from a clean checkout. That is about 17 seconds, and the same for every record of one
+ * app. A caller that scores many records of one app (the tests) sets POSTMASTER_FIXTURE_APP_CACHE
+ * to a directory it owns, and each result is kept there under a key made from everything it
+ * depends on, so the next record of the same app reads it. Nothing else sets it; with it unset
+ * every score runs everything. */
+export function appCached<T>(key: string, compute: () => T): T {
+  const dir = process.env.POSTMASTER_FIXTURE_APP_CACHE;
+  if (!dir) return compute();
+  const file = join(dir, `${createHash("sha256").update(key).digest("hex")}.json`);
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch {
+    // Not kept yet, or not readable: compute it.
+  }
+  const value = compute();
+  try {
+    mkdirSync(dir, { recursive: true });
+    const part = `${file}.${process.pid}.part`;
+    writeFileSync(part, JSON.stringify(value));
+    renameSync(part, file);
+  } catch {
+    // A cache that cannot be written only costs time.
+  }
+  return value;
+}
+
+/** What the lanes' scores depend on: the ticket, main, every local branch, the run's manifest and
+ * its waybill. */
+function laneKey(dispatch: string, repo: string, ticket: string, main: string): string {
+  const branches = sh([
+    "git",
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname) %(objectname)",
+    "refs/heads",
+  ]);
+  const read = (name: string): string => {
+    try {
+      return readFileSync(join(dispatch, name), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  return ["lanes", ticket, main, branches.out ?? "", read("manifest.json"), read("brief.md")].join(
+    "\0",
+  );
+}
+
 function checkHidden(
   dispatch: string,
   repo: string,
   app: string,
+  main: string,
 ): { ok: boolean; detail: string; out: string } {
   const brief = join(dispatch, "brief.md");
   const text = existsSync(brief) ? squash(readFileSync(brief, "utf8")) : "";
@@ -552,9 +636,12 @@ function checkHidden(
       out: "",
     };
   }
-  const h = hidden(found[0]!, app);
-  const mainDetail = `${found[0]}, from the waybill: ${h.detail} on main`;
-  const lanes = laneScores(dispatch, repo, found[0]!);
+  const ticket = found[0]!;
+  const h = appCached(`hidden\0${ticket}\0${main}`, () => hidden(ticket, app));
+  const mainDetail = `${ticket}, from the waybill: ${h.detail} on main`;
+  const lanes = appCached(laneKey(dispatch, repo, ticket, main), () =>
+    laneScores(dispatch, repo, ticket),
+  );
   return {
     ok: h.passed,
     detail: lanes ? `${mainDetail}; ${lanes}` : mainDetail,
@@ -563,6 +650,14 @@ function checkHidden(
 }
 
 function checkGate(
+  app: string,
+  repo: string,
+  branch: string,
+): { ok: boolean; detail: string; out: string } {
+  return appCached(`gate\0${branch}`, () => runGate(app, repo, branch));
+}
+
+function runGate(
   app: string,
   repo: string,
   branch: string,
@@ -611,6 +706,11 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
     return words.length > 1 && words[1] === "review";
   });
   expected = expected.filter((s) => s !== "review" || hasReview);
+  // A single-thread run never enters workhorses-running: the coachman writes the change
+  // itself in the synthesis stage, so that stage is not part of its schedule (D5).
+  if (runMode(dispatch) === "single-thread") {
+    expected = expected.filter((s) => s !== "workhorses-running");
+  }
   const events = readActions(dispatch);
   if (events === null) return { ok: false, detail: "no actions.jsonl" };
   const entered = events.filter((e) => e.action === "stage").map((e) => e.target);
@@ -678,6 +778,83 @@ export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: str
   if (dispatchIndex < 0)
     return { ok: true, detail: "premises action recorded and no workhorse dispatched" };
   return { ok: true, detail: "premises action precedes the first workhorse dispatch" };
+}
+
+export { runMode };
+
+/** The run's ticket id, from its waybill's first line, else the dispatch directory's name. */
+function waybillTicket(dispatch: string): string {
+  try {
+    const id = ticketIdFromWaybill(readFileSync(join(dispatch, "brief.md"), "utf8"));
+    if (id !== null) return id;
+  } catch {
+    /* fall through */
+  }
+  return basename(dispatch);
+}
+
+/** The run kept its mode: no workhorse dispatch and no wb/ branch in a single-thread run; one
+ * coachman dispatch and one wb/<ticket>-<lane> branch per configured workhorse in a synthesis
+ * run. A record with no mode reads as synthesis (D14). */
+export function checkMode(dispatch: string, repo: string): { ok: boolean; detail: string } {
+  const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
+  if (!meta) return { ok: true, detail: "skipped: no run.json" };
+  const raw = meta.mode;
+  const mode = raw === undefined ? "synthesis" : raw;
+  if (mode !== "synthesis" && mode !== "single-thread") {
+    return {
+      ok: false,
+      detail: `run.json records mode ${String(mode)}, which is neither synthesis nor single-thread`,
+    };
+  }
+  const events = readActions(dispatch);
+  if (events === null) return { ok: false, detail: "no actions.jsonl" };
+  const dispatched = events.filter(
+    (e) => e.action === "dispatch" && e.actor === "coachman" && typeof e.target === "string",
+  );
+  const listed = sh(["git", "-C", repo, "for-each-ref", "--format=%(refname)", "refs/heads/wb/"]);
+  const refs = listed.code === 0 ? listed.out.split(/\r?\n/u).filter((r) => r !== "") : [];
+  const ticket = waybillTicket(dispatch);
+  const branched = laneNamesFromBranches(refs, ticket);
+  if (mode === "single-thread") {
+    if (dispatched.length > 0) {
+      return {
+        ok: false,
+        detail: `single-thread run logged a workhorse dispatch: ${dispatched
+          .map((e) => String(e.target))
+          .join(", ")}`,
+      };
+    }
+    if (branched.length > 0) {
+      return {
+        ok: false,
+        detail: `single-thread run has workhorse branches: ${branched.join(", ")}`,
+      };
+    }
+    return { ok: true, detail: "single-thread: no workhorse dispatch, no workhorse branch" };
+  }
+  const config = meta.config as Record<string, unknown> | undefined;
+  const team = config?.team as Record<string, unknown> | undefined;
+  let lanes = Array.isArray(team?.workhorses) ? team.workhorses.map(String) : [];
+  if (lanes.length === 0) {
+    try {
+      const brief = readFileSync(join(dispatch, "brief.md"), "utf8");
+      lanes = laneNamesFromWorkhorses(brief);
+    } catch {
+      lanes = [];
+    }
+  }
+  if (lanes.length === 0) return { ok: false, detail: "synthesis run names no workhorses" };
+  const targets = new Set(dispatched.map((e) => String(e.target)));
+  const undispatched = lanes.filter((lane) => !targets.has(lane));
+  if (undispatched.length > 0) {
+    return { ok: false, detail: `synthesis run never dispatched: ${undispatched.join(", ")}` };
+  }
+  const unbranched = lanes.filter((lane) => !branched.includes(lane));
+  if (unbranched.length > 0) {
+    return { ok: false, detail: `synthesis run has no branch for: ${unbranched.join(", ")}` };
+  }
+  return { ok: true, detail: `synthesis: dispatched and branched ${lanes.join(", ")}` };
 }
 
 function readActions(dispatch: string): Array<Record<string, unknown>> | null {
@@ -819,6 +996,65 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
   }
   if (!seen) return { ok: false, detail: "no Team workhorses or coachman entries" };
   return { ok: true, detail: "waybill Team efforts match run.json" };
+}
+
+function checkReach(dispatch: string): { ok: boolean; detail: string } {
+  let actions: ReturnType<typeof reachActions>;
+  try {
+    actions = reachActions(dispatch);
+  } catch (e) {
+    return { ok: false, detail: `cannot read reach actions: ${String(e)}` };
+  }
+  const points = actions.filter(({ event }) => event.kind === "point");
+  const pointNames = new Set(points.map(({ event }) => event.point));
+  // A single-thread run never runs "Check lane reach before synthesis", so the
+  // workhorses point is expected only of a synthesis run; a record with no mode
+  // reads as synthesis, as the mode item does.
+  const expected = new Set(["card"]);
+  const single = runMode(dispatch) === "single-thread";
+  if (!single) expected.add("workhorses");
+  const logs = join(dispatch, "logs");
+  try {
+    for (const name of readdirSync(logs)) {
+      const match = /^review-r([1-9][0-9]*)\.json$/u.exec(name);
+      if (match) expected.add(`r${match[1]}`);
+    }
+  } catch (e) {
+    return { ok: false, detail: `cannot list review records: ${String(e)}` };
+  }
+  const missing = [...expected].filter((point) => !pointNames.has(point));
+  if (missing.length > 0) return { ok: false, detail: `not checked: ${missing.join(", ")}` };
+
+  const findings = actions.filter(({ event }) => event.kind === "finding" || event.kind === "void");
+  if (findings.length > 0) {
+    const first = findings[0]!.event;
+    return {
+      ok: false,
+      detail: `reach found at ${first.point}: ${first.path ?? first.reason ?? first.kind}`,
+    };
+  }
+  for (const { event } of points) {
+    if (event.result === "finding") return { ok: false, detail: `reach found at ${event.point}` };
+    const lanes = Array.isArray(event.lanes) ? event.lanes : [];
+    for (const laneValue of lanes) {
+      const lane =
+        typeof laneValue === "object" && laneValue !== null
+          ? (laneValue as Record<string, unknown>)
+          : {};
+      if (lane.status === "not checked" && REACH_READERS.has(String(lane.harness ?? ""))) {
+        return {
+          ok: false,
+          detail: `not checked: ${String(lane.lane ?? "lane")} at ${event.point}`,
+        };
+      }
+    }
+  }
+  return {
+    ok: true,
+    detail: single
+      ? "review rounds and card checked with no reach"
+      : "workhorses, review rounds and card checked with no reach",
+  };
 }
 
 function checkCard(dispatch: string): { ok: boolean; detail: string } {

@@ -1,4 +1,4 @@
-// Tests beside scripts/runs-watch.ts, moved from its --self-test on #109: 80 controls.
+// Tests beside scripts/runs-watch.ts, moved from its --self-test on #109: 97 controls.
 // POSTMASTER_CONFIG is pointed at a 1s-poll config for the run and restored in afterAll.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
@@ -19,8 +19,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { recordAcceptance } from "./lib/effective-config.ts";
 import { run } from "./lib/proc.ts";
-import { activeRunCount, pendingReadyTickets, runCapacity, streamLines } from "./runs-watch.ts";
+import {
+  activeRunCount,
+  pendingReadyTickets,
+  runCapacity,
+  streamLines,
+  watchConfig,
+} from "./runs-watch.ts";
 
 const self = join(import.meta.dir, "run");
 const savedConfig = process.env.POSTMASTER_CONFIG;
@@ -149,7 +156,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
       expect(rc).toBe(0);
       expect(out).toContain(`needs ${name} ${want}`);
       expect(out).toContain("NEXT");
-    }, 30000);
+    });
   }
 
   test("NEXT INSPECT names inspect", () => {
@@ -160,7 +167,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
     const { rc, out } = watch(root);
     expect(rc).toBe(0);
     expect(out).toContain("needs inspect INSPECT");
-  }, 30000);
+  });
 
   test("a run that becomes actionable mid-wait is named", () => {
     const root = join(tmp, "pos-late");
@@ -171,7 +178,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
     expect(rc).toBe(0);
     expect(out).toContain("needs late RULE");
     expect(out).not.toContain("the poll interval is the default");
-  }, 30000);
+  });
 
   test("every waking run is named", () => {
     const root = join(tmp, "pos-multi");
@@ -183,7 +190,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
     expect(out).toContain("needs first RULE");
     expect(out).toContain("needs second GATE");
     expect(out).toContain("NEXT");
-  }, 30000);
+  });
 
   test("a usable poll interval wakes promptly", () => {
     const root = join(tmp, "pos-prompt");
@@ -196,7 +203,7 @@ describe("positive controls: each NEXT that needs the postmaster names its run",
     expect(rc).toBe(0);
     expect(out).toContain("needs prompt RULE");
     expect(took <= 15).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("negative controls: WAIT, USER, - and a held run leave it waiting", () => {
@@ -210,7 +217,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("wait ");
     expect(out).toContain("WAIT");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("a run put to the user is left waiting until the timeout", () => {
     const root = join(tmp, "neg-user");
@@ -222,7 +229,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("user ");
     expect(out).toContain(".waiting-on-user");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("a closed run is left waiting until the timeout", () => {
     const root = join(tmp, "neg-closed");
@@ -234,7 +241,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("closed ");
     expect(out).toContain(".leg-3-done");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("a run on the held list never needs the postmaster", () => {
     const root = join(tmp, "neg-held");
@@ -249,7 +256,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain(".escalation-ready");
     expect(out).not.toContain("needs ");
     expect(out).not.toContain("matches no run");
-  }, 30000);
+  });
 
   test("a #ticket held line warns that it matches no run", () => {
     const root = join(tmp, "neg-heldhash");
@@ -261,7 +268,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(rc).toBe(0);
     expect(out).toContain("needs 121 RULE");
     expect(out).toContain('held "#121" matches no run');
-  }, 30000);
+  });
 
   test("a held line for no run warns", () => {
     const root = join(tmp, "neg-heldtypo");
@@ -274,7 +281,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("wait ");
     expect(out).toContain('held "999" matches no run');
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("a held run is left out of the names even beside a waking run", () => {
     const root = join(tmp, "neg-mixed");
@@ -289,7 +296,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("held ");
     expect(out).toContain(".escalation-ready");
     expect(out).not.toContain("needs held");
-  }, 30000);
+  });
 
   test("a dangling held link is refused", () => {
     const root = join(tmp, "neg-heldlink");
@@ -301,7 +308,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(rc).toBe(1);
     expect(out).toContain("cannot read");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("a held list that is a directory is refused", () => {
     const root = join(tmp, "neg-helddir");
@@ -312,7 +319,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(rc).toBe(1);
     expect(out).toContain("cannot read");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("an unreadable held list is refused", () => {
     const root = join(tmp, "neg-heldperm");
@@ -326,7 +333,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(rc).toBe(1);
     expect(out).toContain("cannot read");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("an unlistable postmaster dir is refused", () => {
     const root = join(tmp, "neg-heldlock");
@@ -340,7 +347,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(rc).toBe(1);
     expect(out).toContain("cannot read");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 
   test("a run root with a backslash still holds its held runs", () => {
     const root = join(tmp, "neg-bsroot");
@@ -356,7 +363,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("heldrun ");
     expect(out).not.toContain("needs ");
     expect(out).not.toContain("warning");
-  }, 30000);
+  });
 
   test("an empty timeout still looks once, prints the table and exits 3", () => {
     const root = join(tmp, "neg-none");
@@ -367,7 +374,7 @@ describe("negative controls: WAIT, USER, - and a held run leave it waiting", () 
     expect(out).toContain("NEXT");
     expect(out).toContain("alone ");
     expect(out).not.toContain("needs ");
-  }, 30000);
+  });
 });
 
 function autoRun(root: string, name: string, leg: number, thread: string): void {
@@ -471,7 +478,7 @@ describe("stream skip: the line count", () => {
     expect(streamLines(join(tmp, "terminated.jsonl"))).toBe(2);
     expect(streamLines(join(tmp, "empty.jsonl"))).toBe(0);
     expect(streamLines(join(tmp, "no-such.jsonl"))).toBe(0);
-  }, 30000);
+  });
 });
 
 describe("watcher steps: dispatch and resume controls", () => {
@@ -501,11 +508,13 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(call).toContain("leg=review");
     expect(call).toContain("number=2");
     expect(call).toContain("thread=");
-    expect(call).toContain(`prompt=${join(root, "dispatch", "leg-2-prompt.txt")}`);
+    // Physically, as the watcher resolves the dispatch it was given (like pin
+    // above); the logical spelling differs under a linked parent.
+    expect(call).toContain(`prompt=${join(realpathSync(root), "dispatch", "leg-2-prompt.txt")}`);
     const prompt = readFileSync(join(root, "dispatch", "leg-2-prompt.txt"), "utf8");
     expect(prompt).toContain("Your review leg covers stage 2");
     expect(prompt).toContain(`${pin}/skills/postmaster/coachman.md`);
-  }, 60000);
+  });
 
   test("a U+2028 in the waybill opens no fake Project profile: ^ matches after \\n only, as BASE", () => {
     const root = join(tmp, "auto-u2028");
@@ -525,7 +534,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     const { rc } = watchStub(root);
     expect(rc).toBe(3);
     expect(existsSync(join(tmp, "calls", "dispatch-u2028-2"))).toBe(true);
-  }, 60000);
+  });
 
   test("the watcher follows a legs list without review and records the omission", () => {
     const root = join(tmp, "auto-skip-review");
@@ -554,7 +563,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(actionCount(join(root, "skip-review"), "dispatch")).toBe(1);
     const shipCall = readFileSync(join(tmp, "calls", "dispatch-skip-review-3"), "utf8").split("\n");
     expect(shipCall).toContain("leg=ship");
-  }, 60000);
+  });
 
   test("a run with no checkout recorded dispatches from its waybill tool", () => {
     const root = join(tmp, "auto-unpinned");
@@ -576,7 +585,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     const call = readFileSync(join(tmp, "calls", "dispatch-unpinned-2"), "utf8").split("\n");
     expect(call).toContain(`rt=${pin}`);
     expect(actionCount(join(root, "unpinned"), "dispatch")).toBe(1);
-  }, 60000);
+  });
 
   test("a checkout that moved past its dispatch commit wakes and launches nothing", () => {
     const root = join(tmp, "auto-stale-pin");
@@ -596,7 +605,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(out).toContain("needs stale-pin DISPATCH");
     expect(out).toContain("does not serve");
     expect(existsSync(join(tmp, "calls", "dispatch-stale-pin-2"))).toBe(false);
-  }, 60000);
+  });
 
   test("a checkout without the leg script wakes with nothing started", () => {
     const root = join(tmp, "auto-no-leg");
@@ -618,7 +627,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(existsSync(join(root, "no-leg", "logs", "coachman-leg-2-attempts.jsonl"))).toBe(false);
     expect(existsSync(join(root, "no-leg", ".leg-2-exited"))).toBe(false);
     expect(existsSync(join(root, "no-leg", "leg-2-prompt.txt"))).toBe(true);
-  }, 60000);
+  });
 
   test("a waybill with no repo path dispatches from the recorded checks", () => {
     const root = join(tmp, "auto-repo-fallback");
@@ -637,7 +646,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(rc).toBe(3);
     expect(existsSync(join(tmp, "calls", "dispatch-repo-fallback-2"))).toBe(true);
     expect(actionCount(join(root, "repo-fallback"), "dispatch")).toBe(1);
-  }, 60000);
+  });
 
   test("a run with no repo anywhere wakes and launches nothing", () => {
     const root = join(tmp, "auto-no-repo");
@@ -652,7 +661,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(rc).toBe(0);
     expect(out).toContain("needs no-repo DISPATCH");
     expect(existsSync(join(tmp, "calls", "dispatch-no-repo-2"))).toBe(false);
-  }, 60000);
+  });
 
   test("a one-line profile dispatches from the repo field alone", () => {
     const root = join(tmp, "auto-one-line");
@@ -673,7 +682,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     expect(rc).toBe(3);
     expect(existsSync(join(tmp, "calls", "dispatch-one-line-2"))).toBe(true);
     expect(actionCount(join(root, "one-line"), "dispatch")).toBe(1);
-  }, 60000);
+  });
 
   test("a ticket-text profile does not shadow the waybill's own", () => {
     const root = join(tmp, "auto-early-profile");
@@ -693,7 +702,7 @@ describe("watcher steps: dispatch and resume controls", () => {
     const { rc } = watchStub(root);
     expect(rc).toBe(3);
     expect(existsSync(join(tmp, "calls", "dispatch-early-profile-2"))).toBe(true);
-  }, 60000);
+  });
 });
 
 describe("corrupt manifests: reported once, never dispatched from, never fatal", () => {
@@ -717,7 +726,7 @@ describe("corrupt manifests: reported once, never dispatched from, never fatal",
       expect(out).toContain("needs good RULE");
       expect(still).toBe(bad);
       expect(existsSync(join(tmp, "calls", "dispatch-bad-2"))).toBe(false);
-    }, 60000);
+    });
   }
 
   for (const bad of ["02", "08"]) {
@@ -744,7 +753,7 @@ describe("corrupt manifests: reported once, never dispatched from, never fatal",
       expect(out).toContain("needs good RULE");
       expect(still).toBe(`"${bad}"`);
       expect(existsSync(join(tmp, "calls", "dispatch-badleg-2"))).toBe(false);
-    }, 60000);
+    });
   }
 
   for (const bad of ["02", "08"]) {
@@ -772,7 +781,7 @@ describe("corrupt manifests: reported once, never dispatched from, never fatal",
       expect(out).toContain("needs good RULE");
       expect(existsSync(join(tmp, "calls", `resume-badremount-${bad}`))).toBe(false);
       expect(existsSync(join(root, "badremount", "watcher.json"))).toBe(false);
-    }, 60000);
+    });
   }
 });
 
@@ -819,7 +828,7 @@ describe("watcher steps: resume controls", () => {
     expect(call).toContain("leg=synthesis");
     expect(call).toContain("thread=prior-thread");
     expect(existsSync(join(root, "resume", ".leg-1-exited"))).toBe(false);
-  }, 60000);
+  });
 
   for (const attempt of [2, 3]) {
     test(`transient end ${attempt} is resumed and its per-leg count persists`, () => {
@@ -895,7 +904,7 @@ describe("watcher steps: resume controls", () => {
     expect(actionCount(join(root, "resume-fallback"), "resume")).toBe(1);
     const call = readFileSync(join(tmp, "calls", "resume-resume-fallback-1"), "utf8").split("\n");
     expect(call).toContain("thread=thread-fb");
-  }, 60000);
+  });
 
   test("an old transient error in the stream does not resume a later unrelated failure", () => {
     const root = join(tmp, "auto-stale");
@@ -921,7 +930,7 @@ describe("watcher steps: resume controls", () => {
     expect(out).toContain("needs stale RESUME");
     expect(resumeCountOf(root, "stale")).toBe(1);
     expect(actionCount(join(root, "stale"), "resume")).toBe(1);
-  }, 60000);
+  });
 
   test("an unterminated old error stays out of the new classification", () => {
     const root = join(tmp, "auto-unterm");
@@ -960,7 +969,7 @@ describe("watcher steps: resume controls", () => {
     expect(out).toContain("needs unterm RESUME");
     expect(`${watcher.resume_attempts["1"]}/${watcher.stream_skip["1"]}`).toBe("1/2");
     expect(actionCount(join(root, "unterm"), "resume")).toBe(1);
-  }, 60000);
+  });
 
   for (const [name, message] of [
     ["gateway", "529 overloaded"],
@@ -978,7 +987,7 @@ describe("watcher steps: resume controls", () => {
       expect(rc).toBe(3);
       expect(actionCount(join(root, name), "resume")).toBe(1);
       expect(existsSync(join(tmp, "calls", `resume-${name}-1`))).toBe(true);
-    }, 60000);
+    });
   }
 });
 
@@ -1002,7 +1011,7 @@ describe("postmaster wake controls: recorded walls and refusals", () => {
       expect(out).toContain(`needs ${name} ${want}`);
       expect(existsSync(join(root, name, "watcher.json"))).toBe(false);
       expect(existsSync(join(tmp, "calls", `resume-${name}-1`))).toBe(false);
-    }, 60000);
+    });
   }
 
   test("an unlisted provider error stays with the postmaster", () => {
@@ -1021,7 +1030,7 @@ describe("postmaster wake controls: recorded walls and refusals", () => {
     expect(out).toContain("needs other-error RESUME");
     expect(existsSync(join(root, "other-error", "watcher.json"))).toBe(false);
     expect(existsSync(join(tmp, "calls", "resume-other-error-1"))).toBe(false);
-  }, 60000);
+  });
 
   test("a resume the manifest cannot thread stays with the postmaster", () => {
     const root = join(tmp, "wake-no-thread-remount");
@@ -1046,7 +1055,7 @@ describe("postmaster wake controls: recorded walls and refusals", () => {
     expect(out).toContain("no recorded thread id");
     expect(existsSync(join(root, "no-thread-remount", "watcher.json"))).toBe(false);
     expect(existsSync(join(tmp, "calls", "resume-no-thread-remount-1"))).toBe(false);
-  }, 60000);
+  });
 });
 
 describe("postmaster wake controls: incomplete watcher steps", () => {
@@ -1064,7 +1073,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(rc).toBe(0);
     expect(out).toContain("needs handoff DISPATCH");
     expect(existsSync(join(tmp, "calls", "dispatch-handoff-2"))).toBe(false);
-  }, 60000);
+  });
 
   test("a failed turnpikes lookup wakes the postmaster and launches nothing", () => {
     const root = join(tmp, "wake-legs");
@@ -1082,7 +1091,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(rc).toBe(0);
     expect(out).toContain("needs legs DISPATCH");
     expect(existsSync(join(tmp, "calls", "dispatch-legs-2"))).toBe(false);
-  }, 60000);
+  });
 
   test("a done ship leg with nothing after it wakes for the close", () => {
     const root = join(tmp, "wake-close");
@@ -1100,7 +1109,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(rc).toBe(0);
     expect(out).toContain("needs close DISPATCH");
     expect(existsSync(join(tmp, "calls", "dispatch-close-4"))).toBe(false);
-  }, 60000);
+  });
 
   test("a dispatch the host cannot start wakes with its refusal recorded", () => {
     const root = join(tmp, "wake-dispatch");
@@ -1123,7 +1132,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(refused.leg).toBe(2);
     expect(m.leg).toBe(2);
     expect(actionCount(join(root, "dispatch-failure"), "dispatch")).toBe(0);
-  }, 60000);
+  });
 
   test("a dispatch the leg refuses wakes with markers and records untouched", () => {
     const root = join(tmp, "wake-launch-refusal");
@@ -1145,7 +1154,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(existsSync(join(root, "launch-refusal", ".leg-2-done"))).toBe(false);
     expect(existsSync(join(root, "launch-refusal", "watcher.json"))).toBe(false);
     expect(m.leg).toBe(2);
-  }, 60000);
+  });
 
   test("a resume the host cannot start wakes with its refusal recorded and the count restored", () => {
     const root = join(tmp, "wake-resume");
@@ -1177,7 +1186,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(actionCount(join(root, "resume-failure"), "refuse")).toBe(1);
     expect(watcher.resume_attempts["1"]).toBe(0);
     expect(last.outcome).toBe("refused");
-  }, 60000);
+  });
 
   test("a refused resume wakes in the same look with a refusal record, the count unchanged, and no success line", () => {
     const root = join(tmp, "wake-resume-refusal");
@@ -1219,7 +1228,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
       .filter((l) => l !== "")
       .pop()!;
     expect((JSON.parse(lastLine) as { outcome: string }).outcome).toBe("incomplete");
-  }, 60000);
+  });
 
   test("a standing refusal is named every look without spending a remount", () => {
     const root = join(tmp, "wake-resume-refusal-many");
@@ -1243,7 +1252,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(actionCount(join(root, "refusal-many"), "refuse") >= 1).toBe(true);
     expect(actionCount(join(root, "refusal-many"), "resume")).toBe(0);
     expect(watcher.resume_attempts["1"]).toBe(0);
-  }, 60000);
+  });
 
   test("a dispatch whose action cannot be logged wakes the postmaster", () => {
     const root = join(tmp, "wake-log");
@@ -1258,7 +1267,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(rc).toBe(0);
     expect(out).toContain("needs log-failure DISPATCH");
     expect(existsSync(join(tmp, "calls", "dispatch-log-failure-2"))).toBe(true);
-  }, 60000);
+  });
 
   test("a resume whose action cannot be logged wakes the postmaster", () => {
     const root = join(tmp, "wake-resume-log");
@@ -1281,7 +1290,7 @@ describe("postmaster wake controls: incomplete watcher steps", () => {
     expect(out).toContain("needs resume-log RESUME");
     expect(existsSync(join(tmp, "calls", "resume-resume-log-1"))).toBe(true);
     expect(watcher.resume_attempts["1"]).toBe(1);
-  }, 60000);
+  });
 });
 
 describe("negative controls: held runs are left untouched", () => {
@@ -1306,7 +1315,7 @@ describe("negative controls: held runs are left untouched", () => {
     expect(existsSync(join(root, "held-dispatch", ".leg-1-exited"))).toBe(true);
     expect(actionCount(join(root, "held-dispatch"), "dispatch")).toBe(0);
     expect(m.leg).toBe(1);
-  }, 60000);
+  });
 
   test("a held resume run keeps its count, marker, and log unchanged", () => {
     const root = join(tmp, "held-resume");
@@ -1327,7 +1336,7 @@ describe("negative controls: held runs are left untouched", () => {
     expect(existsSync(join(root, "held-resume", "watcher.json"))).toBe(false);
     expect(existsSync(join(root, "held-resume", ".leg-1-exited"))).toBe(true);
     expect(actionCount(join(root, "held-resume"), "resume")).toBe(0);
-  }, 60000);
+  });
 });
 
 describe("ready tickets wait for a run slot", () => {
@@ -1349,7 +1358,7 @@ describe("ready tickets wait for a run slot", () => {
     const { rc, out } = watch(root, "0", config);
     expect(rc).toBe(0);
     expect(out).toContain("needs READY #2");
-  }, 30000);
+  });
 
   test("the queue matches the marker's first line, with or without a digest", () => {
     const root = join(tmp, "ready-first-line");
@@ -1359,7 +1368,7 @@ describe("ready tickets wait for a run slot", () => {
     writeFileSync(join(dir, "3.ready"), "3\n");
     writeFileSync(join(dir, "bogus.ready"), "nope\n");
     expect(pendingReadyTickets(root)).toEqual(["2", "3"]);
-  }, 30000);
+  });
 
   test("a wake names no more tickets than free slots", () => {
     const root = join(tmp, "ready-cap");
@@ -1375,7 +1384,7 @@ describe("ready tickets wait for a run slot", () => {
     expect(rc).toBe(0);
     expect(out.match(/needs READY/gu)?.length ?? 0).toBe(1);
     expect(out).toContain("needs READY 2");
-  }, 30000);
+  });
 
   test("a queued ticket waits until an in-flight run frees its slot", () => {
     const root = join(tmp, "ready-wait-slot");
@@ -1399,7 +1408,7 @@ describe("ready tickets wait for a run slot", () => {
     expect(rc).toBe(0);
     expect(out).toContain("needs READY 2");
     expect(activeRunCount(root)).toBe(0);
-  }, 30000);
+  });
 
   test("a pending ticket does not wake a full run ceiling", () => {
     const root = join(tmp, "ready-full");
@@ -1411,7 +1420,7 @@ describe("ready tickets wait for a run slot", () => {
     const { rc, out } = watch(root, "0", config);
     expect(rc).toBe(3);
     expect(out).not.toContain("needs READY");
-  }, 30000);
+  });
 });
 
 describe("config: a missing or unusable poll interval falls back to the default", () => {
@@ -1430,7 +1439,7 @@ describe("config: a missing or unusable poll interval falls back to the default"
     expect(out).toContain("wait ");
     expect(out).not.toContain("needs ");
     expect(out).toContain("the poll interval is the default, 120s");
-  }, 30000);
+  });
 
   test("an unusable poll interval falls back to the default, and says so", () => {
     writeFileSync(join(tmp, "bad.toml"), '[postmaster]\npoll_seconds = "soon"\n');
@@ -1439,7 +1448,7 @@ describe("config: a missing or unusable poll interval falls back to the default"
     expect(out).toContain("NEXT");
     expect(out).toContain("wait ");
     expect(out).toContain("the poll interval is the default, 120s");
-  }, 30000);
+  });
 
   test("a zero poll interval falls back to the default, and says so", () => {
     writeFileSync(join(tmp, "zero.toml"), "[postmaster]\npoll_seconds = 0\n");
@@ -1447,7 +1456,7 @@ describe("config: a missing or unusable poll interval falls back to the default"
     expect(rc).toBe(3);
     expect(out).toContain("wait ");
     expect(out).toContain("the poll interval is the default, 120s");
-  }, 30000);
+  });
 
   test("a config that is not UTF-8 falls back to the default, and says so", () => {
     writeFileSync(
@@ -1459,7 +1468,7 @@ describe("config: a missing or unusable poll interval falls back to the default"
     expect(out).toContain("wait ");
     expect(out).toContain("the poll interval is the default, 120s");
     expect(out).not.toContain("Traceback");
-  }, 30000);
+  });
 
   test("a timeout shorter than the poll interval still ends on time", () => {
     writeFileSync(join(tmp, "slow.toml"), "[postmaster]\npoll_seconds = 8\n");
@@ -1469,7 +1478,7 @@ describe("config: a missing or unusable poll interval falls back to the default"
     expect(rc).toBe(3);
     expect(out).toContain("wait ");
     expect(took <= 5).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("usage", () => {
@@ -1479,28 +1488,28 @@ describe("usage", () => {
     expect(r.code).toBe(1);
     expect(out).toContain("usage:");
     expect(out).not.toContain("NEXT");
-  }, 30000);
+  });
 
   test("a timeout that is not a number is refused", () => {
     const r = run(self, ["runs-watch", "--timeout", "soon", join(tmp, "neg-wait")]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("not a whole number");
-  }, 30000);
+  });
 
   test("an empty timeout is refused", () => {
     const r = run(self, ["runs-watch", "--timeout", "", join(tmp, "neg-wait")]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("not a whole number");
-  }, 30000);
+  });
 
   test("a run root that does not exist is refused", () => {
     const r = run(self, ["runs-watch", "--timeout", "2", join(tmp, "nowhere")]);
     const out = `${r.out}${r.err}`;
     expect(r.code).toBe(1);
     expect(out).toContain("no such root");
-  }, 30000);
+  });
 
   test("--help prints the usage", () => {
     const r = run(self, ["runs-watch", "--help"]);
@@ -1508,7 +1517,7 @@ describe("usage", () => {
     expect(r.code).toBe(0);
     expect(out).toContain("run runs-watch");
     expect(out).toContain("held");
-  }, 30000);
+  });
 });
 
 describe("provider walls: the watcher wakes, gates dispatch, delivers the pause", () => {
@@ -1540,7 +1549,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     const second = watch(root, "5");
     expect(second.rc).toBe(3);
     expect(second.out).not.toContain("needs ");
-  }, 60000);
+  });
 
   test("a held run's wall is never named; released, it is (C7)", () => {
     const root = join(tmp, "watch-heldwall");
@@ -1555,7 +1564,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     const freeLook = watch(root, "0");
     expect(freeLook.rc).toBe(0);
     expect(freeLook.out).toContain("needs T WALL");
-  }, 60000);
+  });
 
   test("a told wall with no ruling stops the next leg; ruled, it dispatches (C14)", () => {
     const root = join(tmp, "watch-wall-dispatch");
@@ -1585,7 +1594,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     expect(existsSync(join(tmp, "calls", "dispatch-wallgate-2"))).toBe(true);
     expect(actionCount(d, "dispatch")).toBe(1);
     expect(readFileSync(join(d, "actions.jsonl"), "utf8")).toContain("the watcher took it");
-  }, 60000);
+  });
 
   test("a pause ruled during it is delivered by the watcher, with the rulings named (C20)", () => {
     const root = join(tmp, "watch-wall-pause");
@@ -1615,7 +1624,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     const promptText = readFileSync(prompt, "utf8");
     expect(promptText).toContain("go on");
     expect(promptText).toContain("sec");
-  }, 60000);
+  });
 
   test("a wall pause still open wakes the postmaster instead of resuming", () => {
     const root = join(tmp, "watch-wall-open");
@@ -1631,7 +1640,7 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     expect(out).toContain("needs walledopen RULE");
     expect(out).toContain("sec");
     expect(existsSync(join(tmp, "calls", "resume-walledopen-1"))).toBe(false);
-  }, 60000);
+  });
 
   test("a stale wall-pause marker never delivers a later escalation", () => {
     const root = join(tmp, "watch-wall-stale");
@@ -1655,5 +1664,98 @@ describe("provider walls: the watcher wakes, gates dispatch, delivers the pause"
     expect(existsSync(join(tmp, "calls", "resume-wallstale-1"))).toBe(false);
     expect(existsSync(join(d, ".escalation-ready"))).toBe(true);
     expect(existsSync(join(d, ".wall-pause"))).toBe(true);
-  }, 60000);
+  });
+});
+
+describe("project poll and capacity", () => {
+  const id = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"];
+  function watched(name: string, settings: string | null): { root: string; config: string } {
+    const dir = join(tmp, name);
+    const root = join(dir, ".postmaster", "runs");
+    mkdirSync(root, { recursive: true });
+    if (run("git", ["init", "-q", "-b", "main", dir]).code !== 0) {
+      throw new Error("cannot init the watched fixture");
+    }
+    if (settings !== null) {
+      writeFileSync(join(dir, ".postmaster", "settings.toml"), settings);
+    }
+    const config = join(tmp, `${name}.toml`);
+    writeFileSync(config, "[postmaster]\npoll_seconds = 120\n[team]\nmax_runs = 2\n");
+    return { root, config };
+  }
+
+  test("the project poll interval and capacity win over the global ones", () => {
+    const { root, config } = watched(
+      "wc-proj",
+      "[postmaster]\npoll_seconds = 30\n[team]\nmax_runs = 7\n",
+    );
+    const seen = watchConfig(root, config);
+    expect(seen.poll).toBe(30);
+    expect(seen.capacity).toBe(7);
+  }, 30000);
+
+  test("an invalid project poll falls back to the global one", () => {
+    const { root, config } = watched("wc-badpoll", '[postmaster]\npoll_seconds = "soon"\n');
+    expect(watchConfig(root, config).poll).toBe(120);
+  }, 30000);
+
+  test("an invalid project capacity falls back to the global one", () => {
+    const { root, config } = watched("wc-badcap", '[team]\nmax_runs = "many"\n');
+    expect(watchConfig(root, config).capacity).toBe(2);
+  }, 30000);
+
+  test("a root without settings reads the global config alone", () => {
+    const { root, config } = watched("wc-plain", null);
+    const seen = watchConfig(root, config);
+    expect(seen.poll).toBe(120);
+    expect(seen.capacity).toBe(2);
+  }, 30000);
+
+  test("a root outside any repository reads the global config alone", () => {
+    const root = join(tmp, "wc-norepo", "runs");
+    mkdirSync(root, { recursive: true });
+    const config = join(tmp, "wc-norepo.toml");
+    writeFileSync(config, "[postmaster]\npoll_seconds = 120\n[team]\nmax_runs = 2\n");
+    const seen = watchConfig(root, config);
+    expect(seen.poll).toBe(120);
+    expect(seen.capacity).toBe(2);
+  }, 30000);
+
+  test("a malformed project file falls back loudly, not silently", () => {
+    const { root, config } = watched("wc-broken", "[[[unparseable\n");
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...args: unknown[]) => {
+      errs.push(args.map(String).join(" "));
+    };
+    try {
+      const seen = watchConfig(root, config);
+      expect(seen.poll).toBe(120);
+      expect(seen.capacity).toBe(2);
+    } finally {
+      console.error = orig;
+    }
+    expect(errs.join("\n")).toContain("runs-watch: local project settings does not parse");
+  }, 30000);
+
+  test("a pending file reads the global values until it is accepted", () => {
+    const dir = join(tmp, "wc-pending");
+    const root = join(dir, ".postmaster", "runs");
+    mkdirSync(root, { recursive: true });
+    if (run("git", ["init", "-q", "-b", "main", dir]).code !== 0) {
+      throw new Error("cannot init the pending fixture");
+    }
+    writeFileSync(join(dir, ".postmaster", "settings.toml"), "[postmaster]\npoll_seconds = 30\n");
+    if (run("git", ["-C", dir, "add", "-f", ".postmaster/settings.toml"]).code !== 0) {
+      throw new Error("cannot add the pending fixture");
+    }
+    if (run("git", ["-C", dir, ...id, "commit", "-qm", "settings"]).code !== 0) {
+      throw new Error("cannot commit the pending fixture");
+    }
+    const config = join(tmp, "wc-pending.toml");
+    writeFileSync(config, "[postmaster]\npoll_seconds = 120\n[team]\nmax_runs = 2\n");
+    expect(watchConfig(root, config).poll).toBe(120);
+    recordAcceptance(dir, config);
+    expect(watchConfig(root, config).poll).toBe(30);
+  }, 30000);
 });

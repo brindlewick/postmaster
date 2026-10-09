@@ -48,9 +48,12 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/run host name <dispatch> postmaster
 <tool>/scripts/run host name <dispatch> role <text...>
-<tool>/scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...
-<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host leg <launch|resume|takeover|retry|outcome|backfill|waiting> ...
+<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host workhorse <dispatch> <lane> <worktree>
+<tool>/scripts/run host limits [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>]
 <tool>/scripts/run host stop <worktree>
+<tool>/scripts/run host stop-pidfile <pidfile>
 <tool>/scripts/run host close <worktree>
 <tool>/scripts/run host stop-run <dispatch>
 <tool>/scripts/run host close-run <dispatch>
@@ -118,14 +121,20 @@ onto the fragment it supersedes.
   labels and prompt text never identify ownership. A user pane split into a launch tab or window
   survives: `run host` closes only its own pane and leaves the shared tab or window open. The event
   stream and logs stay on disk.
-- **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
-  it. `run host run` returns as soon as the launch has started. The wait still goes in the same
+- **`--pidfile` gets its pid, which is also its process group, with the start, boot and
+  command that prove it:** `<tool>/scripts/run host stop-pidfile <pidfile>` stops the recorded
+  launch and its group only while that identity still matches. Members it cannot prove are
+  never killed: they are reported as leftover members, each pid with its command, and the
+  stop exits 2. `run host run` returns as soon as the launch has started.
+  The wait still goes in the same
   command as the launch, as `<tool>/scripts/run wait-for-markers`, or for a review round
   `<tool>/scripts/run review-round wait`.
 - **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
   `lane` for a workhorse, `coachman` for a leg, and `reviewer` for a review launch. Direct host
   launches use the default limits. With `--run <dispatch>`, the limits come from the config in
-  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run.
+  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run. With
+  `--project <repo>` and no `--run`, they come from the project's effective config. `host
+  limits` prints the limits a launch would get, as `memory=<max>` and `tasks=<max>`.
 - **A Linux user scope contains each launch and its descendants.** When systemd can verify a
   cgroup v2 memory controller, pids controller and the requested scope properties, `run host`
   applies `MemoryMax` (default `8G`), `MemorySwapMax=0` and `TasksMax` (default `512`). Systemd
@@ -201,9 +210,9 @@ onto the fragment it supersedes.
   worktree from the waybill. `herdr worktree open --workspace <repository's space> --path
   <synthesis worktree> --label <ticket>` opens the run's space. Every launch gets a tab
   in the same space, with its own checkout as the tab's working directory, the first one
-  included: it closes the run space's root tab once its own tab exists. That includes
-  reviewer worktrees and security-review clones: a clone is never opened as a separate
-  workspace. A failure before the launch lands rolls back instead — the root tab
+  included: it closes the run space's root tab once its own tab exists.
+  That includes reviewer scratches: a clone is never opened as a separate workspace. A
+  failure before the launch lands rolls back instead — the root tab
   while the launch tab does not exist yet, the launch tab after — so a failed
   placement leaves nothing a later close could refuse. A run launch without `--under` is refused
   instead of opening a top-level space.
@@ -288,7 +297,7 @@ with `herdr agent start`. It is a pane whose agent `run host` reports. So when i
 
 - A launch is a detached process in a session of its own, with no terminal. There is nothing to
   watch but its files: `<tool>/scripts/run runs-status`, the events file, and
-  `<tool>/scripts/run view-stream < <events-file>` for the readable form.
+  `<tool>/scripts/run view-stream <events-file>` for the readable form.
 - **The postmaster runs headless, as a native session**, like every other role:
   `<tool>/scripts/run host run "postmaster" <repo> --out <runs>/postmaster/events.jsonl
   --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited -- <tool>/scripts/run launch

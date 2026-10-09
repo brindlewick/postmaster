@@ -1,7 +1,7 @@
 // Tests beside scripts/turnpikes.ts, moved from its --self-test on #109: 90 controls.
 // The self-test staged shared waybills and run state between controls; each test below builds
 // its own fixtures so it passes alone as well as in file order. The root-conditional control
-// is gated by test.skipIf with a top notice.
+// is gated by test.skipIf; skips.toml carries the reason.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,11 +44,6 @@ let canRestrict = true;
   } finally {
     rmSync(probe, { recursive: true, force: true });
   }
-}
-if (!canRestrict) {
-  console.log(
-    "skip an unreadable brief.md names the read error: this user reads every file, so no denial was compared",
-  );
 }
 
 let tmp = "";
@@ -690,39 +685,39 @@ describe("controls: a one-leg run, walked from synthesis to the card through the
     const { d } = setupOne("one-handoff");
     const hc = run(join(HERE, "run"), ["handoff-check", join(d, "handoff-1.md")]);
     expect(hc.code).toBe(0);
-  }, 30000);
+  });
 
   test("a one-leg run's card is GATE", () => {
     const { repo } = setupOne("one-gate");
     expect(poll(join(repo, ".postmaster", "runs"), "one")).toBe("GATE");
-  }, 30000);
+  });
 
   test("a one-leg run has no second leg", () => {
     const { d } = setupOne("one-legs");
     const r = run(SELF, ["turnpikes", "legs", d]);
     expect(r.out.replace(/\n+$/u, "")).toBe("1 synthesis");
-  }, 30000);
+  });
 
   test("a one-leg run closes at done", () => {
     const { repo, d } = setupOne("one-close");
     run(join(HERE, "run"), ["stage", d, "shipped", "postmaster"]);
     run(join(HERE, "run"), ["stage", d, "done", "postmaster"]);
     expect(poll(join(repo, ".postmaster", "runs"), "one")).toBe("-");
-  }, 30000);
+  });
 
   test("a one-leg run's stages after the card are the postmaster's", () => {
     const { d } = setupOne("one-stages");
     run(join(HERE, "run"), ["stage", d, "shipped", "postmaster"]);
     run(join(HERE, "run"), ["stage", d, "done", "postmaster"]);
     expect(stageTargetsOf(d)).toBe("shipped done");
-  }, 30000);
+  });
 });
 
 describe("controls: a two-leg run, walked from synthesis through review to the card", () => {
   test("after synthesis the poll says DISPATCH", () => {
     const { repo } = setupTwo("two-poll");
     expect(poll(join(repo, ".postmaster", "runs"), "two")).toBe("DISPATCH");
-  }, 30000);
+  });
 
   test("the leg after synthesis is review", () => {
     const { d } = setupTwo("two-next");
@@ -733,7 +728,7 @@ describe("controls: a two-leg run, walked from synthesis through review to the c
     });
     const nextVal = next ? `${pyWords(next)[0]} ${pyWords(next)[1]}` : "";
     expect(nextVal).toBe("2 review");
-  }, 30000);
+  });
 
   test("the review leg starts from synthesis's hand-off, which passes its check", () => {
     const { d } = setupTwo("two-handoff");
@@ -746,7 +741,7 @@ describe("controls: a two-leg run, walked from synthesis through review to the c
     const hc = run(join(HERE, "run"), ["handoff-check", join(d, `handoff-${prev}.md`)]);
     expect(hc.code).toBe(0);
     expect(prev).toBe(1);
-  }, 30000);
+  });
 
   test("the review leg ends with the card, and no leg follows", () => {
     const { repo, d } = setupTwo("two-card");
@@ -761,7 +756,7 @@ describe("controls: a two-leg run, walked from synthesis through review to the c
     const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 2);
     expect(poll(join(repo, ".postmaster", "runs"), "two")).toBe("GATE");
     expect(after).toEqual([]);
-  }, 30000);
+  });
 
   test("it closes through the postmaster's stages", () => {
     const { repo, d } = setupTwo("two-close");
@@ -776,7 +771,7 @@ describe("controls: a two-leg run, walked from synthesis through review to the c
     run(join(HERE, "run"), ["stage", d, "done", "postmaster"]);
     expect(stageTargetsOf(d)).toBe("review shipping shipped done");
     expect(poll(join(repo, ".postmaster", "runs"), "two")).toBe("-");
-  }, 30000);
+  });
 });
 
 describe("controls: a three-leg run dispatched before this change, walked from review to ship", () => {
@@ -786,7 +781,7 @@ describe("controls: a three-leg run dispatched before this change, walked from r
     const last = r.out.replace(/\n+$/u, "").split("\n").pop() ?? "";
     expect(poll(join(repo, ".postmaster", "runs"), "old")).toBe("DISPATCH");
     expect(last).toBe("3 ship");
-  }, 30000);
+  });
 
   test("the leg after review is ship", () => {
     const { d } = setupOld("old-next");
@@ -797,13 +792,13 @@ describe("controls: a three-leg run dispatched before this change, walked from r
     });
     const nextVal = next ? `${pyWords(next)[0]} ${pyWords(next)[1]}` : "";
     expect(nextVal).toBe("3 ship");
-  }, 30000);
+  });
 
   test("the legacy ship hand-off still passes its check", () => {
     const { d } = setupOld("old-handoff");
     const hc = run(join(HERE, "run"), ["handoff-check", join(d, "handoff-2.md")]);
     expect(hc.code).toBe(0);
-  }, 30000);
+  });
 
   test("after ship the card is GATE, and no leg follows", () => {
     const { repo, d } = setupOld("old-card");
@@ -817,7 +812,7 @@ describe("controls: a three-leg run dispatched before this change, walked from r
     const after = r.out.split("\n").filter((l) => parseInt(pyWords(l)[0] ?? "", 10) > 3);
     expect(poll(join(repo, ".postmaster", "runs"), "old")).toBe("GATE");
     expect(after).toEqual([]);
-  }, 30000);
+  });
 
   test("a three-leg run keeps its stages", () => {
     const { repo, d } = setupOld("old-close");
@@ -831,5 +826,5 @@ describe("controls: a three-leg run dispatched before this change, walked from r
     run(join(HERE, "run"), ["stage", d, "done", "postmaster"]);
     expect(stageTargetsOf(d)).toBe("shipping shipped done");
     expect(poll(join(repo, ".postmaster", "runs"), "old")).toBe("-");
-  }, 30000);
+  });
 });

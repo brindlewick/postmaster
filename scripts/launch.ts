@@ -63,14 +63,18 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
+import {
+  effectiveConfigForProject,
+  globalConfigPath,
+  specPairFor,
+} from "./lib/effective-config.ts";
 import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
 import { parseWallReset } from "./lib/wall.ts";
 
-const CONFIG =
-  process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
+const CONFIG = globalConfigPath();
 const LEGS = ["synthesis", "review", "ship"] as const;
 
 // The harness top review level, named when the lane's config names no effort. Without a named
@@ -118,6 +122,9 @@ interface Spec {
   model: string;
   effort: string;
   envFile: string;
+  // The project root a relative env_file resolves against when the
+  // project's settings set it; "" keeps the global config's directory.
+  envFileBase: string;
   confine: boolean;
 }
 
@@ -133,6 +140,8 @@ function resolveSpec(
   project: string,
 ): Spec {
   let cfg: Record<string, unknown>;
+  let localLayer: Record<string, unknown> | null = null;
+  let projectRootDir = "";
   if (recorded) {
     const data = tryJsonFile<Record<string, unknown>>(sourcePath);
     if (!data) die(`cannot read ${sourcePath}: it does not parse`);
@@ -142,22 +151,15 @@ function resolveSpec(
     }
     cfg = c as Record<string, unknown>;
   } else if (project) {
-    try {
-      readTomlFile(sourcePath);
-    } catch (e) {
-      die(`cannot read ${sourcePath}: ${String(e)}`);
+    const resolved = effectiveConfigForProject(project, sourcePath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      die(resolved.error ?? "cannot resolve project settings");
     }
-    const r = run(join(scriptsDir(import.meta), "run"), [
-      "project-settings",
-      "effective",
-      project,
-      sourcePath,
-    ]);
-    if (r.code !== 0) die(r.err.trim() || "cannot resolve project role choices");
-    try {
-      cfg = JSON.parse(r.out);
-    } catch (e) {
-      die(`project settings gave no effective config: ${String(e)}`);
+    cfg = resolved.config;
+    localLayer = resolved.local;
+    if (resolved.projectFile !== null) {
+      projectRootDir = dirname(dirname(resolved.projectFile));
     }
   } else {
     try {
@@ -235,11 +237,20 @@ function resolveSpec(
   }
   const s = spec as Record<string, unknown>;
   const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
+  // A relative env_file the project's settings set resolves against the
+  // project root; one the global config sets keeps the global directory.
+  // The shared selection decides which file set it.
+  let envFileBase = "";
+  if (localLayer !== null && projectRootDir !== "") {
+    const site = specPairFor(cfg, localLayer, name, leg);
+    if (str(site.local.env_file) !== "") envFileBase = projectRootDir;
+  }
   return {
     harness: str(s.harness),
     model: str(s.model),
     effort: str(s.effort),
     envFile: str(s.env_file),
+    envFileBase,
     confine: String(cfg.confine ?? "") === "on",
   };
 }
@@ -572,6 +583,43 @@ function sourcedLaunch(file: string, cmd: string[], level: string): string[] {
   return [
     "-c",
     'SHLVL=$1; export SHLVL; f=$2; shift 2; s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; "$@"; s=$?; exit $s',
+    "_",
+    level,
+    file,
+    ...cmd,
+  ];
+}
+/** As sourcedLaunch, except the harness replaces the shell: for the
+ * interactive form, whose pane lists the session only when the harness is
+ * the pane's own process. The preamble is sourcedLaunch's with one line
+ * added — `env` resolved before the source into a shell variable — and
+ * only the ending differs otherwise: `exec` through `env`, so the harness
+ * keeps the wrapper's pid and foreground group. The sourced file sees the
+ * same positional parameters as under sourcedLaunch.
+ *
+ * The `env` between them defeats what `exec` does to an exported SHLVL,
+ * pinned on bash 5.2: the shell lowers it by one before it replaces
+ * itself (1 becomes 0, a file-set 9 becomes 8, a non-number or an unset
+ * level becomes 0), so a plain `exec "$@"` hands the harness a level it
+ * never had. The assignment on `env` hands the sourced level back
+ * verbatim, whatever it is, and `-u` keeps an unset level unset; neither
+ * depends on the decrement existing, so macOS bash 3.2 behaves the same.
+ * `env` is resolved before the source, while PATH is intact and no
+ * file-defined function is in scope, and travels in
+ * `__postmaster_exec_env`: assigned before `set -a`, so it is never
+ * exported, and `$@` is untouched, so a file reads the same `$1` and `$#`
+ * and a `shift` or `set --` breaks this form as it breaks sourcedLaunch's.
+ * The `:-` fallback covers a file that empties the stash; only assigning
+ * it a wrong non-empty value diverges. `env -u` holds on both shells. An
+ * `exit` in the file still exits without launching.
+ *
+ * Headless launches stay on sourcedLaunch and sourcedPrompted: there the
+ * fork reports a signalled harness as status 128+N, which the launcher
+ * and its wall record read, and an exec would deliver the signal itself. */
+function sourcedExec(file: string, cmd: string[], level: string): string[] {
+  return [
+    "-c",
+    'SHLVL=$1; export SHLVL; f=$2; shift 2; __postmaster_exec_env=$(command -v env); s=${POSTMASTER_EVENT_STREAM:-}; set -a; . "$f"; set +a; POSTMASTER_EVENT_STREAM=$s; unset POSTMASTER_LAUNCH_NAME POSTMASTER_LAUNCH_ROLE; if [ -n "${SHLVL+set}" ]; then exec "${__postmaster_exec_env:-/usr/bin/env}" "SHLVL=$SHLVL" "$@"; else exec "${__postmaster_exec_env:-/usr/bin/env}" -u SHLVL "$@"; fi',
     "_",
     level,
     file,
@@ -1359,7 +1407,8 @@ if (import.meta.main) {
     recorded = true;
   } else {
     source = CONFIG;
-    if (!existsSync(source)) {
+    // With --project the loader decides: a complete project file needs no global config.
+    if (!PROJECT && !existsSync(source)) {
       die(`no config at ${CONFIG} (POSTMASTER_CONFIG overrides the path)`);
     }
   }
@@ -1368,6 +1417,7 @@ if (import.meta.main) {
   const MODEL = spec.model;
   const EFFORT = spec.effort;
   let ENV_FILE = spec.envFile;
+  const ENV_BASE = spec.envFileBase;
   if (!HARNESS) die(`${NAME} has no harness in ${source}`);
   if (!MODEL) die(`${NAME} has no model in ${source}`);
   // A lane in the effective [lanes] table runs in a process space of its own
@@ -1431,12 +1481,16 @@ if (import.meta.main) {
       ENV_FILE = (process.env.HOME ?? "") + ENV_FILE.slice(1);
     }
     if (!ENV_FILE.startsWith("/")) {
-      // A relative path is read from the live config's directory, under --run too.
-      let configDir: string;
-      try {
-        configDir = dirname(realpathSync(CONFIG));
-      } catch {
-        configDir = dirname(resolve(CONFIG));
+      // A relative path the project's settings set is read from the project
+      // root; any other relative path is read from the live config's
+      // directory, under --run too.
+      let configDir = ENV_BASE;
+      if (configDir === "") {
+        try {
+          configDir = dirname(realpathSync(CONFIG));
+        } catch {
+          configDir = dirname(resolve(CONFIG));
+        }
       }
       ENV_FILE = join(configDir, ENV_FILE);
     }
@@ -1600,7 +1654,7 @@ if (import.meta.main) {
       if (RUN) die("interactive form does not take --run");
       const interactive = mkForms("interactive");
       let cmd = interactive.cmd;
-      if (ENV_FILE) cmd = ["bash", ...sourcedLaunch(ENV_FILE, cmd, "1")];
+      if (ENV_FILE) cmd = ["bash", ...sourcedExec(ENV_FILE, cmd, "1")];
       const shown = [`cd ${show(CWD)}&& `, ...cmd.map(show)].join("");
       process.stdout.write(`launch: ${shown.trimEnd()}\n`);
       process.exit(0);
@@ -1828,6 +1882,15 @@ exit "$rc"
   delete process.env.POSTMASTER_LAUNCH_NAME;
   delete process.env.POSTMASTER_LAUNCH_ROLE;
   delete process.env.POSTMASTER_ATTEMPT_PHASE;
+  // Re-hand the cd pair after the deletes: PWD and OLDPWD are the last
+  // additions the harness must inherit, so they are set last, closest to
+  // the spawn, where no later mutation can drop them unnoticed.
+  if (from !== "") process.env.OLDPWD = from;
+  try {
+    process.env.PWD = logicalPwd(CWD, from, process.cwd());
+  } catch {
+    /* keep the inherited PWD on any surprise */
+  }
 
   // With an env file a shell sources it and runs the harness as a child, as
   // main does: file output reaches the launch streams, an `exit` in the file
@@ -1883,7 +1946,9 @@ exit "$rc"
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
     ...(stdinBytes ? { input: stdinBytes } : {}),
     // A sourcing shell starts with SHLVL unset and takes the level as $1.
-    ...(freshShell ? { env: { ...process.env, SHLVL: undefined } } : {}),
+    // Always explicit, never inherited: the spawn carries a snapshot taken
+    // after the cd pair is re-set above. Identical content elsewhere.
+    env: freshShell ? { ...process.env, SHLVL: undefined } : { ...process.env },
   });
   let rc =
     child.status !== null && child.status !== undefined
