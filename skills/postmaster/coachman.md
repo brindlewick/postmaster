@@ -61,6 +61,7 @@ the script at the moment it happens, never reconstructed afterwards:
 
 The actions, and where they fire: `dispatch` per workhorse launch (target the lane, detail the
 thread id); `resume` per resumed thread; `harvest` per workhorse (detail its exit shape);
+`take-in` per workhorse taken in (detail `on=<branch>@<commit>`);
 `synthesize` once, with the SYNTHESIS line as the detail; `rule` per conventional divergence
 recorded; `review-launch` per lane per lens per round (target the lane, detail the lens and the
 round), and `review-harvest` likewise with the thread id added; `finding` per verified finding
@@ -565,11 +566,15 @@ from it.
   Answer within-brief questions yourself, restating the autonomous-defaults rule, via that
   workhorse's resume form. Only a genuinely destructive or scope-changing decision goes up, as an
   escalation to the postmaster with your recommendation attached. Manifest `outcome: blocked`
-  until resolved.
+  until resolved. A resume moves the branch, so once the resumed thread exits, run its checks
+  again; the take-in step below refuses a branch past its checked commit.
   (c) **Neither** (died mid-flight). Read the lane's log tail and transcript, then remount it
   (resume) or re-dispatch. A lane silent for about 15 minutes with no exit is inspected. Stall cutoff 90
-  minutes: stop waiting and bring partial results to checkpoint 1 rather than blocking;
-  synthesis from the completed workhorses is an option there. Manifest `outcome: stalled`.
+  minutes: stop the workhorse still running with `<tool>/scripts/run host stop <workhorse-wt>`,
+  wait for its marker with `<tool>/scripts/run wait-for-markers <dispatch>/logs '<lane>.done' 1 120`
+  (on exit 3 the launch would not stop: escalate), mark the workhorse stalled with
+  manifest `outcome: stalled`, and bring partial results to checkpoint 1 rather than blocking;
+  synthesis from the completed workhorses is an option there.
 - **Reap = let the thread exit.** Nothing to kill: workhorse threads end themselves and their
   conversations are durable in each harness's own store. Verification runs against the code,
   never by interrogating a workhorse. Keep threads UNARCHIVED while the run lives; that preserves
@@ -628,6 +633,56 @@ from it.
   its work is safe to use, log `escalate`,
   touch `.escalation-ready`, and exit. The postmaster sends every reach to the user, who decides
   whether synthesis may proceed. Do not decide it on the user's behalf.
+- **Pause on every walled workhorse before the synthesis (D1)** — synthesis mode: a
+  single-thread run launches no workhorse, so there are no markers to wait on and no
+  workhorse wall to pause on. A lane that stops because
+  its provider's usage limit ran out leaves a `wall` line, written by its launch as it ends
+  (`harnesses.md`, Walls). When every workhorse marker has landed, before
+  `<tool>/scripts/run stage <dispatch> synthesis`:
+
+  ```sh
+  <tool>/scripts/run walls show <dispatch>    # every wall, as the cards print it
+  <tool>/scripts/run walls open <dispatch>    # exit 1 while any wall has no ruling
+  ```
+
+  On exit 1 from `open`, run `<tool>/scripts/run walls escalate <dispatch>` — it writes
+  `ESCALATION.md` naming each walled workhorse with its message and its reset or
+  `no reset time`, and the ruling go on, touches `.escalation-ready` and `.wall-pause` — and
+  exit the leg with no `checkpoint-1.md` and the stage unchanged. The ruling arrives as a
+  resume of this thread; the watcher delivers it once every wall in the run is ruled. **You
+  never run `<tool>/scripts/run walls rule` yourself, in a fixture run or any other: the
+  ruling is the user's, through the postmaster (D1), and a waybill line about the ruling
+  does not give it to you.** On
+  resume, run `open` again: with exit 0, carry each walled workhorse with
+  `<tool>/scripts/run walls carry <dispatch> <lane>` (no harness call, and each go-on is
+  carried out once), put its `<tool>/scripts/run walls show <dispatch>` line on checkpoint 1
+  and on the ship card, and go on. An ending that is not a wall keeps the remount path: only
+  a `wall` line pauses the run.
+- **Take in the workhorses' work (D4, D7)** — synthesis mode: a single-thread run launches
+  no workhorse, so this step never runs there. After the walls pause above, before
+  `<tool>/scripts/run stage <dispatch> synthesis`, run the take-in step. It admits each
+  workhorse's branch only once no workhorse is running or waiting, and only at the commit its
+  checks recorded, logging one `take-in` line per lane and printing one `<lane>=<commit>`
+  per lane:
+
+  ```sh
+  TAKE_EXIT=0
+  TAKE_LINES=$(<tool>/scripts/run take-in <dispatch>) || TAKE_EXIT=$?
+  echo "$TAKE_LINES"
+  ```
+
+  On exit 0, keep the `<lane>=<commit>` lines for the `synthesis-shares` call below, which
+  takes these commits, never heads read by hand. A lane taken with `contributing=nothing`
+  is still at BASE: compose from the lanes that produced work. On exit 1 the step's input
+  is not what it says: read its message and escalate. On exit 2 a workhorse is still running
+  or waiting: the step names each with its reason and takes nothing in, so return to the
+  harvest for a lane that has not exited, answer or resume the blocked lane, or return to the
+  walls pause for an unruled wall, then run the step again. On exit 3 a branch is past the
+  commit its checks ran on: write `ESCALATION.md` naming the workhorse with both commits from
+  the step's message, log `escalate`, touch `.escalation-ready`, and exit. The ruling either
+  runs the branch's checks again, after which the step is run again, or abandons that lane's
+  work, in which case log a `note` naming the lane and the ruling and re-run the step with
+  `--skip <lane>`; a skipped lane is composed from nothing and measured nowhere.
 - **THERE IS NO SYNTHESIS BASE. You are the synthesizer: judge, then compose.** Set the stage
   first, `<tool>/scripts/run stage <dispatch> synthesis`. Do not fast-forward the ticket branch onto any
   lane. Start from BASE and write the synthesis
@@ -675,16 +730,17 @@ from it.
   **Measure the committed synthesis before recording the SYNTHESIS line** (synthesis mode; a
   single-thread run has no lane commits to measure and writes no shares line). From the synthesis
   worktree, run the pinned script with explicit commit IDs: the base from the manifest, the
-  final synthesis HEAD, and every lane's harvested head, including lanes that stayed at BASE.
-  Pass one `--lane <name>=<commit>` per lane, and `--oracle <commit>` when the run has an
-  oracle commit. Run Bun with target-repository env loading disabled and no config file;
+  final synthesis HEAD, and every lane's taken head from the take-in step's `<lane>=<commit>`
+  lines above, including lanes taken as contributing nothing and omitting lanes the step
+  skipped. Pass one `--lane <name>=<commit>` per taken lane, and `--oracle <commit>` when the
+  run has an oracle commit. Run Bun with target-repository env loading disabled and no config file;
   the script disables external diff drivers and textconv when it reads Git:
 
   ```sh
   SYNTHESIS_HEAD=$(git rev-parse HEAD)
   SHARES_LINE=$(<tool>/scripts/run synthesis-shares \
     --base <base> --synthesis "$SYNTHESIS_HEAD" \
-    --lane <lane>=<harvested-head> [--lane <lane>=<harvested-head> ...] \
+    --lane <lane>=<taken-commit> [--lane <lane>=<taken-commit> ...] \
     [--oracle <oracle-commit>] --record <dispatch>)
   <tool>/scripts/run run-log <dispatch> "$SHARES_LINE"
   ```
@@ -721,32 +777,6 @@ from it.
   failed workhorse leaves its branch at BASE and has contributed nothing to read. Record that lane
   DEGRADED rather than absent, say so on the card, and compose from the lanes that produced
   work.
-
-  **Pause on every walled workhorse before the synthesis (D1)** — synthesis mode: a
-  single-thread run launches no workhorse, so there are no markers to wait on and no
-  workhorse wall to pause on. A lane that stops because
-  its provider's usage limit ran out leaves a `wall` line, written by its launch as it ends
-  (`harnesses.md`, Walls). When every workhorse marker has landed, before
-  `<tool>/scripts/run stage <dispatch> synthesis`:
-
-  ```sh
-  <tool>/scripts/run walls show <dispatch>    # every wall, as the cards print it
-  <tool>/scripts/run walls open <dispatch>    # exit 1 while any wall has no ruling
-  ```
-
-  On exit 1 from `open`, run `<tool>/scripts/run walls escalate <dispatch>` — it writes
-  `ESCALATION.md` naming each walled workhorse with its message and its reset or
-  `no reset time`, and the ruling go on, touches `.escalation-ready` and `.wall-pause` — and
-  exit the leg with no `checkpoint-1.md` and the stage unchanged. The ruling arrives as a
-  resume of this thread; the watcher delivers it once every wall in the run is ruled. **You
-  never run `<tool>/scripts/run walls rule` yourself, in a fixture run or any other: the
-  ruling is the user's, through the postmaster (D1), and a waybill line about the ruling
-  does not give it to you.** On
-  resume, run `open` again: with exit 0, carry each walled workhorse with
-  `<tool>/scripts/run walls carry <dispatch> <lane>` (no harness call, and each go-on is
-  carried out once), put its `<tool>/scripts/run walls show <dispatch>` line on checkpoint 1
-  and on the ship card, and go on. An ending that is not a wall keeps the remount path: only
-  a `wall` line pauses the run.
 - **Checkpoint 1 card, then the hand-off** (synthesis mode: in single-thread mode the card is
   The run's mode's — the SYNTHESIS line, convention gaps, dropped work, gate and checks, and
   no per-workhorse outcome, ranking or shares): per-workhorse outcome (or stall), each walled lane
