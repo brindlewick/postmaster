@@ -6,8 +6,9 @@
 //
 //   surface    cli | web | library: the surface the verifier covers
 //   prompt     print the session's instructions for the repo and surface
-//   make       cut a worktree on a branch of its own beside the repo, render the prompt,
-//              launch the coachman role headless through run launch under run host, wait,
+//   make       cut a worktree on a branch of its own beside the repo, removed again
+//              when make fails, render the prompt, launch the coachman role headless
+//              through run launch under run host, wait,
 //              fall back to coachman_fallback on a provider wall read from the session
 //              stream, stop the session at the limit by the pid host recorded, and log
 //              one dispatch action per launch
@@ -506,6 +507,19 @@ function attempt(o: LaunchOpts): Attempt {
   }
 }
 
+/**
+ * Best-effort removal of a failed make's worktree and branch: "" when clean,
+ * otherwise the failure to append to the error that caused the cleanup.
+ */
+export function removeProvisioning(repo: string, wt: string, branch: string): string {
+  const problems: string[] = [];
+  const rm = git(repo, ["worktree", "remove", "--force", wt]);
+  if (rm.code !== 0) problems.push(rm.err.trim() || rm.out.trim() || `exit ${rm.code}`);
+  const del = git(repo, ["branch", "-D", branch]);
+  if (del.code !== 0) problems.push(del.err.trim() || del.out.trim() || `exit ${del.code}`);
+  return problems.length === 0 ? "" : `; the cleanup failed too: ${problems.join("; ")}`;
+}
+
 function runMake(req: ParsedMake): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
@@ -523,6 +537,25 @@ function runMake(req: ParsedMake): number {
   if (added.code !== 0) {
     throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
   }
+  try {
+    return runMakeLaunches(req, repo, dispatch, base, branch, wt, vdir);
+  } catch (e) {
+    const cleanup = removeProvisioning(repo, wt, branch);
+    if (e instanceof RunError && cleanup !== "") throw new RunError(`${e.message}${cleanup}`);
+    throw e;
+  }
+}
+
+/** Everything past the cut: a thrower here leaves no branch or worktree behind. */
+function runMakeLaunches(
+  req: ParsedMake,
+  repo: string,
+  dispatch: string,
+  base: string,
+  branch: string,
+  wt: string,
+  vdir: string,
+): number {
   const logs = join(dispatch, "logs");
   mkdirSync(logs, { recursive: true });
   const promptFile = join(logs, `verifier-${branch}-prompt.txt`);

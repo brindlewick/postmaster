@@ -2,7 +2,7 @@
 // detection and the wall scan. The live session stays out; acceptance-323 covers the
 // command boundary as a subprocess.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
@@ -16,6 +16,7 @@ import {
   pickBranch,
   pickWorktree,
   remoteFromSymbolicRef,
+  removeProvisioning,
   renderPrompt,
   repoTop,
   roleHarness,
@@ -339,6 +340,39 @@ describe("branchHasPath", () => {
       expect(branchHasPath(repo, "verify-cli", "note.md")).toBe(true);
       expect(branchHasPath(repo, "verify-cli", "missing.md")).toBe(false);
       expect(branchHasPath(repo, "nope", "note.md")).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("removeProvisioning", () => {
+  test("removes the worktree and the branch", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      const wt = join(dir, "app-verify-cli");
+      gitOrThrow(repo, "worktree", "add", wt, "-b", "verify-cli", "main");
+      expect(removeProvisioning(repo, wt, "verify-cli")).toBe("");
+      expect(existsSync(wt)).toBe(false);
+      expect(gitOrThrow(repo, "branch", "--list", "verify-cli").trim()).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("names what it could not remove", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      const out = removeProvisioning(repo, join(dir, "nope"), "nope");
+      expect(out.startsWith("; the cleanup failed too: ")).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
