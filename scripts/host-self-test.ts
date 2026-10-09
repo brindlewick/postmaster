@@ -125,15 +125,25 @@ function json<T>(path: string, fallback: unknown): T {
 // A test-side read of stub state, under the same lock the stubs take: the
 // state files are truncated and rewritten, and a lockless read can land
 // between and parse a torn half, which reads as empty state.
-function readStubJson(stubDir: string, name: string, fallback: Partial<HerdrStubState>): HerdrStubState;
-function readStubJson(stubDir: string, name: string, fallback: Partial<TmuxStubState>): TmuxStubState;
+function readStubJson(
+  stubDir: string,
+  name: string,
+  fallback: Partial<HerdrStubState>,
+): HerdrStubState;
+function readStubJson(
+  stubDir: string,
+  name: string,
+  fallback: Partial<TmuxStubState>,
+): TmuxStubState;
 function readStubJson(
   stubDir: string,
   name: string,
   fallback: unknown,
 ): HerdrStubState | TmuxStubState {
   // The cast bridges the overloads: the inner read casts to the state either way.
-  return withStubLock(stubDir, () => json(join(stubDir, name), fallback as Partial<HerdrStubState>));
+  return withStubLock(stubDir, () =>
+    json(join(stubDir, name), fallback as Partial<HerdrStubState>),
+  );
 }
 function save(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value));
