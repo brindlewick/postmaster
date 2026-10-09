@@ -1267,8 +1267,7 @@ export function scanLine(
     for (const item of live) aggregate.push(item);
   }
   for (const marker of lineCandidates)
-    if (!covered.has(coverKey(marker)))
-      faults.push({ start: marker.start, end: marker.end });
+    if (!covered.has(coverKey(marker))) faults.push({ start: marker.start, end: marker.end });
   if (physicalNext.length) {
     // A physical next-line marker is resolved by the streaming caller when its next line arrives.
     for (const marker of physicalNext)
