@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { run } from "./proc.ts";
 import { packageSettingsDiffer, parseSwitchOff, scanComments } from "./switch-offs.ts";
@@ -45,6 +52,13 @@ function write(path: string, text: string): void {
   const parent = full.slice(0, full.lastIndexOf("/"));
   mkdirSync(parent, { recursive: true });
   writeFileSync(full, text);
+}
+
+function symlink(target: string, path: string): void {
+  const full = join(repo, path);
+  const parent = full.slice(0, full.lastIndexOf("/"));
+  mkdirSync(parent, { recursive: true });
+  symlinkSync(target, full);
 }
 
 function commit(message: string): string {
@@ -1270,6 +1284,105 @@ describe("switch-off detection", () => {
     expect(result.code).toBe(2);
     expect(result.out).toContain("scripts/t.tsx:1 eslint-disable-line no-debugger");
   });
+
+  test("a .ts type assertion hides no later directive", () => {
+    // security-18: .ts read with the jsx plugin saw <any>v as a tag.
+    freshRepo("ts-assertion");
+    write(
+      "scripts/assert.ts",
+      'declare const v: any;\nconst a = <any>v;\n// @ts-ignore assertion reason\nconst n: number = "not a number";\nexport const b = v < /any>/g;\nexport { a, n };\n',
+    );
+    commit("add assertion case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/assert.ts:3 ts-ignore");
+  });
+
+  test("a symlinked source file is scanned through the link", () => {
+    // security-19: the scanner read the link's text instead of its target.
+    freshRepo("symlink");
+    write("scripts/evil.txt", '// @ts-ignore link reason\nexport const n: number = "x";\n');
+    symlink("evil.txt", "scripts/evil.ts");
+    commit("add symlinked source");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/evil.ts:1 ts-ignore");
+  });
+
+  test("a dangling source symlink fails loud", () => {
+    // security-19: a link the tree cannot resolve is refused, never clear.
+    freshRepo("dangling");
+    symlink("missing.txt", "scripts/dangle.ts");
+    commit("add dangling link");
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("cannot resolve symlink scripts/dangle.ts");
+  });
+
+  test("a chained source symlink fails loud", () => {
+    // security-19: a link to a link is refused, never followed blindly.
+    freshRepo("chained");
+    write("scripts/real.txt", "export const ok = true;\n");
+    symlink("real.txt", "scripts/mid.txt");
+    symlink("mid.txt", "scripts/chain.ts");
+    commit("add chained link");
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("cannot resolve symlink scripts/chain.ts");
+  });
+
+  test("a symlink leaving the tree fails loud", () => {
+    // security-19: a link escaping the tree is refused, never followed.
+    freshRepo("escaping");
+    symlink("../outside.ts", "scripts/esc.ts");
+    commit("add escaping link");
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("cannot resolve symlink scripts/esc.ts");
+  });
+
+  test("an Annex B disable comment is listed", () => {
+    // security-20: Oxlint reads a script file's <!-- line as a comment.
+    freshRepo("annex-b");
+    write(
+      "tests/foo.test.ts",
+      "<!-- eslint-disable postmaster/test-beside-target -- annex reason\nvar z = 1;\n",
+    );
+    commit("add annex b case");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("tests/foo.test.ts:1 eslint-disable");
+  });
+
+  test("an edit to a covered line under a braced block comment asks again", () => {
+    // security-22: the window stopped where braces closed on the comment line.
+    freshRepo("short-window");
+    git(repo, "checkout", "-q", "main");
+    write(
+      "scripts/own.ts",
+      "export const o = { a: 1 /* @ts-ignore own reason */ };\nexport const x: number = 1;\n",
+    );
+    commit("block comment on main");
+    git(repo, "checkout", "-q", "-B", "ticket", "main");
+    write(
+      "scripts/own.ts",
+      'export const o = { a: 1 /* @ts-ignore own reason */ };\nexport const x: number = "now a type error";\n',
+    );
+    commit("edit covered line");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain("scripts/own.ts:1 ts-ignore");
+  });
+
+  test("a .gitignore change is listed as a settings change", () => {
+    // security-23: Oxlint obeys .gitignore when it walks the tree.
+    freshRepo("gitignore");
+    write(".gitignore", "node_modules/\n");
+    commit("add gitignore");
+    const result = check();
+    expect(result.code).toBe(2);
+    expect(result.out).toContain(".gitignore");
+  });
 });
 
 describe("switch-off units", () => {
@@ -1487,6 +1600,86 @@ describe("switch-off units", () => {
     expect(
       packageSettingsDiffer('{"prettier":{"x":1}}', '{"prettier":{"x":2},"scripts":{"c":"a"}}'),
     ).toBe(true);
+  });
+
+  test("module extensions read assertions as code, not tags", () => {
+    // security-18: without the jsx plugin <any>v is an assertion.
+    const text =
+      'declare const v: any;\nconst a = <any>v;\n// @ts-ignore module reason\nconst n: number = "x";\n';
+    for (const name of ["x.ts", "x.mts", "x.cts"]) {
+      expect(scanComments(text, name).length).toBe(1);
+    }
+  });
+
+  test("a recovered parse fails loud instead of listing nothing", () => {
+    // security-20: recovery invents structure that can hide a directive.
+    expect(() => scanComments("x <!-- eslint-disable -- r\nvar z = 1;\n", "probe/x.js")).toThrow(
+      "refusing to report clear over unparseable input",
+    );
+  });
+
+  test("a script-only comment reaches the comment list", () => {
+    // security-20: x <!--eslint-disable is valid module code with no comment.
+    const cs = scanComments("x <!--eslint-disable\nvar z = 1;\n", "probe/x.js");
+    expect(cs.length).toBe(1);
+    expect(cs[0]!.raw).toBe("<!--eslint-disable");
+  });
+
+  test("parseSwitchOff counts any spelling or case of a directive word", () => {
+    // security-17/security-21: the tools match loosely, so the check matches looser.
+    for (const raw of [
+      "// @ts-ignore-next-line -- r",
+      "// @ts-ignorefoo -- r",
+      "// @TS-IGNORE -- r",
+      "/*/ @ts-ignore -- r */",
+      "/*// @ts-ignore -- r */",
+      "/* // @ts-ignore -- r */",
+      "// @ts-expect-errors -- r",
+      "/** @TS-EXPECT-ERROR-X r */",
+    ]) {
+      const off = parseSwitchOff(raw);
+      expect(off?.tool).toBe("ts");
+      expect(off?.scope).toBe("next");
+    }
+    expect(parseSwitchOff("// @ts-nocheck_x file reason")).toEqual({
+      form: "ts-nocheck",
+      scope: "file",
+      tool: "ts",
+      rules: "every rule",
+      reason: "_x file reason",
+    });
+    expect(parseSwitchOff("// biome-ignoreformat: r")).toEqual({
+      form: "biome-ignore",
+      scope: "next",
+      tool: "biome",
+      rules: "format",
+      reason: "r",
+    });
+    expect(parseSwitchOff("// biome-ignore-allformat: r")?.scope).toBe("file");
+    expect(parseSwitchOff("// ESLint-Disable-Next-Line no-debugger -- r")).toEqual({
+      form: "eslint-disable-next-line",
+      scope: "next",
+      tool: "linter",
+      rules: "no-debugger",
+      reason: "r",
+    });
+    expect(parseSwitchOff("<!-- eslint-disable rule -- r")).toEqual({
+      form: "eslint-disable",
+      scope: "open",
+      tool: "linter",
+      rules: "rule",
+      reason: "r",
+    });
+    expect(parseSwitchOff("--> eslint-disable rule -- r")).toEqual({
+      form: "eslint-disable",
+      scope: "open",
+      tool: "linter",
+      rules: "rule",
+      reason: "r",
+    });
+    // Position still rules: a mid-line mention names no directive.
+    expect(parseSwitchOff("// see @ts-ignore docs")).toBeNull();
+    expect(parseSwitchOff("// biome-ignoreX")).toBeNull();
   });
 });
 
