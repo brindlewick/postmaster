@@ -21,7 +21,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls, waitFor } from "./host-self-test.ts";
+import { runWorktreePaths } from "./host.ts";
 import { bootId, processStart, processState } from "./lib/processes.ts";
+import { launchRound, type StepChild, type StepDeps } from "./review-round.ts";
 
 const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "preamble", count: 8 },
@@ -1111,6 +1113,50 @@ test("Herdr checks time out when timeout is absent, and keep working when it is 
       expect(detected.status).toBe(0);
       expect(detected.stdout.trim()).toBe("none");
       expect(detected.elapsed).toBeLessThan(10000);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("close-run teardown finds reviewer worktrees from rows the launch wrote", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-revlaunch-")));
+  try {
+    const repo = join(dir, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "T-9");
+    mkdirSync(join(dispatch, "logs"), { recursive: true });
+    writeFileSync(join(dispatch, "manifest.json"), `${JSON.stringify({ base: "BASESHA" })}\n`);
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      `## Dispatch\nname: T-9\nsynthesis worktree: ${join(repo, ".worktrees", "T-9-synthesis")}\n`,
+    );
+    const recorded: string[][] = [];
+    const deps: StepDeps = {
+      tool: (name, args): StepChild => {
+        if (name === "log-action") recorded.push(args);
+        if (name === "turnpikes")
+          return { code: 0, out: "1 synthesis\n2 review style bug security\n", err: "" };
+        if (name === "reviewers" && args[0] === "lanes") return { code: 0, out: "luna\n", err: "" };
+        return { code: 0, out: "", err: "" };
+      },
+      git: (args): StepChild =>
+        args.includes("rev-parse")
+          ? { code: 0, out: "SNAP\n", err: "" }
+          : { code: 0, out: "", err: "" },
+    };
+    const res = launchRound(
+      { dispatch, round: "1", repo, synthesis: join(repo, ".worktrees", "T-9-synthesis") },
+      deps,
+    );
+    expect(res.code).toBe(0);
+    const lines = recorded
+      .filter((args) => args[2] === "review-launch")
+      .map((args) => JSON.stringify({ action: args[2], target: args[3], detail: args[4] }));
+    expect(lines.length).toBe(3);
+    writeFileSync(join(dispatch, "actions.jsonl"), `${lines.join("\n")}\n`);
+    const paths = runWorktreePaths(dispatch);
+    for (const lens of ["style", "bug", "security"]) {
+      expect(paths).toContain(join(repo, ".worktrees", `T-9-rev-${lens}-luna`));
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

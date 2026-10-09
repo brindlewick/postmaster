@@ -906,7 +906,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    every open lens through `run host` (`hosts.md`), each named as `host name <dispatch> review
    <lane> <lens> <round>` prints, with `--under`, `--role reviewer`, `--run`, `--out`, `--err`
    and `--marker` — the bug lens on `launch review`, every other lens on `launch launch`
-   with its prompt file. `run host` lands each marker, naming the round, the lens and the lane,
+   with its prompt file — logging one `review-launch` line per lane it starts.
+   `run host` lands each marker, naming the round, the lens and the lane,
    when its process exits, whatever its exit, and the call ends in the wait for the whole
    round, given every reviewer it launched, exiting as the wait does:
 

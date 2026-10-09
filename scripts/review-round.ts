@@ -627,6 +627,13 @@ export function launchRound(a: StepArgs, deps: StepDeps): StepResult {
       ]);
       passOut(res, started);
       passErr(res, started);
+      recordStep(res, deps, "log-action", [
+        a.dispatch,
+        "coachman",
+        "review-launch",
+        lane,
+        `${lens} round ${a.round}`,
+      ]);
       pairs.push(`${lens}:${lane}`);
     }
   }

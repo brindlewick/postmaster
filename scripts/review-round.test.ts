@@ -1193,6 +1193,28 @@ describe("the round's three steps", () => {
       }, "review-round-launch-");
     });
 
+    test("logs one review-launch per lane per lens per round, targeting the lane", () => {
+      withTempDir((root) => {
+        const p = paths(root);
+        const { calls, deps } = stand((name, args) => {
+          if (name === "launch" && args[0] === "skill")
+            return { code: 0, out: "SECURITY TEXT\n", err: "" };
+          return green(name, args);
+        });
+        const res = launchRound(
+          { dispatch: p.dispatch, round: "1", repo: p.repo, synthesis: p.synthesis },
+          deps,
+        );
+        expect(res.code).toBe(0);
+        const launches = of(calls, "log-action").filter((c) => c.args[2] === "review-launch");
+        expect(launches.map((c) => c.args)).toEqual([
+          [p.dispatch, "coachman", "review-launch", "luna", "style round 1"],
+          [p.dispatch, "coachman", "review-launch", "luna", "bug round 1"],
+          [p.dispatch, "coachman", "review-launch", "luna", "security round 1"],
+        ]);
+      }, "review-round-launchrows-");
+    });
+
     test("a scratch that is not ready stops it before the round starts", () => {
       withTempDir((root) => {
         const p = paths(root);
