@@ -33,7 +33,6 @@ import { reachTarget } from "./check-target.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type RecordOf<T = unknown> = Record<string, T>;
 type Harness = "codex" | "claude" | "muse" | "mimo" | "pi" | string;
 /** Observed changes read "read" or "write"; a named path reads "names", never either. */
@@ -113,7 +112,6 @@ interface ReachEvent {
   [key: string]: unknown;
 }
 
-const HERE = import.meta.dir;
 const TOOL = toolRoot(import.meta);
 const RUN = join(TOOL, "scripts", "run");
 
@@ -279,7 +277,7 @@ function placeOf(info: RunInfo, path: string, ownFolder: string): Place {
 }
 
 function expandPath(token: string, cwd: string): string | null {
-  if (!token || /[*?\[\]]/u.test(token)) return null;
+  if (!token || /[*?[\]]/u.test(token)) return null;
   let value = token;
   if (value.startsWith("~")) {
     if (value !== "~" && !value.startsWith("~/")) return null;
