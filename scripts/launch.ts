@@ -657,9 +657,11 @@ function promptedArgv(promptFile: string, idx: number, cmd: string[]): string[] 
  * script target itself; spawning the shell routes around that, and PWD and
  * OLDPWD ride the inherited environment as in the sourced forms. */
 function directArgv(level: string | undefined, cmd: string[]): string[] {
+  // TEMP-DIAG-R6 v2: fork instead of exec, to split exec from env. Removed
+  // before the card, whatever it proves.
   return [
     "-c",
-    'e=$(command -v env); s=$1; l=$2; shift 2; if [ "$s" = set ]; then exec "${e:-/usr/bin/env}" "SHLVL=$l" "$@"; else exec "${e:-/usr/bin/env}" -u SHLVL "$@"; fi',
+    'e=$(command -v env); s=$1; l=$2; shift 2; if [ "$s" = set ]; then "${e:-/usr/bin/env}" "SHLVL=$l" "$@"; s=$?; exit $s; else "${e:-/usr/bin/env}" -u SHLVL "$@"; s=$?; exit $s; fi',
     "_",
     level === undefined ? "unset" : "set",
     level ?? "",
