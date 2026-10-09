@@ -347,15 +347,14 @@ describe("coachman shell blocks", () => {
   });
 
   test("no shell block holds loops, arrays or pipes: the loop runs through review-round", () => {
+    const bad: number[] = [];
     for (const [index, block] of blocks.entries()) {
       const code = block.source
         .split("\n")
         .map((line) => line.replace(/#.*$/u, ""))
         .join("\n");
-      expect({ block: index + 1, code }).toEqual({
-        block: index + 1,
-        code: expect.not.stringMatching(/\$\{|\||\bfor\b|\bwhile\b|\bif\b|\bcase\b/u),
-      });
+      if (/\$\{|\||\bfor\b|\bwhile\b|\bif\b|\bcase\b/u.test(code)) bad.push(index + 1);
     }
+    expect(bad).toEqual([]);
   });
 });
