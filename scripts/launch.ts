@@ -1949,6 +1949,17 @@ exit "$rc"
   })();
   // Machine time, not the tests' clock: it is compared against file mtimes.
   const launchedAt = Date.now();
+  // TEMP-DIAG-R6, removed before the card: a 3-bit diagnosis of the handed
+  // OLDPWD rides one extra variable into the harness, so the mac parity
+  // messages carry it: 4 = the snapshot's OLDPWD equals `from`, 2 = `from`
+  // is non-empty, 1 = process.env holds OLDPWD at the spawn.
+  const diagSnap: Record<string, string | undefined> = freshShell
+    ? { ...process.env, SHLVL: undefined }
+    : { ...process.env };
+  const diagBits =
+    (diagSnap["OLDPWD"] === from && from !== "" ? 4 : 0) +
+    (from !== "" ? 2 : 0) +
+    ("OLDPWD" in process.env ? 1 : 0);
   const child = spawnSync(cmd, cmdArgs, {
     stdio: STDIN_FILE ? ["ignore", "inherit", "inherit"] : ["inherit", "inherit", "inherit"],
     // Raw bytes, as main's `exec < file` hands them: no UTF-8 decode.
@@ -1959,7 +1970,7 @@ exit "$rc"
     // after the cd pair is re-set above. The bare launch runs under a shell
     // too (directArgv): Bun on macOS drops the handed OLDPWD when it spawns
     // a script target itself, and the snapshot alone did not survive that.
-    env: freshShell ? { ...process.env, SHLVL: undefined } : { ...process.env },
+    env: { ...diagSnap, DIAG_R6: String(diagBits) },
   });
   let rc =
     child.status !== null && child.status !== undefined
