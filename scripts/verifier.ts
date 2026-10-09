@@ -401,8 +401,8 @@ export function surfaceFromReadme(text: string): string | null {
   // A minimal README may name only the short token, as src/cli.ts does. No
   // library token: a bare "library" is usually the project's own code.
   const tokens: Array<[RegExp, Surface]> = [
-    [/\bcli\b/u, "cli"],
-    [/\bweb\b/u, "web"],
+    [/\bcli\b/u, "cli"], // ASCII: ASCII literals; an adjacent ASCII word char joins them
+    [/\bweb\b/u, "web"], // ASCII: ASCII literals; an adjacent ASCII word char joins them
   ];
   let tokenBest: { at: number; surface: Surface } | null = null;
   for (const [re, surface] of tokens) {
