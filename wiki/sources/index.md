@@ -1,7 +1,7 @@
 ---
 title: Sources
 type: source
-updated: 2026-10-08
+updated: 2026-10-09
 ---
 
 # Sources
@@ -12,8 +12,11 @@ captured into `raw/`, saying what it claims and what it would mean here if true.
 
 ## Articles
 
-Read on 2026-10-08 for [running the flow on Cloudflare](../concepts/running-the-flow-on-cloudflare.md), newest first:
+Read on 2026-10-08 and 2026-10-09 for [running the flow on Cloudflare](../concepts/running-the-flow-on-cloudflare.md), newest first:
 
+- [Price pages, limits and lifecycle documents of container and sandbox platforms](on-demand-containers-and-sandboxes.md): what a container costs on each platform that bills it by the second, and what stops one holding a launch.
+- [Hosted CI machines, free tiers, Tailscale, phones and owned hardware](ci-runners-free-tiers-and-phones.md): what else could run a ticket's work, and what stops it.
+- [Price lists and billing rules of hourly-billed virtual machine providers](on-demand-virtual-machines.md): what an hour of a plain machine costs, and what stops one being bought.
 - [The vendors' price pages](model-api-prices.md): what a million tokens cost on each lane's model.
 - [pi, Grok Build and the Antigravity CLI](other-harnesses-login-and-terms.md): headless logins, endpoints and terms.
 - [Xiaomi on MiMo Code](xiaomi-mimo-code-login-and-terms.md): keys, the Token Plan's "programming tools" clause.

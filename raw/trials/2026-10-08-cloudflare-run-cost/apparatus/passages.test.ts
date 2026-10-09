@@ -79,10 +79,36 @@ describe("render", () => {
   });
 
   test("an always pattern keeps a named entry that holds no quotation", () => {
-    const kept = render(blocks(notes), "# P", { always: /^A1\.9$/u });
+    const kept = render(blocks(notes), "# P", { always: /^A1\.9 /u });
     expect(kept).toContain("### A1.9 A mere comment");
     expect(kept).toContain("- finding: nothing quoted here");
     expect(render(blocks(notes), "# P")).not.toContain("### A1.9");
+  });
+
+  test("an always pattern also matches the title, for entries whose ids repeat", () => {
+    const kept = render(blocks(notes), "# P", { always: /mere comment/u });
+    expect(kept).toContain("### A1.9 A mere comment");
+    expect(render(blocks(notes), "# P", { always: /no such title/u })).not.toContain("### A1.9");
+  });
+
+  test("a checked line and an arithmetic line are kept, and a line about someone else's draft is not", () => {
+    const text = render(
+      blocks(
+        [
+          "### X1 A rate",
+          "- finding: a rate",
+          "- checked: yes (two reads agree)",
+          '- quote: "an exact sentence on the page" (verbatim)',
+          "- draft says: a private figure",
+          "- arithmetic (not on the page): 4 x 3600 = 14400",
+          "- source: https://example.com/p ; read 2026-10-09",
+        ].join("\n"),
+      ),
+      "# P",
+    );
+    expect(text).toContain("- checked: yes (two reads agree)");
+    expect(text).toContain("- arithmetic (not on the page): 4 x 3600 = 14400");
+    expect(text).not.toContain("draft says");
   });
 
   test("an ids filter and a drop pattern narrow the output", () => {

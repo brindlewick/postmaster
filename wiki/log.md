@@ -1,12 +1,26 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-08
+updated: 2026-10-09
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-09] query | how other on-demand compute compares, and what limits concurrency
+
+Issue #341. The user asked whether other providers sell on-demand machines for less than Cloudflare, what limits how many runs
+can be in flight and what a cloud would lift, and whether a ticket could name where its work runs, beside local runs. Read the
+price, limit and lifecycle pages of twelve container and sandbox platforms (ten of them priced), the price lists, billing rules and quota pages of
+eight virtual machine providers, and the pages on hosted runners, tailnets, phones and owned hardware; captured the passages
+relied on in three more `raw/articles/` folders, each with a page in `sources/`. Priced the same two kinds of hour on each
+provider and counted how many launches ran at once in the 18 audited runs, in the trial `2026-10-08-cloudflare-run-cost`, with
+eleven more controls (34 in all). Two figures given for Fly.io Machines and one for a Hetzner plan by an earlier comparison that
+had not been checked against the pages were wrong. Added the sections "Other on-demand providers", "What limits concurrency,
+and what a cloud would lift" and "Other places to run a ticket" to [running the flow on
+Cloudflare](concepts/running-the-flow-on-cloudflare.md), and put the spike beside a measurement of idle compute. No standing
+changed.
 
 ## [2026-10-09] query | what the flow would cost on Cloudflare alone
 

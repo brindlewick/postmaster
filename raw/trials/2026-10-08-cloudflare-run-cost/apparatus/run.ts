@@ -3,13 +3,15 @@
 //
 //   bun run.ts [--runs <runs.json>] [--out <results dir>]
 //
-// Reads the audit's runs.json and writes instance-time.json, instance-time.md and cost.md.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Reads the audit's runs.json and writes instance-time.json, instance-time.md, cost.md, concurrency.md and providers.md.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Extract } from "../../2026-10-03-lane-audit/apparatus/extract.ts";
 import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
+import { intervalsOfRuns, loadTable, longerThan, peakInOneRun, runHours } from "./concurrency.ts";
 import { covered, runTime, type RunTime, summarizeRole } from "./instance-time.ts";
 import { PLAN_FEE_PER_MONTH } from "./cost.ts";
+import { type Machine, machinesTable, profileHours, type Rate, ratesTable, runCost } from "./providers.ts";
 import {
   auditTotals,
   breakEven,
@@ -165,6 +167,81 @@ writeFileSync(
   join(outDir, "instance-time.json"),
   `${JSON.stringify({ real: summary(real), fixture: summary(fixture), perRun: real }, null, 2)}\n`,
 );
+const stageLengths = longerThan(intervalsOfRuns(covered(data.runs, "real")).coachman, 24);
+const concurrencyText = `# How many launches ran at once
+
+The ${real.length} real runs that reached synthesis, whose records span ${span?.first.slice(0, 10) ?? "?"} to ${span?.last.slice(0, 10) ?? "?"}. A launch is an
+interval: a lane from the start of implementing to its exit; a reviewer from its round's first launch line to its own
+exit; a gate run for its seconds, ending when it was logged; the coachman for each stage in which a leg can run, which
+includes the wait for the user's spec review, so its row is an upper bound. The load of a set of launches is how many
+cover each moment, over the one window that covers all of them. [method.md](../method.md) says what this leaves out:
+fixture runs, other projects and the user's own sessions shared the machine.
+
+${loadTable(intervalsOfRuns(covered(data.runs, "real")))}
+
+Inside any one run, at most ${peakInOneRun(covered(data.runs, "real"), false)} lanes, reviewers and gate runs ran at once, and ${peakInOneRun(covered(data.runs, "real"), true)} with the
+coachman's stages. The longest single coachman stage is ${stageLengths.longest.toFixed(1)} hours, waits included, and ${stageLengths.count} stages ran longer
+than 24 hours.
+`;
+writeFileSync(join(outDir, "concurrency.md"), concurrencyText);
+
+// what other on-demand providers charge, from the rate tables in results/
+const readRows = <T>(name: string): T[] =>
+  existsSync(join(outDir, name)) ? (JSON.parse(readFileSync(join(outDir, name), "utf8")) as { rates?: T[]; machines?: T[] })[name.startsWith("machines") ? "machines" : "rates"] ?? [] : [];
+const providerRates = readRows<Rate>("providers.json");
+const machineRows = readRows<Machine>("machines.json");
+const medianOf = (role: "lanes" | "reviewers" | "gatesOnLanes" | "gatesOnSynthesis"): number =>
+  (summarizeRole(real, role).medianPerRun ?? 0) / 3600;
+const gateMedian = medianOf("gatesOnLanes") + medianOf("gatesOnSynthesis");
+const agentBase = medianOf("lanes") + medianOf("reviewers");
+const medianRunHours = {
+  agentLow: agentBase + floor / 3600 - gateMedian,
+  agentHigh: agentBase + ceilingSameRuns / 3600 - gateMedian,
+  gate: gateMedian,
+};
+const lives = runHours(covered(data.runs, "real"));
+const life = { medianHours: median(lives) as number, lives };
+const lifeMean = lives.reduce((a, b) => a + b, 0) / lives.length;
+const gatesTotal = real.reduce((a, t) => a + t.gatesOnLanes.each.concat(t.gatesOnSynthesis.each).reduce((x, y) => x + y, 0), 0);
+const allHours = profileHours({ lanesAndReviewers: totals.lanesAndReviewers, coachman: totals.coachmanCeiling, gates: gatesTotal });
+const cloudflareRate = providerRates.find((r) => r.id === "cloudflare");
+const sizedAverage = cloudflareRate ? runCost(cloudflareRate, allHours.agent, allHours.gate) / totals.runs : 0;
+const sizedEvens = breakEven(FLAT_PRICES, sizedAverage, PLAN_FEE_PER_MONTH);
+const sizedRows = FLAT_PRICES.map((price, i) => `| $${price} | ${(sizedEvens[i] as number).toFixed(0)} |`).join("\n");
+const providersText = `# What other on-demand providers charge
+
+List prices read on 2026-10-08 and 2026-10-09; each row names its page, its date and how well the rate was checked, in
+\`providers.json\` and \`machines.json\`. Two kinds of work are priced. A **gate hour** is 4 vCPU and 12 GiB with every
+vCPU busy. A **waiting-agent hour** is 1 vCPU and 4 GiB with a fifth of the CPU busy, the rest spent waiting on model
+calls. Neither profile was measured: [#363](https://github.com/brindlewick/postmaster/issues/363) is the ticket that
+would. The disk is 20 GB and 10 GB where a provider charges for it by the hour, in the first table only; egress, plan fees and, for machines billed whole, the disk and the address are left out.
+
+A typical run, built from the median hours of each role in the instance-time tables, is ${medianRunHours.agentLow.toFixed(1)} to ${medianRunHours.agentHigh.toFixed(1)} waiting-agent hours (lanes,
+reviewers and the coachman at its floor and its ceiling, less the gate) and ${medianRunHours.gate.toFixed(1)} gate hours. A provider
+whose longest session is shorter than 19 hours, about the coachman's median ceiling over a whole run (18.8 hours), is left out of the first table.
+
+## Containers and sandboxes billed by the second
+
+${ratesTable(providerRates, { agentLow: medianRunHours.agentLow, agentHigh: medianRunHours.agentHigh, gate: medianRunHours.gate }, 19)}
+
+## Machines billed whole
+
+A machine of 4 vCPU and 8 GiB kept up for a run's whole life: the median run's life is ${life.medianHours.toFixed(1)} hours, the
+mean ${lifeMean.toFixed(1)}, taken from the first to the last timestamp in each run's record, waits included.
+
+${machinesTable(machineRows, life)}
+
+## All ${totals.runs} runs together on Cloudflare, with agents sized to what they use
+
+${allHours.agent.toFixed(0)} waiting-agent hours and ${allHours.gate.toFixed(0)} gate hours: ${cloudflareRate ? `$${sizedAverage.toFixed(2)} an average run` : "no Cloudflare row"}, against
+$${averageAt("standard-4").toFixed(2)} when every launch is a standard-4. The runs a month at which a flat monthly price costs the same as that
+(plan fee $${PLAN_FEE_PER_MONTH} plus the average run for each run):
+
+| Flat price a month | Runs a month |
+| --- | --- |
+${sizedRows}
+`;
+writeFileSync(join(outDir, "providers.md"), providersText);
 writeFileSync(join(outDir, "instance-time.md"), instanceTime);
 writeFileSync(join(outDir, "cost.md"), cost);
 process.stdout.write(`wrote ${outDir}\n`);

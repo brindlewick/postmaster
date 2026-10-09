@@ -5,11 +5,20 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Extract } from "../../2026-10-03-lane-audit/apparatus/extract.ts";
 import { median } from "../../2026-10-03-lane-audit/apparatus/analyze.ts";
+import {
+  COACHMAN_STAGES,
+  intervalsOfRuns,
+  load as loadOf,
+  longerThan,
+  peakInOneRun,
+  runHours,
+} from "./concurrency.ts";
 import { cost, INSTANCE_TYPES, type InstanceType, perHour } from "./cost.ts";
 import { covered, runTime, seconds, summarizeRole } from "./instance-time.ts";
 import type { Launch } from "./measure.ts";
 import { CONTRIBUTOR_TIER, type Prices, roleDollars, STANDARD_TIER, withRatesOf } from "./model-bill.ts";
 import { auditTotals, totalsCost } from "./tables.ts";
+import { AGENT, breakEvenRuns, fits, GATE, hourly, type Machine, profileHours, type Rate } from "./providers.ts";
 import { totalInput } from "./tokens.ts";
 import type { RunUptime } from "./uptime.ts";
 
@@ -27,6 +36,8 @@ export type Inputs = {
   launches: Launch[];
   uptime: RunUptime[];
   prices: Prices;
+  providers: Rate[];
+  machines: Machine[];
 };
 
 const within = (got: number, want: number, tolerance: number): boolean => Math.abs(got - want) <= tolerance;
@@ -341,6 +352,179 @@ export function runControls(inp: Inputs): Control[] {
     got: `$${empty.low} low, $${empty.high} high, average ${empty.average}`,
     pass: empty.low === 0 && empty.high === 0 && empty.average === 0,
   });
+
+  // 11. how many launches ran at once
+  const kinds = intervalsOfRuns(covered(inp.audit.runs, "real"));
+  const secondsOf = (xs: ReadonlyArray<readonly [number, number]>): number => sum(xs.map(([a, b]) => b - a));
+  const totalsLane = summarizeRole(real, "lanes").totalSeconds;
+  const totalsReview = summarizeRole(real, "reviewers").totalSeconds;
+  const totalsGate =
+    summarizeRole(real, "gatesOnLanes").totalSeconds + summarizeRole(real, "gatesOnSynthesis").totalSeconds;
+  const totalsCoach = sum(real.map((t) => t.coachmanUpper));
+  const intervalsAgree =
+    within(secondsOf(kinds.lanes), totalsLane, 1) &&
+    within(secondsOf(kinds.reviewers), totalsReview, 1) &&
+    within(secondsOf(kinds.gates), totalsGate, 1) &&
+    within(secondsOf(kinds.coachman), totalsCoach, 1);
+  add({
+    id: "C24",
+    kind: "positive",
+    what: "the launches rebuilt as intervals from their timestamps, against the hours the instance-time tables summed from each launch's own seconds",
+    expected: "the same total for lanes, reviewers, gate runs and the coachman's stages, to a second",
+    got: `${fmt(secondsOf(kinds.lanes) / 3600)}, ${fmt(secondsOf(kinds.reviewers) / 3600)}, ${fmt(secondsOf(kinds.gates) / 3600)} and ${fmt(secondsOf(kinds.coachman) / 3600)} hours, against ${fmt(totalsLane / 3600)}, ${fmt(totalsReview / 3600)}, ${fmt(totalsGate / 3600)} and ${fmt(totalsCoach / 3600)}`,
+    pass: intervalsAgree,
+  });
+  const everyLaunch = [...kinds.lanes, ...kinds.reviewers, ...kinds.gates, ...kinds.coachman];
+  const everyLoad = loadOf(everyLaunch);
+  add({
+    id: "C25",
+    kind: "positive",
+    what: "the average load over the window, times the window's seconds, against the sum of every interval's length",
+    expected: "equal: the area under the load curve is the sum of the intervals",
+    got: `${fmt((everyLoad.average * everyLoad.seconds) / 3600, 2)} and ${fmt(secondsOf(everyLaunch) / 3600, 2)} hours`,
+    pass: within(everyLoad.average * everyLoad.seconds, secondsOf(everyLaunch), 1),
+  });
+  const noLoad = loadOf([]);
+  add({
+    id: "C26",
+    kind: "negative",
+    what: "the load of no launches, through the same code",
+    expected: "a peak of 0 and an average of 0",
+    got: `peak ${noLoad.peak}, average ${noLoad.average}`,
+    pass: noLoad.peak === 0 && noLoad.average === 0,
+  });
+
+  // 12. what other providers charge
+  const cloudflareRow = inp.providers.find((r) => r.id === "cloudflare");
+  const standard4Type = INSTANCE_TYPES["standard-4"] as InstanceType;
+  if (cloudflareRow) {
+    const agentByHand = 0.2 * 0.072 + 4 * 0.009 + 10 * 0.000252;
+    add({
+      id: "C27",
+      kind: "positive",
+      what: "Cloudflare's row in the provider table: a gate hour against the cost module's standard-4 hour, and a waiting-agent hour against its arithmetic by hand",
+      expected: "$0.40104 and $0.05292, agreeing to a millionth of a dollar",
+      got: `$${hourly(cloudflareRow, GATE).toFixed(5)} against $${perHour(standard4Type, 1).toFixed(5)}, and $${hourly(cloudflareRow, AGENT).toFixed(5)} against $${agentByHand.toFixed(5)}`,
+      pass:
+        within(hourly(cloudflareRow, GATE), perHour(standard4Type, 1), 1e-6) &&
+        within(hourly(cloudflareRow, AGENT), agentByHand, 1e-6),
+    });
+  }
+  const gatesSeconds = sum(real.map((t) => seconds(t.gatesOnLanes) + seconds(t.gatesOnSynthesis)));
+  const lanesReviewersSeconds = sum(real.map((t) => seconds(t.lanes) + seconds(t.reviewers)));
+  const coachmanSeconds = sum(real.map((t) => t.coachmanUpper));
+  const split = profileHours({ lanesAndReviewers: lanesReviewersSeconds, coachman: coachmanSeconds, gates: gatesSeconds });
+  add({
+    id: "C28",
+    kind: "positive",
+    what: "the waiting-agent hours and the gate hours of all the runs, against every launch hour (lanes, reviewers and the coachman's ceiling)",
+    expected: "the two add up to the same hours, since the gate is carved out of the coachman and counted once",
+    got: `${fmt(split.agent + split.gate)} against ${fmt((lanesReviewersSeconds + coachmanSeconds) / 3600)} hours`,
+    pass: within(split.agent + split.gate, (lanesReviewersSeconds + coachmanSeconds) / 3600, 1e-9),
+  });
+  const fly = inp.providers.find((r) => r.id === "fly-performance");
+  if (fly) {
+    const derived = 4 * fly.vcpuHour + 8 * fly.gibHour;
+    const pagePerSecond = 0.000050928;
+    const printedHourly = 0.1833;
+    add({
+      id: "C29",
+      kind: "positive",
+      what: "Fly's performance-4x with 8 GB from the provider table's per-vCPU and per-GiB rates, against the $0.1833 an hour that Fly's pricing page prints for it and the per-second figure from the documentation's constants times 3600",
+      expected: "$0.1833 an hour all three ways, to a hundredth of a cent",
+      got: `$${derived.toFixed(4)} against $${printedHourly.toFixed(4)} and $${(pagePerSecond * 3600).toFixed(4)}`,
+      pass: within(derived, pagePerSecond * 3600, 1e-4) && within(derived, printedHourly, 1e-4),
+    });
+    add({
+      id: "C30",
+      kind: "negative",
+      what: "the same Fly price against an unchecked figure of $0.0001386 a second that had been given for it",
+      expected: "far apart: the unchecked figure is 2.7 times the derived price",
+      got: `${(0.0001386 * 3600).toFixed(3)} against ${derived.toFixed(3)} an hour, a ratio of ${((0.0001386 * 3600) / derived).toFixed(2)}`,
+      pass: (0.0001386 * 3600) / derived > 2,
+    });
+  }
+  const daytona = inp.providers.find((r) => r.id === "daytona");
+  if (daytona) {
+    add({
+      id: "C31",
+      kind: "negative",
+      what: "Daytona's default size limit of 4 vCPU and 8 GB against the 12 GiB gate profile, through the fit check",
+      expected: "the gate does not fit and the waiting agent does",
+      got: `gate fits: ${fits(daytona, GATE)}, agent fits: ${fits(daytona, AGENT)}`,
+      pass: !fits(daytona, GATE) && fits(daytona, AGENT),
+    });
+  }
+  const unnamed = [...inp.providers, ...inp.machines].filter((r) => !r.source || !r.read || !r.checked);
+  add({
+    id: "C32",
+    kind: "positive",
+    what: "every row of the provider and machine tables names its page, the day it was read and how well it was checked",
+    expected: "none missing",
+    got: `${unnamed.length} missing of ${inp.providers.length + inp.machines.length}`,
+    pass: unnamed.length === 0,
+  });
+  const lives = runHours(covered(inp.audit.runs, "real"));
+  const medianLife = median(lives) as number;
+  const vultr = inp.machines.find((m) => m.id === "vultr-vc2-4c-8gb");
+  if (vultr && vultr.monthly !== null) {
+    const byHand = vultr.monthly / (Math.ceil(medianLife) * vultr.hourly);
+    const fromCode = breakEvenRuns(vultr, medianLife) as number;
+    add({
+      id: "C33",
+      kind: "positive",
+      what: "the runs a month that cost what Vultr's 4 vCPU and 8 GiB machine costs kept up all month, from the table's code against $40 over the median life rounded up to a whole hour at $0.055",
+      expected: "the same number, about 26",
+      got: `${fromCode.toFixed(2)} against ${byHand.toFixed(2)} (median life ${medianLife.toFixed(1)} hours)`,
+      pass: within(fromCode, byHand, 1e-9),
+    });
+  }
+  const azure = inp.machines.find((m) => m.id === "azure-spot-f4s-v2");
+  if (azure) {
+    add({
+      id: "C34",
+      kind: "negative",
+      what: "the same break-even for Azure Spot, which has no monthly price, through the same code",
+      expected: "none, not zero and not NaN",
+      got: String(breakEvenRuns(azure, medianLife)),
+      pass: breakEvenRuns(azure, medianLife) === null,
+    });
+  }
+  const realRuns = covered(inp.audit.runs, "real");
+  const rawStages = realRuns.flatMap((r) =>
+    r.stages
+      .filter((st) => COACHMAN_STAGES.includes(st.stage) && st.seconds !== null && st.seconds > 0)
+      .map((st) => (st.seconds as number) / 3600),
+  );
+  const fromIntervals = longerThan(kinds.coachman, 24);
+  const rawLongest = Math.max(...rawStages);
+  const rawOver = rawStages.filter((h) => h > 24).length;
+  add({
+    id: "C35",
+    kind: "positive",
+    what: "the longest coachman stage and the number of stages over 24 hours, from the rebuilt intervals against the audit's own stage seconds",
+    expected: "the same longest stage and the same count",
+    got: `${fromIntervals.longest.toFixed(2)} hours and ${fromIntervals.count} against ${rawLongest.toFixed(2)} hours and ${rawOver}`,
+    pass: within(fromIntervals.longest, rawLongest, 1e-9) && fromIntervals.count === rawOver,
+  });
+  add({
+    id: "C36",
+    kind: "negative",
+    what: "a stage of exactly 24 hours, and one of 24 hours and a second, through the same count of stages over 24 hours",
+    expected: "the first is not counted and the second is",
+    got: `${longerThan([[0, 86400]], 24).count} and ${longerThan([[0, 86401]], 24).count}`,
+    pass: longerThan([[0, 86400]], 24).count === 0 && longerThan([[0, 86401]], 24).count === 1,
+  });
+  const onePeak = peakInOneRun(realRuns, false);
+  const allPeak = loadOf([...kinds.lanes, ...kinds.reviewers, ...kinds.gates]).peak;
+  add({
+    id: "C37",
+    kind: "positive",
+    what: "the most lanes, reviewers and gate runs at once inside any one run, against the most at once across all the runs together",
+    expected: "at least 1 and no more than the all-runs peak, since one run is part of the whole",
+    got: `${onePeak} against ${allPeak}`,
+    pass: onePeak >= 1 && onePeak <= allPeak,
+  });
   return out;
 }
 
@@ -367,6 +551,8 @@ export function load(results: string, audit: string): Inputs {
     launches: read<{ launches: Launch[] }>(join(results, "tokens-by-kind.json")).launches,
     uptime: read<{ rows: RunUptime[] }>(join(results, "coachman-uptime.json")).rows,
     prices: read<Prices>(join(results, "prices.json")),
+    providers: read<{ rates: Rate[] }>(join(results, "providers.json")).rates,
+    machines: read<{ machines: Machine[] }>(join(results, "machines.json")).machines,
   };
 }
 

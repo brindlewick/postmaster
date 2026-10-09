@@ -28,7 +28,7 @@ export function blocks(notes: string): Block[] {
   return out;
 }
 
-const KEEP = /^- (finding|quote[^:]*|source|strength):/u;
+const KEEP = /^- (finding|quote[^:]*|source|strength|checked|arithmetic[^:]*):/u;
 
 /** The lines of a block worth keeping: finding, quotes, source, strength, and their continuations. */
 export function kept(b: Block): string[] {
@@ -44,7 +44,7 @@ export function kept(b: Block): string[] {
 export type Options = {
   ids?: RegExp;
   drop?: RegExp;
-  /** ids kept whole, every line, even when they hold no quotation, for a reader's plain summary of what was permitted */
+  /** entries kept whole, every line, even when they hold no quotation, matched against the id and the title together: a reader's summary or a table */
   always?: RegExp;
   /** number the entries `<prefix>1`, `<prefix>2`... in front of the reader's own heading, for notes whose ids repeat */
   prefix?: string;
@@ -55,7 +55,7 @@ export function render(bs: readonly Block[], intro: string, opt: Options = {}): 
   let n = 0;
   for (const b of bs) {
     if (opt.ids && !opt.ids.test(b.id)) continue;
-    const always = opt.always?.test(b.id) === true;
+    const always = opt.always?.test(`${b.id} ${b.title}`) === true;
     const lines = always ? b.lines.filter((l) => l.trim() !== "") : kept(b);
     if (lines.length === 0) continue;
     // a quotation line is any `- quote...:` line that says something other than n/a, whether the words are in marks or are code

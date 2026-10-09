@@ -145,13 +145,16 @@ What it would take to run the flow on someone else's machines, and what the harn
   earlier example in its sandbox repository did the same for a Claude subscription token. No vendor's terms settle a
   subscription login held by a Worker for a cloud container. On Cloudflare alone a typical run costs about $1 to $4.50 in
   container time and the average run up to about $4 to $7, with the control plane at cents; the model bill, the same on any
-  host, is a side note. A container per lane would stop every reach the isolation scan found inside the machine, by the
-  documented design.
+  host, is a side note. Other on-demand providers charge about the same: Cloudflare is mid-pack, with several container
+  platforms and hourly virtual machines cheaper for a typical run by under a dollar, and the platforms built for agent
+  sandboxes dearer. A container per lane would stop every reach the isolation scan found inside the machine, by the
+  documented design, and lifts the machine's cores as the limit on runs in flight, not the usage windows or the user's
+  rulings. It would be an option a ticket chooses beside local runs.
 
 ## Sources
 
 [Recorded runs and captured reading](sources/index.md): one run, the review rounds of #36,
 fourteen papers on review, fixes and severity, an article on review before implementation,
 [pstack](sources/pstack.md), a plugin of skills for verified agent work, read twice and set beside
-what postmaster holds, and the Cloudflare documentation, the harness vendors' pages and their price pages read for
-running the flow on Cloudflare.
+what postmaster holds, and the Cloudflare documentation, the harness vendors' pages and their price pages, and the
+pricing pages of other on-demand compute, read for running the flow on Cloudflare and elsewhere.

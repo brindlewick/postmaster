@@ -1,7 +1,7 @@
 ---
 kind: trial
-subject: what one run of the flow would cost on Cloudflare Containers and as pay-per-token model use, from the lane audit's times and token counts, and which of the flow's scripts lean on one machine
-date: 2026-10-08
+subject: what one run of the flow would cost on Cloudflare Containers and on other on-demand providers, and as pay-per-token model use, from the lane audit's times and token counts, how many launches ran at once, and which of the flow's scripts lean on one machine
+date: 2026-10-09
 ---
 
 # Method
@@ -14,6 +14,11 @@ made them come out wrong. The comparison it serves is Cloudflare against a flat-
 figures lead, with the totals for all the runs and a break-even against a flat monthly price, and the model bill, which
 is the same on any host, is a side note. It answers a question about arithmetic on the fleet's own records. It does not show
 that the flow runs on Cloudflare, which needs a trial of its own.
+
+Two later questions use the same records. The first is whether another on-demand provider would charge less than Cloudflare
+for the same hours, priced from each provider's own page on two kinds of hour (a gate hour and a waiting-agent hour) and, for
+virtual machines, for a machine kept up for a run's whole life. The second is what limits how many runs can be in flight,
+for which the trial counts how many launches ran at once.
 
 **Inputs.**
 
@@ -28,6 +33,10 @@ that the flow runs on Cloudflare, which needs a trial of its own.
 - The rates. Cloudflare's: the Containers pricing page and instance-types partial of the documentation
   repository at commit 6e1b96433cf016efd2c0c9057a7e27a8e112376f, read on 2026-10-08. The models': each vendor's own
   pricing page, read on 2026-10-08, with the page and tier in `results/prices.json`.
+- Other providers' rates, entered by hand in `results/providers.json` (containers and sandboxes billed by the second) and
+  `results/machines.json` (machines billed whole), each row naming its page, the day it was read and how well it was
+  checked. The readings are the captures `on-demand-containers-and-sandboxes` and `on-demand-virtual-machines`, read on
+  2026-10-09. A rate that could be had only from a search answer or a third party is not in the files.
 - The flow's scripts, `scripts/` and `scripts/lib/` of this repository at the base of this branch, for the table of
   what they lean on. The seven scripts that test the flow itself (self-tests, oracles, acceptance runs) and every
   `.test.ts` are left out, which leaves 69.
@@ -54,6 +63,21 @@ that the flow runs on Cloudflare, which needs a trial of its own.
 - *Break-even against a flat monthly price*: the runs a month at which the $5 plan fee plus the average run's cost for
   each run equals the flat price, for example prices. It assumes the flat machine is big enough for the work, which
   this trial does not size.
+- *A gate hour* is 4 vCPU and 12 GiB with every vCPU busy, and a *waiting-agent hour* is 1 vCPU and 4 GiB with a fifth of the
+  CPU busy; the first is the project's checks, the second a lane, a reviewer or a coachman waiting on a model. Neither was
+  measured. The waiting-agent hours of the 18 runs are every lane, reviewer and coachman launch hour (the coachman at its
+  floor or its ceiling) less the gate hours, which are carved out of the coachman and counted once.
+- *A rate* is dollars per vCPU-hour and per GiB-hour, with the CPU charged either for the busy part or for every vCPU, plus
+  disk per GB-hour where the provider charges it by the hour. A provider whose longest session is shorter than 19 hours, about
+  the coachman's median ceiling over a whole run (18.8 hours), is left out, and one whose largest sandbox is below the gate is
+  shown as over its size limit. *A machine billed whole* costs its hourly price for the run's whole life, from the first to the
+  last timestamp in the run's record, rounded up to a whole hour where the provider bills by the hour, run by run. A typical run
+  for the provider tables is built from the median hours of each role, as in the cost tables.
+- *The launches at once* are counted from intervals: a lane from the start of implementing to its exit, a reviewer from its
+  round's first launch line to its own exit, a gate run for its seconds, and the coachman for each stage in which a leg can
+  run, which includes the wait for the user's spec review and so is an upper bound. The load at a moment is how many
+  intervals cover it. The most at once inside any one run, and the number of coachman stages longer than 24 hours, are counted
+  from the same intervals.
 - *Cost of container time*: seconds times the per-second rate of an instance type, memory and disk for what the type
   provisions and CPU for active use only, from the Containers pricing page. The audit holds no CPU measurement, so
   CPU use is bracketed at none, a quarter and all vCPUs busy. List rates; the monthly allowance is not taken off,
@@ -69,7 +93,7 @@ that the flow runs on Cloudflare, which needs a trial of its own.
   since the two differ twelvefold in input price.
 
 **Counts and controls.** Every count has a control, listed with its result in
-[results/controls.md](results/controls.md), 23 in all, and `apparatus/controls.test.ts` runs them against the
+[results/controls.md](results/controls.md), 37 in all, and `apparatus/controls.test.ts` runs them against the
 committed data. They include: the audit's own published gate totals reproduced through the new code (36 lane-branch
 gate runs, 6.5 hours; 260 synthesis runs, 43.5 hours); one lane's seconds recomputed from its two timestamps; that
 lane's cost recomputed by hand; a run with nothing in it reading zero everywhere; the coachman's floor below its
@@ -80,8 +104,17 @@ recomputed from each launch's own per-model tokens at the published Opus 5.5 pri
 cache writes at five minutes to all at one hour for 61 of 61 launches that used one model, against 0 launches when
 the same arithmetic uses Opus 4.1's prices; and the coachman's dollars at Meta's standard tier summed launch by launch
 and recomputed from the summed tokens, against the same re-pricing of a model no launch used, which moves nothing; and the totals for all the runs, as hours
-times the hourly rate and as the cost summed run by run, with the totals over no runs reading zero. The
-unit tests beside each module hold the other positive and negative cases, 94 tests in all. For the scan of scripts they
+times the hourly rate and as the cost summed run by run, with the totals over no runs reading zero; the intervals rebuilt
+from timestamps against the hours the instance-time tables summed from each launch's own seconds, the area under the load
+curve against the sum of the intervals, and the load of no launches reading zero; Cloudflare's row of the provider table
+against the cost module's standard-4 hour and against the waiting-agent hour by hand; the waiting-agent and gate hours
+against every launch hour; Fly.io's performance-4x price from the per-vCPU and per-GiB rates against the hourly price Fly's pricing
+page prints and the per-second figure from its documentation's constants, and an unchecked figure for it failing that comparison
+by a factor of 2.72; Daytona's size limit rejecting the gate and accepting the agent; every row naming its page, its date and its
+check; the break-even against a rented month for Vultr by hand, and none for a machine with no monthly price; the longest
+coachman stage and the count of stages over 24 hours from the intervals against the audit's own stage seconds, with a stage of
+exactly 24 hours not counted; and the most launches at once inside one run against the most across all runs together. The
+unit tests beside each module hold the other positive and negative cases, 132 tests in all. For the scan of scripts they
 include a package-manager lock file and a process's own `.pid` property, which must not count as marker files, and
 another tool's `worktree` command, which must not count as a `git worktree` call; a hand count of calls to `git` with a
 worktree verb in the 69 scripts finds the same six scripts as the scan. They show the code applies a rule the same way on a case that must read non-zero and one that
@@ -93,7 +126,7 @@ must read zero. They cannot show that the rule is the right one.
 bun apparatus/uptime.ts --runs <ids> --dir <runs folder> [--dir <another>] --out results/coachman-uptime.json
 bun apparatus/measure.ts --audit ../2026-10-03-lane-audit/results/runs.json --runs <ids> --dir <runs folder> --out results/tokens-by-kind.json
 bun apparatus/primitives.ts --repo <checkout> --out results/script-primitives.md
-bun apparatus/run.ts          # instance-time.json, instance-time.md, cost.md
+bun apparatus/run.ts          # instance-time.json, instance-time.md, cost.md, concurrency.md, providers.md
 bun apparatus/model-bill.ts    # model-bill.md
 bun apparatus/controls.ts      # controls.md
 bun apparatus/quotes.ts --notes ../../articles/<capture>/passages.md --root <cloudflare-docs>/src/content   # quote-check.md
@@ -104,7 +137,7 @@ bun test apparatus/
 A reader without the run folders runs `run.ts`, `model-bill.ts`, `controls.ts` and the tests alone and gets every table from the committed
 data. The quote check needs a checkout of `cloudflare-docs` at commit 6e1b96433cf016efd2c0c9057a7e27a8e112376f. `uptime.ts` and
 `measure.ts` refuse to write anything that looks like a path. `passages.ts` turned the readers' notes into the passages files of
-the ten captures.
+the thirteen captures.
 
 **Limits.**
 
@@ -128,6 +161,12 @@ the ten captures.
 - Fixture runs are cheap and short and say little about a real ticket's tokens. Their tokens were not measured here;
   the trial's cost for a fixture lane uses the audit's medians.
 - A price is the vendor's page on the day it was read. Pages carry no date of their own, and prices change.
+- The launches-at-once counts are the 18 audited runs alone. Fixture runs, other projects and the user's own sessions shared the
+  machine and are not in them, and the coachman's intervals count the user's waits as running.
+- The provider rates are list prices from pages read once or twice on 2026-10-08 and 2026-10-09 through a fetch tool that
+  returns a summary of a page, so two agreeing reads count as one check. The rate files say which rows have one read. Where a
+  provider's pricing page could not be read, the row says where its rate came from. The two profiles are assumptions, the
+  machine rows are one shape for a whole run and hold neither the gate nor a 16 GiB coachman, and nothing was ordered or run.
 - The scan of scripts counts files whose code matches a pattern, with comments removed and a target project's lock file
   names blanked. It lists the files behind each count. A file that reaches a machine primitive through a library the
   patterns do not name is missed, and a match is a file that uses the primitive, not a measure of how much.
