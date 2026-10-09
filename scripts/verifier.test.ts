@@ -124,6 +124,25 @@ describe("renderPrompt", () => {
     expect(out).toBe("/x/app$$x verify-$&-'");
   });
 
+  test("placeholder-shaped text in a value copies literally", () => {
+    const out = renderPrompt("{{REPO}} {{BASE}}", {
+      repo: "/x/{{BASE}}-app",
+      surface: "cli",
+      surfaceProse: "command line",
+      verifyDir: "verify-app",
+      base: "origin/main",
+    });
+    expect(out).toBe("/x/{{BASE}}-app origin/main");
+    const unknown = renderPrompt("{{REPO}}", {
+      repo: "/x/{{NAME}}-app",
+      surface: "cli",
+      surfaceProse: "command line",
+      verifyDir: "verify-app",
+      base: "main",
+    });
+    expect(unknown).toBe("/x/{{NAME}}-app");
+  });
+
   test("a leftover placeholder throws", () => {
     expect(() =>
       renderPrompt("{{REPO}} {{NOPE}}", {

@@ -120,17 +120,21 @@ export interface PromptVars {
 
 /** Fill the template's placeholders. A placeholder left over is a bug, and throws. */
 export function renderPrompt(template: string, vars: PromptVars): string {
-  // Each value rides a replacer function: as a plain string, $ patterns in a
-  // repo path would expand instead of copying.
-  const out = template
-    .replaceAll("{{REPO}}", () => vars.repo)
-    .replaceAll("{{SURFACE}}", () => vars.surface)
-    .replaceAll("{{SURFACE_PROSE}}", () => vars.surfaceProse)
-    .replaceAll("{{VERIFY_DIR}}", () => vars.verifyDir)
-    .replaceAll("{{BASE}}", () => vars.base);
-  const left = out.match(/\{\{[A-Z_]+\}\}/u);
-  if (left !== null) throw new Error(`unknown placeholder in the prompt template: ${left[0]}`);
-  return out;
+  const known: Record<string, string> = {
+    REPO: vars.repo,
+    SURFACE: vars.surface,
+    SURFACE_PROSE: vars.surfaceProse,
+    VERIFY_DIR: vars.verifyDir,
+    BASE: vars.base,
+  };
+  // One pass, each value through a replacer function: an inserted value is
+  // never rescanned, so $ patterns and placeholder-shaped text in a value
+  // copy literally instead of expanding or throwing.
+  return template.replace(/\{\{[A-Z_]+\}\}/gu, (m) => {
+    const v: string | undefined = known[m.slice(2, -2)];
+    if (v === undefined) throw new Error(`unknown placeholder in the prompt template: ${m}`);
+    return v;
+  });
 }
 
 /** The verifier folder for a repo: verify- plus its slugged base name. */
