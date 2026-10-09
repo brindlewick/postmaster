@@ -1014,7 +1014,9 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    (`preview server`), which
    keeps it alive past a harness turn and in the user's view, and put stopping it on the
    teardown checklist: `<tool>/scripts/run host stop-pidfile <dispatch>/render/preview.pid`,
-   which stops its whole process group, so no child of a package script survives. The preview link goes on the ship card and the
+   which stops its whole process group, so no child of a package script survives, while the
+   recorded identity matches; otherwise it names the leftover members it cannot prove and
+   exits 2. The preview link goes on the ship card and the
    tracker comment beside the review link. **Then QA that preview build before shipping it:
    click through the new surface like a person**, at phone width, working the actual task
    rather than ticking a checklist.

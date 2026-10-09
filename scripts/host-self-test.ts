@@ -1328,9 +1328,9 @@ export async function runControls(): Promise<number> {
       },
       `${probeText}\n${JSON.stringify(processInfo(Number(field(probeText, "pid"))))}`,
     );
-    await pass("--pidfile holds the launch's pid, start and boot", () => {
+    await pass("--pidfile holds the launch's pid, start, boot and command", () => {
       const lines = readFileSync(join(logs, "n3.pid"), "utf8").trim().split("\n");
-      return lines.length === 3 && lines[0] === field(probeText, "pid");
+      return lines.length === 4 && lines[0] === field(probeText, "pid") && (lines[3] ?? "") !== "";
     });
     await marker(markerPath("n3"));
     writeFileSync(

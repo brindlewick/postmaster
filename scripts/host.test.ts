@@ -593,14 +593,15 @@ describe("workhorse and stop-pidfile", () => {
       const pid = child.pid!;
       const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
       const pidfile = join(dir, "preview.pid");
-      // A stale start for a live number: the recorded launch is gone.
+      // A stale start for a live number: the recorded launch is gone, so the live
+      // holder is reported as a leftover member and the stop exits nonzero, unkilled.
       writeFileSync(pidfile, `${pid}\nno-such-start\nno-such-boot\n`);
       const stale = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(stale.status).toBe(0);
-      expect(stale.stdout).toContain("no process group");
+      expect(stale.status).toBe(2);
+      expect(stale.stderr).toContain(`${pid} sleep 300`);
       expect(processState(pid)).toBe("live");
       // The live start with a foreign boot: still not the recorded launch.
       writeFileSync(pidfile, `${pid}\n${processStart(pid)}\nno-such-boot\n`);
@@ -608,8 +609,8 @@ describe("workhorse and stop-pidfile", () => {
         encoding: "utf8",
         timeout: 10000,
       });
-      expect(boot.status).toBe(0);
-      expect(boot.stdout).toContain("no process group");
+      expect(boot.status).toBe(2);
+      expect(boot.stderr).toContain(`${pid} sleep 300`);
       expect(processState(pid)).toBe("live");
       child.kill("SIGKILL");
       await Promise.race([exited, Bun.sleep(15000)]);
@@ -618,8 +619,42 @@ describe("workhorse and stop-pidfile", () => {
     }
   }, 40000);
 
-  test("host stop-pidfile stops members orphaned after the leader exits", async () => {
+  test("host stop-pidfile checks the recorded command, and a legacy pidfile still stops", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "host-pidfile-command-"));
+    try {
+      const child = spawn("sleep", ["300"], { stdio: "ignore", detached: true });
+      const pid = child.pid!;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const start = processStart(pid);
+      expect(start).not.toBeNull();
+      const pidfile = join(dir, "preview.pid");
+      // Live start and boot, but a foreign command: refused and reported.
+      writeFileSync(pidfile, `${pid}\n${start}\n${currentBootId()}\nnot-sleep\n`);
+      const wrong = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      expect(wrong.status).toBe(2);
+      expect(wrong.stderr).toContain(`${pid} sleep 300`);
+      expect(processState(pid)).toBe("live");
+      // A legacy pidfile, with no command recorded, still stops a live match.
+      writeFileSync(pidfile, `${pid}\n${start}\n${currentBootId()}\n`);
+      const legacy = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+        encoding: "utf8",
+        timeout: 30000,
+      });
+      expect(legacy.status).toBe(0);
+      expect(legacy.stdout).toContain(`stopped the process group of ${pid}`);
+      await Promise.race([exited, Bun.sleep(15000)]);
+      expect(processState(pid)).not.toBe("live");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 40000);
+
+  test("host stop-pidfile reports members orphaned after the leader exits, and kills nothing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "host-pidfile-orphan-"));
+    let orphan = 0;
     try {
       const orphanPidFile = join(dir, "orphan.pid");
       const child = spawn("bash", ["-c", `sleep 300 & echo $! > ${orphanPidFile} && sleep 2`], {
@@ -633,24 +668,28 @@ describe("workhorse and stop-pidfile", () => {
       const deadline = Date.now() + 15000;
       while (Date.now() < deadline && processState(leader) === "live") await Bun.sleep(50);
       await Promise.race([exited, Bun.sleep(15000)]);
-      const orphan = Number(readFileSync(orphanPidFile, "utf8").trim());
+      orphan = Number(readFileSync(orphanPidFile, "utf8").trim());
       expect(processState(orphan)).toBe("live");
+      // A bare pidfile records no identity, so the unprovable members are
+      // reported, not killed, and the stop exits nonzero.
       const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain("stopped the process group of");
-      const gone = Date.now() + 15000;
-      while (Date.now() < gone && processState(orphan) === "live") await Bun.sleep(50);
-      expect(processState(orphan)).not.toBe("live");
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(`${orphan} sleep 300`);
+      expect(processState(orphan)).toBe("live");
     } finally {
+      try {
+        if (orphan > 0) process.kill(orphan, "SIGKILL");
+      } catch {}
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
 
-  test("a recorded pidfile stops orphans too, not just a live leader", async () => {
+  test("a recorded pidfile with a reaped leader reports the orphans, and kills nothing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "host-pidfile-orphan-recorded-"));
+    let orphan = 0;
     try {
       const orphanPidFile = join(dir, "orphan.pid");
       const child = spawn("bash", ["-c", `sleep 300 & echo $! > ${orphanPidFile} && sleep 2`], {
@@ -666,21 +705,145 @@ describe("workhorse and stop-pidfile", () => {
       const deadline = Date.now() + 15000;
       while (Date.now() < deadline && processState(leader) === "live") await Bun.sleep(50);
       await Promise.race([exited, Bun.sleep(15000)]);
-      const orphan = Number(readFileSync(orphanPidFile, "utf8").trim());
+      orphan = Number(readFileSync(orphanPidFile, "utf8").trim());
       expect(processState(orphan)).toBe("live");
+      // The leader is reaped, so no row proves the identity: the members are
+      // reported, not killed, and the stop exits nonzero.
       const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
         encoding: "utf8",
         timeout: 30000,
       });
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain("stopped the process group of");
-      const gone = Date.now() + 15000;
-      while (Date.now() < gone && processState(orphan) === "live") await Bun.sleep(50);
-      expect(processState(orphan)).not.toBe("live");
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(`${orphan} sleep 300`);
+      expect(processState(orphan)).toBe("live");
     } finally {
+      try {
+        if (orphan > 0) process.kill(orphan, "SIGKILL");
+      } catch {}
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
+
+  const skipSetsid = process.platform !== "linux";
+  // A group leader that dies unreaped: the middle shell never waits, so the leader
+  // holds its number as a zombie with a live member beside it. The trailing `:` keeps
+  // the leader bash to the end: without it bash execs its last sleep instead.
+  async function zombieLeader(): Promise<{
+    leader: number;
+    member: number;
+    outer: ReturnType<typeof spawn>;
+  }> {
+    const outer = spawn(
+      "bash",
+      [
+        "-c",
+        "setsid bash -c 'sleep 300 & echo MEMBER=$!; sleep 5; :' & echo LEADER=$!; exec sleep 60",
+      ],
+      { stdio: ["ignore", "pipe", "ignore"], detached: true },
+    );
+    const lines: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      if (!outer.stdout) return reject(new Error("shell stdout is unavailable"));
+      const reader = createInterface({ input: outer.stdout });
+      const timeout = setTimeout(() => reject(new Error("shell did not print its pids")), 5000);
+      reader.on("line", (line: string) => {
+        lines.push(line);
+        if (lines.length === 2) {
+          clearTimeout(timeout);
+          reader.close();
+          resolve();
+        }
+      });
+      outer.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
+    const leader = Number((lines.find((l) => l.startsWith("LEADER=")) ?? "=").split("=")[1]);
+    const member = Number((lines.find((l) => l.startsWith("MEMBER=")) ?? "=").split("=")[1]);
+    return { leader, member, outer };
+  }
+
+  test.skipIf(skipSetsid)(
+    "a stale pidfile whose leader is a zombie reports the members, and kills nothing",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "host-pidfile-zombie-stale-"));
+      let member = 0;
+      let outer: ReturnType<typeof spawn> | null = null;
+      try {
+        const z = await zombieLeader();
+        outer = z.outer;
+        member = z.member;
+        expect(Number.isSafeInteger(z.leader) && z.leader > 0).toBe(true);
+        expect(Number.isSafeInteger(member) && member > 0).toBe(true);
+        const dead = Date.now() + 15000;
+        while (Date.now() < dead && processState(z.leader) === "live") await Bun.sleep(50);
+        expect(processState(z.leader)).toBe("zombie");
+        expect(processState(member)).toBe("live");
+        const pidfile = join(dir, "preview.pid");
+        writeFileSync(pidfile, `${z.leader}\nno-such-start\n${currentBootId()}\n`);
+        const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+          encoding: "utf8",
+          timeout: 30000,
+        });
+        expect(r.status).toBe(2);
+        expect(r.stderr).toContain(`${member} sleep 300`);
+        expect(processState(member)).toBe("live");
+        expect(processState(z.leader)).toBe("zombie");
+      } finally {
+        try {
+          if (member > 0) process.kill(member, "SIGKILL");
+        } catch {}
+        try {
+          outer?.kill("SIGTERM");
+        } catch {}
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    60000,
+  );
+
+  test.skipIf(skipSetsid)(
+    "a recorded pidfile still stops the members of its zombie leader",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "host-pidfile-zombie-recorded-"));
+      let member = 0;
+      let outer: ReturnType<typeof spawn> | null = null;
+      try {
+        const z = await zombieLeader();
+        outer = z.outer;
+        member = z.member;
+        expect(Number.isSafeInteger(z.leader) && z.leader > 0).toBe(true);
+        expect(Number.isSafeInteger(member) && member > 0).toBe(true);
+        const start = processStart(z.leader);
+        expect(start).not.toBeNull();
+        const dead = Date.now() + 15000;
+        while (Date.now() < dead && processState(z.leader) === "live") await Bun.sleep(50);
+        expect(processState(z.leader)).toBe("zombie");
+        expect(processState(member)).toBe("live");
+        const pidfile = join(dir, "preview.pid");
+        writeFileSync(pidfile, `${z.leader}\n${start}\n${currentBootId()}\nbash\n`);
+        const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
+          encoding: "utf8",
+          timeout: 30000,
+        });
+        expect(r.status).toBe(0);
+        expect(r.stdout).toContain(`stopped the process group of ${z.leader}`);
+        const gone = Date.now() + 15000;
+        while (Date.now() < gone && processState(member) === "live") await Bun.sleep(50);
+        expect(processState(member)).not.toBe("live");
+      } finally {
+        try {
+          if (member > 0) process.kill(member, "SIGKILL");
+        } catch {}
+        try {
+          outer?.kill("SIGTERM");
+        } catch {}
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    60000,
+  );
 
   test("a pidfile a launch wrote stops that launch", async () => {
     const dir = mkdtempSync(join(tmpdir(), "host-pidfile-roundtrip-"));
@@ -733,7 +896,9 @@ describe("workhorse and stop-pidfile", () => {
       );
       expect(launched.status).toBe(0);
       const pidfile = join(dispatch, "s.pid");
-      expect(readFileSync(pidfile, "utf8").trim().split("\n").length).toBe(3);
+      const recorded = readFileSync(pidfile, "utf8").trim().split("\n");
+      expect(recorded.length).toBe(4);
+      expect(recorded[3]!.length).toBeGreaterThan(0);
       const r = spawnSync(join(import.meta.dir, "run"), ["host", "stop-pidfile", pidfile], {
         encoding: "utf8",
         timeout: 30000,

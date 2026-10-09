@@ -120,9 +120,11 @@ onto the fragment it supersedes.
   labels and prompt text never identify ownership. A user pane split into a launch tab or window
   survives: `run host` closes only its own pane and leaves the shared tab or window open. The event
   stream and logs stay on disk.
-- **`--pidfile` gets its pid, which is also its process group:**
-  `<tool>/scripts/run host stop-pidfile <pidfile>` stops all of it, including members
-  orphaned after the leader exits. `run host run` returns as soon as the launch has started.
+- **`--pidfile` gets its pid, which is also its process group, with the start, boot and
+  command that prove it:** `<tool>/scripts/run host stop-pidfile <pidfile>` stops the recorded
+  launch and its group only while that identity still matches. Members it cannot prove are
+  never killed: they are reported as leftover members, each pid with its command, and the
+  stop exits 2. `run host run` returns as soon as the launch has started.
   The wait still goes in the same
   command as the launch, as `<tool>/scripts/run wait-for-markers`, or for a review round
   `<tool>/scripts/run review-round wait`.

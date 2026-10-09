@@ -23,7 +23,8 @@
 //                                         launch one workhorse into its worktree: its name from
 //                                         `name ... workhorse`, its events/err/marker under the
 //                                         dispatch's logs, `run launch launch` with --run
-//   run host stop-pidfile <pidfile>        stop the whole process group the pidfile names
+//   run host stop-pidfile <pidfile>        stop the recorded launch and its group while its
+//                                         identity matches, else report the leftover members
 //   run host stop <worktree>               stop every launch still running in a worktree, and
 //                                         everything each one started
 //   run host close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
@@ -44,8 +45,10 @@
 // --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
 // as it starts and touched when it exits,
 // whatever its exit, and also when run host cannot start it, with the reason in --err. --pidfile
-// gets its pid, which is also its process group: `kill -- -<pid>` stops all of it. <cwd> is the
-// directory the launch belongs to, usually its worktree: in Herdr the launch runs in a new tab of
+// gets its pid, which is also its process group, with the start, boot and command that prove
+// it: stop-pidfile stops all of it while that identity matches, else reports the leftover
+// members. <cwd> is the directory the launch belongs to, usually its worktree: in Herdr the
+// launch runs in a new tab of
 // that worktree's space, opened with `herdr worktree open` under the repository's space if it is
 // not open yet; in tmux in a window of session postmaster-<repo>; with no host, detached from
 // the caller. A run launch's <cwd>, including a reviewer's scratch clone, is its tab's working
@@ -131,6 +134,7 @@ import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
   processCommandLine,
+  processInfo,
   processStart,
   processState,
   processTable as sharedProcessTable,
@@ -2179,11 +2183,20 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     } catch {}
     if (spec.pidfile) {
       try {
-        // The start and boot identity travels with the pid, so stop-pidfile
-        // refuses a number the OS has since reused for another process.
+        // The start, boot and command identity travels with the pid, so stop-pidfile
+        // refuses a number the OS has since reused for another process. Each missing
+        // line weakens the form: without a command it checks start and boot, and a
+        // bare pid checks nothing.
         const start = startOf(pid);
         const boot = bootId();
-        writeFileSync(spec.pidfile, start && boot ? `${pid}\n${start}\n${boot}\n` : `${pid}\n`);
+        const command = await settledCommand(pid);
+        const body =
+          start && boot && command
+            ? `${pid}\n${start}\n${boot}\n${command}\n`
+            : start && boot
+              ? `${pid}\n${start}\n${boot}\n`
+              : `${pid}\n`;
+        writeFileSync(spec.pidfile, body);
       } catch {}
     }
   }
@@ -2848,12 +2861,53 @@ async function workhorseCmd(args: string[]): Promise<void> {
   ]);
 }
 
+/** A process name as a pidfile records it: one line, since the form is line-based. */
+function pidfileCommand(name: string): string {
+  return name.split("\n")[0] ?? "";
+}
+
+/**
+ * The leader's command once it is stable: a child read before it execs still looks like
+ * its parent, and a wrapper may exec again (setsid becomes systemd-run), so the command
+ * line must read the same three times before its holder's name is recorded. "" when the
+ * process is gone or never settles, in which case the pidfile holds no command.
+ */
+async function settledCommand(pid: number): Promise<string> {
+  let prev: string | null = null;
+  let stable = 0;
+  const end = Date.now() + 500;
+  for (;;) {
+    const cur = processCommandLine(pid);
+    if (cur === "") return "";
+    if (cur === prev) stable += 1;
+    else {
+      stable = 0;
+      prev = cur;
+    }
+    if (stable >= 2) break;
+    if (Date.now() >= end) return "";
+    await Bun.sleep(10);
+  }
+  return pidfileCommand(processInfo(pid)?.name ?? "");
+}
+
+/** A leftover member for the report: its command line, or its bare name. */
+function describeCommand(pid: number, name: string): string {
+  const line = clean(processCommandLine(pid).replace(/\s+/gu, " ").trim());
+  if (line !== "") return line.slice(0, 200);
+  return name;
+}
+
 /**
  * The process group a pidfile names, stopped as `stop` stops a worktree's launches.
- * A pidfile in the form `run` writes (pid, start, boot) stops only the launch it
- * recorded: a reused number whose start or boot differs is already gone. A bare pid
- * stops whatever holds the number now. A dead leader with live members is an orphaned
- * group, stopped through its members as the registry's backfill does.
+ * A pidfile in the form `run` writes (pid, start, boot, command) stops only the launch it
+ * recorded: the leader and its group die only while the recorded start, boot and command
+ * still match the holder of the number, live or zombie. A legacy pidfile without the
+ * command (pid, start, boot) is checked on start and boot alone. A bare pid stops
+ * whatever live holder and group hold the number now. Members no check proves are never
+ * killed: they are reported as leftover members, each pid with its command, and the stop
+ * exits 2 so the caller sees it. Nothing here assumes a dead leader means an owned group:
+ * a stranger's group may hold the number with a zombie leader or with none.
  */
 async function stopPidfileCmd(args: string[]): Promise<void> {
   const file = args[0] ?? "";
@@ -2865,45 +2919,71 @@ async function stopPidfileCmd(args: string[]): Promise<void> {
     die(`no such pidfile: ${file}`);
   }
   const parts = text.trim().split("\n");
-  const pidText = parts.length === 1 || parts.length === 3 ? (parts[0] ?? "") : "";
+  const pidText =
+    parts.length === 1 || parts.length === 3 || parts.length === 4 ? (parts[0] ?? "") : "";
   if (!/^[0-9]+$/u.test(pidText)) die(`${file} does not hold a pid: ${text.trim()}`);
   const pid = Number(pidText);
   if (pid <= 0) die(`${file} does not hold a pid: ${text.trim()}`);
+  const recorded = parts.length === 3 || parts.length === 4;
   const table = processTable();
   const row = table.get(pid);
-  if (row !== undefined && !row.zombie && parts.length === 3) {
-    if (row.start !== parts[1] || bootId() !== parts[2]) {
+  // The live members of the numbered group, the holder included: the processes a stop
+  // would end. A zombie needs no killing and is never reported as leftover.
+  const members = [...table]
+    .filter(([, r]) => r.group === pid && !r.zombie)
+    .map(([member]) => member)
+    .sort((a, b) => a - b);
+  const matches =
+    recorded &&
+    row !== undefined &&
+    row.start === parts[1] &&
+    bootId() === parts[2] &&
+    (parts.length === 3 || pidfileCommand(row.name) === parts[3]);
+  if (matches || (!recorded && row !== undefined && !row.zombie)) {
+    // Proven, so the leader and its group die: through the group while the leader is
+    // live, else through the proven members one by one, since a stop root needs a
+    // live holder.
+    const roots =
+      row !== undefined && !row.zombie
+        ? [`group|${pid}|${row.start}`]
+        : members.map((member) => `tree|${member}|${table.get(member)!.start}`);
+    if (roots.length === 0) {
       console.log(`no process group of ${pid} is running`);
       return;
     }
+    const grace = count(process.env.POSTMASTER_HOST_STOP_WAIT ?? "20", "POSTMASTER_HOST_STOP_WAIT");
+    const most = count(process.env.POSTMASTER_HOST_STOP_MAX ?? "512", "POSTMASTER_HOST_STOP_MAX");
+    const result = await stopTree(grace, most, roots);
+    const fields = result.text.split("\t");
+    if (result.code === 0)
+      console.log(`stopped the process group of ${pid}: ${fields[0]} process(es)`);
+    else if (result.code === 2) {
+      warn(`stopped the process group of ${pid}, but these still run: ${fields[1] ?? ""}`);
+      throw hostError("", 2);
+    } else if (result.code === 3) {
+      warn(
+        `refused to stop the process group of ${pid}, and left it running: ${fields.slice(1).join("\t")}`,
+      );
+      throw hostError("", 2);
+    } else die(`could not stop the process group of ${pid}: ${result.text}`);
+    return;
   }
-  // A leader no live process holds leaves either nothing or an orphaned group: a
-  // stranger's group always has its leader alive, so live members here are ours.
-  const roots =
-    row !== undefined && !row.zombie
-      ? [`group|${pid}|${row.start}`]
-      : [...table]
-          .filter(([, r]) => r.group === pid && !r.zombie)
-          .map(([member, r]) => `tree|${member}|${r.start}`);
-  if (roots.length === 0) {
+  if (members.length === 0) {
     console.log(`no process group of ${pid} is running`);
     return;
   }
-  const grace = count(process.env.POSTMASTER_HOST_STOP_WAIT ?? "20", "POSTMASTER_HOST_STOP_WAIT");
-  const most = count(process.env.POSTMASTER_HOST_STOP_MAX ?? "512", "POSTMASTER_HOST_STOP_MAX");
-  const result = await stopTree(grace, most, roots);
-  const fields = result.text.split("\t");
-  if (result.code === 0)
-    console.log(`stopped the process group of ${pid}: ${fields[0]} process(es)`);
-  else if (result.code === 2) {
-    warn(`stopped the process group of ${pid}, but these still run: ${fields[1] ?? ""}`);
-    throw hostError("", 2);
-  } else if (result.code === 3) {
-    warn(
-      `refused to stop the process group of ${pid}, and left it running: ${fields.slice(1).join("\t")}`,
-    );
-    throw hostError("", 2);
-  } else die(`could not stop the process group of ${pid}: ${result.text}`);
+  const pairs = members
+    .map((member) => `${member} ${describeCommand(member, table.get(member)!.name)}`)
+    .join(", ");
+  const reason = !recorded
+    ? "the pidfile records no identity and the leader is gone"
+    : row === undefined
+      ? "the recorded leader is gone"
+      : "the recorded identity does not match";
+  warn(
+    `left ${members.length} leftover member(s) of ${pid} running: ${pairs} (${reason}; killed nothing)`,
+  );
+  throw hostError("", 2);
 }
 
 async function stopCmd(args: string[]): Promise<void> {
