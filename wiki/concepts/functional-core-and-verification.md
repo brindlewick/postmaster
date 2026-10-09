@@ -61,7 +61,7 @@ measures any of this in TypeScript, apart from the case studies of LemmaScript's
 | Property-based tests find defects that example tests miss | shown that they find defects; in the one small head-to-head each kind caught defects the other missed, and no controlled comparison on real code was found | experience reports, one corpus study and one small head-to-head |
 
 **What follows.** Four changes are proposed to the design rules and the ticket template (give rule 8 a mechanical
-check, which asks the user to reverse a decision they gave in #298; one program for the dry run, the tests and the real run of anything that runs dry or undoes;
+check, which asks the user to reverse a decision they gave in #298, with a possible second part against mutating what escapes a function; one program for the dry run, the tests and the real run of anything that runs dry or undoes;
 a law over generated inputs for each reader of text; a state table for each undo), and five trials, none run: four of 2 to 12 hours each, and a fifth in three steps of 4 to 12 hours, each later step run
 only if the one before did not fail. One of the four prices LemmaScript on a single function. The fifth writes a cleanup script's
 decisions once, with git passed in and swapped for a mock that is checked against real git, and compares a plain version
@@ -733,19 +733,36 @@ checked by inspection. *It failed if* the function is outside the subset and a r
 if the work takes more than two days, if the specification the model wrote admits the buggy version, or if the proof
 cannot be trusted without reading the generated Dafny line by line.
 
-**4. A purity check in the gate.** Write a script, or switch on a rule, that flags `process.env`, `Date.now` and
-imports of `node:fs`, `node:child_process` and `node:os` inside modules named `*-core.ts` or under `scripts/lib/`.
-Biome's `noProcessEnv` and Oxlint's `node/no-process-env` each disallow `process.env` and are off by default
-[@articles/biome-noprocessenv/passages.md] [@articles/oxlint-no-process-env/passages.md]. Oxlint runs in the gate, and
-Biome runs there only as a formatter, so its rule would need `biome lint` or `biome check` added to `bun run check`.
-Whether either can be scoped to one folder, or restricts imports and the clock, was not checked. Run the check on `main`
-and at the review snapshots of the four runs; no module on `main` is named `*-core.ts` today, so on `main` it covers
-`scripts/lib/`.
-*Cost:* 2 to 3 hours. *It would show* whether it flags the environment reads in #216's `scrub-core.ts` (three at the round-1
-snapshot, one of them the variable behind two of the eight E-kind findings), how many of the eight it
-reaches, and how many places on `main` it flags that no one would call a defect. Several of the eight, such as a git
-call that inherits `GIT_DIR`, sit at the edge, where a check on core modules does not look, and the trial counts them.
-*It failed if* it flags none of the eight, or flags more than about twenty places on `main` that are not defects.
+**4. A purity and mutation check in the gate.** Write a script, or switch on a rule, that flags `process.env`,
+`Date.now` and imports of `node:fs`, `node:child_process` and `node:os` inside modules named `*-core.ts` or under
+`scripts/lib/`. Biome's `noProcessEnv` and Oxlint's `node/no-process-env` each disallow `process.env` and are off by
+default [@articles/biome-noprocessenv/passages.md] [@articles/oxlint-no-process-env/passages.md]. Oxlint runs in the
+gate, and Biome runs there only as a formatter, so its rule would need `biome lint` or `biome check` added to
+`bun run check`. Whether either can be scoped to one folder, or restricts imports and the clock, was not checked. Run the
+check on `main` and at the review snapshots of the four runs; no module on `main` is named `*-core.ts` today, so on
+`main` it covers `scripts/lib/`.
+The same script also counts two kinds of mutation, so that a rule on mutation would rest on numbers. *Escaping
+mutation* is a change to something the function did not create: assigning to an argument or to a property of one,
+calling `push`, `set`, `delete` or `splice` on one, or changing a module-level variable or an imported object. *Every
+mutation* adds reassigning a local variable and changing a local collection. In the first count, locals built inside the
+function and modules at the edge (the code that calls git, the file system and the clock) are exempt. In the second,
+nothing is exempt, and the number is a contrast, not a pass mark. Controls: a function that pushes onto its argument
+must be flagged in both counts (positive), and one that builds a local array and returns it must not be flagged in the
+first (negative). For the second count, a function that reassigns a local `let` must be flagged, and one that uses only
+`const`, `map` and `filter` must not. Run both counts on `main` and at the review snapshots, and read a random sample of
+30 flagged places, marking each a hazard (a reader could be surprised by it), harmless or unclear, with a second reader on
+10 of them.
+*Cost:* 4 to 6 hours, 2 to 3 for the first part and 2 to 3 for the mutation counts. *It would show* whether the first
+part flags the environment reads in #216's `scrub-core.ts` (three at the round-1 snapshot, one of them the variable behind
+two of the eight E-kind findings), how many of the eight it reaches, and how many places on `main` it flags that no one
+would call a defect. Several of the eight, such as a git call that inherits `GIT_DIR`, sit at the edge, where a check on
+core modules does not look, and the trial counts them. It would show how many of the 84 serious findings sit in the same
+function as a place the first mutation count flags at that round's snapshot (81 of the 84 cite a file and a line), which
+is the test of whether a rule on mutation connects to what the reviewers found, and how many flagged places on `main` are
+hazards.
+*It failed if* the first part flags none of the eight, or flags more than about twenty places on `main` that are not
+defects. The mutation counts failed if the first count flags more than about twenty places on `main` that are not
+hazards, or flags none of the 84 findings' functions.
 
 **5. One program with its git swapped, for the cleanup script's dry run.** Take #252's cleanup at its round-1
 snapshot (`a793251` in the trial's data): 1,624 lines that run ten different git commands (`status`, `diff`,
@@ -809,8 +826,14 @@ lint rule "would flag good code and miss bad code". The check proposed here does
 thing, reads of the environment and the clock and imports of file, process and operating-system modules, inside
 modules named `*-core.ts` or under `scripts/lib/`, and trial 4 counts the good code it would flag. It still asks the
 user to reverse the "no check" half of D2. No module on `main` is named `*-core.ts` today, so as scoped it covers
-`scripts/lib/`, whose helpers do I/O on purpose, and trial 4 counts what it flags there.
-*Tied to:* the 8 findings of kind E, 4 of them the ambient environment in 3 runs, and to #216's round-1 style
+`scripts/lib/`, whose helpers do I/O on purpose, and trial 4 counts what it flags there. A second part would add a rule against mutating anything that escapes a
+function (arguments, module state, imported objects), with locals built inside the function and edge modules exempt. A
+ban on every mutation is the stricter version, and trial 4 counts both before either is switched on. The argument for it
+is that a name that never changes is easier to follow, for a reader and for a model, and that a check gives an agent
+something to iterate against. Neither is measured here: no study found compares a reader's or a model's grasp of mutable
+and immutable versions of the same code, and the 84 findings were not classified by mutation. The second part is not tied
+to a finding; trial 4 tests whether it connects to any.
+*Tied to (the first part):* the 8 findings of kind E, 4 of them the ambient environment in 3 runs, and to #216's round-1 style
 finding that named the environment read in a core module at the lowest severity while two serious findings
 traced to it.
 
@@ -943,7 +966,8 @@ helper's notes support and the independent readers did not reach include Propert
 recall range, the per-model numbers of Verus-SpecGym, and the rows for SysMoBench, Hong's Alloy study and Danso's
 temporal-logic study; each capture says which of its quotes were read twice. Trial 5, proposal 2 and the sentences about
 Effect were rewritten on 2026-10-09 and checked by a third reader against the captures, the trial's data and the code at
-the snapshot; what it found was corrected.
+the snapshot; what it found was corrected. The mutation counts added to trial 4, and the possible second part of
+proposal 1, were added later on 2026-10-09 and were read by the research session only.
 
 ## Every serious finding, and what would have caught it
 

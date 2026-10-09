@@ -8,6 +8,17 @@ updated: 2026-10-09
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-09] query | would banning mutation make code easier to follow, for a reader and for a model
+
+Issue #300. The user asked whether code without mutation is easier for a model to follow and proposed starting with a ban
+and some exceptions. Answered from the reading already captured: the benefit is argued and not measured (no study found
+compares mutable and immutable versions of the same code, and the 84 findings were not classified by mutation), and local
+mutation does not change whether a function can be tested without the outside. What can be measured is how much a rule
+would flag. Filed back into [the functional-core page](concepts/functional-core-and-verification.md): proposal 1 has a
+possible second part against mutating what escapes a function, and trial 4 counts escaping mutation and every mutation,
+with controls, on `main` and at the review snapshots. The research session alone read this addition. Nothing was run or
+installed. No standing changed.
+
 ## [2026-10-09] query | does passing git in, or Effect, make the cleanup checks more effective
 
 Issue #300. Two questions on [the functional-core page](concepts/functional-core-and-verification.md): would wrapping
