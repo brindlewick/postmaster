@@ -150,8 +150,8 @@ const RANK: Record<string, number> = {
 function loadText(path: string): string {
   try {
     return readFileSync(path, "utf8").replace(/^\ufeff/u, "");
-  } catch (e: any) {
-    dieT(`cannot read ${path}: ${e?.message ?? e}`);
+  } catch (e) {
+    dieT(`cannot read ${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
