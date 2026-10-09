@@ -155,23 +155,33 @@ function formHarnessArgv(form: string, envFile: string): string[] {
   return argv.slice(at + 1);
 }
 
-function runPty(lay: Layout, form: string): string {
-  // macOS script takes the form as its command: fed through stdin it dies in
-  // tcgetattr on that stdin (a socket under Bun's pipes), prints nothing and
-  // exits 1. The shell stays interactive, as on Linux, so job control puts
-  // the harness in its own foreground group; -c supplies the form, so stdin
-  // stays a pipe nothing reads.
-  if (process.platform === "darwin") {
-    const r = spawnSync(
-      "script",
-      ["-q", "/dev/null", "bash", "--norc", "--noprofile", "-i", "-c", form],
-      { timeout: 60000, encoding: "utf8", env: lay.env },
-    );
-    if (r.error) throw new Error(`script failed to run: ${String(r.error)}`);
-    return String(r.stdout ?? "");
+/** argv and stdin for `script` to run a shell under a pty, per platform, as
+ * runPty calls it. macOS takes the form as its command: fed through stdin it
+ * dies in tcgetattr on that stdin (a socket under Bun's pipes), prints
+ * nothing and exits 1. The shell stays interactive, as on Linux, so job
+ * control puts the harness in its own foreground group; -c supplies the
+ * form, so stdin stays a pipe nothing reads. Exported so the suite pins the
+ * mac shape where no mac runs. */
+function ptyInvocation(platform: string, form: string): {
+  args: string[];
+  input: string | null;
+} {
+  if (platform === "darwin") {
+    return {
+      args: ["-q", "/dev/null", "bash", "--norc", "--noprofile", "-i", "-c", form],
+      input: null,
+    };
   }
-  const r = spawnSync("script", ["-qec", "bash --norc --noprofile -i", "/dev/null"], {
+  return {
+    args: ["-qec", "bash --norc --noprofile -i", "/dev/null"],
     input: `${form}\nexit\n`,
+  };
+}
+
+function runPty(lay: Layout, form: string): string {
+  const { args, input } = ptyInvocation(process.platform, form);
+  const r = spawnSync("script", args, {
+    ...(input === null ? {} : { input }),
     timeout: 60000,
     encoding: "utf8",
     env: lay.env,
@@ -300,6 +310,7 @@ export {
   makeLayout,
   parseProbe,
   printForm,
+  ptyInvocation,
   runHeadless,
   runPlain,
   runPty,
