@@ -43,6 +43,7 @@ import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
+import { thrownDetail } from "./lib/thrown.ts";
 import {
   digitValue,
   END_OF_STRING,
@@ -1012,6 +1013,13 @@ interface PlaneConfig {
   WS: string;
   KEY: string;
 }
+// One object from the Plane API: fields are read per call site.
+type PlaneObj = Record<string, unknown>;
+interface PlanePage {
+  results?: PlaneObj[];
+  next_page_results?: unknown;
+  next_cursor?: string;
+}
 
 function loadConfig(): PlaneConfig {
   const configPath =
@@ -1077,7 +1085,7 @@ export async function api(
   path: string,
   body?: unknown,
   params?: Record<string, string>,
-): Promise<any> {
+): Promise<unknown> {
   let url = `${cfg.BASE}/api/v1/${path}`;
   if (params) {
     const qs = new URLSearchParams(params).toString();
@@ -1100,14 +1108,15 @@ export async function api(
     if (!r.ok) {
       dieP(`${method} ${path}: HTTP ${r.status} ${raw.slice(0, 300)}`);
     }
-    return raw ? JSON.parse(raw) : null;
-  } catch (e: any) {
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch (e) {
     if (e instanceof DieError) throw e;
     // Our own 30-second cutoff: Bun reports it as TimeoutError, Node as
     // AbortError. Nothing else aborts this signal, so either name is our cutoff.
-    if (e?.name === "AbortError" || e?.name === "TimeoutError")
-      dieP(`${method} ${path}: timed out`);
-    dieP(`${method} ${path}: ${e?.message ?? e}`);
+    const name: unknown =
+      typeof e === "object" && e !== null ? (e as { name?: unknown }).name : undefined;
+    if (name === "AbortError" || name === "TimeoutError") dieP(`${method} ${path}: timed out`);
+    dieP(`${method} ${path}: ${thrownDetail(e)}`);
   }
 }
 
@@ -1115,13 +1124,13 @@ async function* pages(
   cfg: PlaneConfig,
   path: string,
   params?: Record<string, string>,
-): AsyncGenerator<any> {
+): AsyncGenerator<PlaneObj> {
   const p: Record<string, string> = { ...(params ?? {}), per_page: "100" };
   for (;;) {
-    const page = await api(cfg, "GET", path, undefined, p);
+    const page = (await api(cfg, "GET", path, undefined, p)) as PlanePage | null;
     for (const item of page?.results ?? []) yield item;
     if (!page?.next_page_results) return;
-    p.cursor = page.next_cursor;
+    p.cursor = page.next_cursor as string;
   }
 }
 
@@ -1143,7 +1152,7 @@ export function envOf(line: string): [string, string] | null {
   return [m[1] ?? "", val];
 }
 
-async function projectFor(cfg: PlaneConfig, ident: string): Promise<any> {
+async function projectFor(cfg: PlaneConfig, ident: string): Promise<PlaneObj> {
   const up = ident.toUpperCase(); // ASCII: Plane identifiers are API-issued ASCII; anything else dies below.
   for await (const p of pages(cfg, `workspaces/${cfg.WS}/projects/`)) {
     if (String(p.identifier ?? "").toUpperCase() === up) return p; // ASCII: API identifiers are ASCII.
@@ -1151,24 +1160,24 @@ async function projectFor(cfg: PlaneConfig, ident: string): Promise<any> {
   dieP(`no project with identifier ${up} in workspace ${cfg.WS}`);
 }
 
-async function statesOf(cfg: PlaneConfig, pid: string): Promise<any[]> {
-  const out: any[] = [];
+async function statesOf(cfg: PlaneConfig, pid: string): Promise<PlaneObj[]> {
+  const out: PlaneObj[] = [];
   for await (const s of pages(cfg, `workspaces/${cfg.WS}/projects/${pid}/states/`)) out.push(s);
   return out;
 }
 
-async function labelsOf(cfg: PlaneConfig, pid: string): Promise<any[]> {
-  const out: any[] = [];
+async function labelsOf(cfg: PlaneConfig, pid: string): Promise<PlaneObj[]> {
+  const out: PlaneObj[] = [];
   for await (const l of pages(cfg, `workspaces/${cfg.WS}/projects/${pid}/labels/`)) out.push(l);
   return out;
 }
 
-function stateIdFor(states: any[], flowState: string): string {
+function stateIdFor(states: PlaneObj[], flowState: string): string {
   for (const group of GROUPS_FOR[flowState] ?? []) {
     const found = states
       .filter((s) => s.group === group)
-      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-    if (found.length > 0) return found[0].id;
+      .sort((a, b) => ((a.sequence ?? 0) as number) - ((b.sequence ?? 0) as number));
+    if (found.length > 0) return found[0].id as string;
   }
   dieP(
     `project has no state in group ${(GROUPS_FOR[flowState] ?? []).join(" or ")} for ${flowState}`,
@@ -1176,31 +1185,31 @@ function stateIdFor(states: any[], flowState: string): string {
 }
 
 function ref(x: unknown): unknown {
-  return typeof x === "object" && x !== null && "id" in x ? (x as any).id : x;
+  return typeof x === "object" && x !== null && "id" in x ? x.id : x;
 }
 
-function flowStateOf(item: any, states: any[], labels: any[]): string {
+function flowStateOf(item: PlaneObj, states: PlaneObj[], labels: PlaneObj[]): string {
   const labelNames: Record<string, string> = {};
-  for (const l of labels) labelNames[l.id] = l.name;
-  const itemLabels = item.labels ?? [];
+  for (const l of labels) labelNames[l.id as string] = l.name as string;
+  const itemLabels = (item.labels ?? []) as unknown[];
   if (itemLabels.some((l: unknown) => pyLower(labelNames[String(ref(l))] ?? "") === BLOCKED))
     return "blocked";
   const stateRef = ref(item.state);
   const group = states.find((s) => s.id === stateRef)?.group;
-  return STATE_FOR_GROUP[group ?? ""] ?? (group || "unknown");
+  return STATE_FOR_GROUP[(group ?? "") as string] ?? (group || "unknown");
 }
 
-async function itemFor(cfg: PlaneConfig, tid: string): Promise<[string, any]> {
+async function itemFor(cfg: PlaneConfig, tid: string): Promise<[string, PlaneObj]> {
   const [ident, n] = parseId(tid);
-  const item = await api(cfg, "GET", `workspaces/${cfg.WS}/work-items/${ident}-${n}/`);
+  const item = (await api(cfg, "GET", `workspaces/${cfg.WS}/work-items/${ident}-${n}/`)) as PlaneObj;
   return [ident, item];
 }
 
 function readFileP(path: string): string {
   try {
     return readFileSync(path, "utf8").replace(/^\ufeff/u, "");
-  } catch (e: any) {
-    dieP(`cannot read ${path}: ${e?.message ?? e}`);
+  } catch (e) {
+    dieP(`cannot read ${path}: ${thrownDetail(e)}`);
   }
 }
 
@@ -1226,12 +1235,17 @@ async function runCommands(): Promise<void> {
     const [outHtml, diff] = readback(body);
     if (diff) dieP(`the body would not read back as written (${diff})`);
     const proj = await projectFor(cfg, ident);
-    const todo = stateIdFor(await statesOf(cfg, proj.id), "todo");
-    const made = await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${proj.id}/work-items/`, {
-      name: title,
-      description_html: outHtml,
-      state: todo,
-    });
+    const todo = stateIdFor(await statesOf(cfg, proj.id as string), "todo");
+    const made = (await api(
+      cfg,
+      "POST",
+      `workspaces/${cfg.WS}/projects/${proj.id}/work-items/`,
+      {
+        name: title,
+        description_html: outHtml,
+        state: todo,
+      },
+    )) as PlaneObj;
     console.log(`${proj.identifier}-${made.sequence_id}`);
   } else if (cmd === "edit") {
     if (args.length !== 3 || !existsSync(args[1] ?? "")) {
@@ -1244,7 +1258,7 @@ async function runCommands(): Promise<void> {
     if (!body.trim()) dieP(`the body file ${args[1]} is empty`);
     const [ident, item] = await itemFor(cfg, args[0]!);
     const tid = `${ident}-${item.sequence_id}`;
-    const [code, result] = planEdit(item.description_html ?? "", base, body);
+    const [code, result] = planEdit((item.description_html ?? "") as string, base, body);
     if (code === 4) dieP(`${tid} changed since ${args[2]} was read; read it again`, 4);
     if (code) dieP(`${tid}: ${result}`);
     await api(
@@ -1276,16 +1290,21 @@ async function runCommands(): Promise<void> {
     const tid = `${ident}-${item.sequence_id}`;
     const pid = String(ref(item.project));
     const labels = await labelsOf(cfg, pid);
-    const current = (item.labels ?? []).map((l: unknown) => ref(l));
+    const current = ((item.labels ?? []) as unknown[]).map((l: unknown) => ref(l));
     const named = labels
-      .filter((l: any) => pyLower(l.name) === pyLower(name))
-      .map((l: any) => l.id);
+      .filter((l) => pyLower(l.name as string) === pyLower(name))
+      .map((l) => l.id);
     let labelId = named[0];
     if (verb === "add") {
       if (!labelId) {
-        const created = await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${pid}/labels/`, {
-          name,
-        });
+        const created = (await api(
+          cfg,
+          "POST",
+          `workspaces/${cfg.WS}/projects/${pid}/labels/`,
+          {
+            name,
+          },
+        )) as PlaneObj;
         labelId = created.id;
       }
       const next = [...new Set([...current, labelId])].sort();
@@ -1307,10 +1326,10 @@ async function runCommands(): Promise<void> {
     const pid = String(ref(item.project));
     const labels = await labelsOf(cfg, pid);
     const names: Record<string, string> = {};
-    for (const l of labels) names[l.id] = l.name;
+    for (const l of labels) names[l.id as string] = l.name as string;
     // Exact membership: a label name may itself hold commas, so the
     // comma-joined `labels:` line is display-only and never parsed back.
-    const has = (item.labels ?? []).some(
+    const has = ((item.labels ?? []) as unknown[]).some(
       (l: unknown) => pyLower(names[String(ref(l))] ?? "") === pyLower(name),
     );
     console.log(has ? "present" : "absent");
@@ -1319,24 +1338,24 @@ async function runCommands(): Promise<void> {
     if (rest.length !== 1 || args.length > 2) dieP("usage: run plane read <IDENT-n> [--body]");
     const [ident, item] = await itemFor(cfg, rest[0]!);
     if (args.includes("--body")) {
-      console.log(htmlToText(item.description_html));
+      console.log(htmlToText(item.description_html as string));
       return;
     }
     const pid = ref(item.project);
     const states = await statesOf(cfg, String(pid));
     const labels = await labelsOf(cfg, String(pid));
     const names: Record<string, string> = {};
-    for (const l of labels) names[l.id] = l.name;
+    for (const l of labels) names[l.id as string] = l.name as string;
     console.log(`id: ${ident}-${item.sequence_id}`);
     console.log(`title: ${item.name ?? ""}`);
     console.log(`state: ${flowStateOf(item, states, labels)}`);
     console.log(
-      `labels: ${(item.labels ?? []).map((l: unknown) => names[String(ref(l))] ?? "?").join(", ")}`,
+      `labels: ${((item.labels ?? []) as unknown[]).map((l: unknown) => names[String(ref(l))] ?? "?").join(", ")}`,
     );
     console.log(`created: ${String(item.created_at ?? "").slice(0, 10)}`);
     console.log("");
-    console.log(htmlToText(item.description_html));
-    const comments: any[] = [];
+    console.log(htmlToText(item.description_html as string));
+    const comments: PlaneObj[] = [];
     for await (const c of pages(
       cfg,
       `workspaces/${cfg.WS}/projects/${pid}/work-items/${item.id}/comments/`,
@@ -1348,7 +1367,7 @@ async function runCommands(): Promise<void> {
       for (const c of [...comments].sort((a, b) =>
         String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")),
       )) {
-        console.log(`- ${pyWords(htmlToText(c.comment_html)).join(" ")}`);
+        console.log(`- ${pyWords(htmlToText(c.comment_html as string)).join(" ")}`);
       }
     }
   } else if (cmd === "state") {
@@ -1358,14 +1377,19 @@ async function runCommands(): Promise<void> {
     const [ident, item] = await itemFor(cfg, args[0]!);
     const pid = String(ref(item.project));
     const labels = await labelsOf(cfg, pid);
-    const current = (item.labels ?? []).map((l: unknown) => ref(l));
-    const blockedIds = labels.filter((l: any) => pyLower(l.name) === BLOCKED).map((l: any) => l.id);
+    const current = ((item.labels ?? []) as unknown[]).map((l: unknown) => ref(l));
+    const blockedIds = labels.filter((l) => pyLower(l.name as string) === BLOCKED).map((l) => l.id);
     let patch: Record<string, unknown>;
     if (newSt === "blocked") {
       if (blockedIds.length === 0) {
-        const created = await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${pid}/labels/`, {
-          name: BLOCKED,
-        });
+        const created = (await api(
+          cfg,
+          "POST",
+          `workspaces/${cfg.WS}/projects/${pid}/labels/`,
+          {
+            name: BLOCKED,
+          },
+        )) as PlaneObj;
         blockedIds.push(created.id);
       }
       patch = { labels: [...new Set([...current, blockedIds[0]])].sort() };
@@ -1397,12 +1421,14 @@ async function runCommands(): Promise<void> {
     if (want && !STATES.includes(want))
       dieP(`invalid state ${want} (one of: ${STATES.join(", ")})`, 2);
     const proj = await projectFor(cfg, args[0]!);
-    const states = await statesOf(cfg, proj.id);
-    const labels = await labelsOf(cfg, proj.id);
-    const items: any[] = [];
+    const states = await statesOf(cfg, proj.id as string);
+    const labels = await labelsOf(cfg, proj.id as string);
+    const items: PlaneObj[] = [];
     for await (const it of pages(cfg, `workspaces/${cfg.WS}/projects/${proj.id}/work-items/`))
       items.push(it);
-    for (const it of items.sort((a, b) => (a.sequence_id ?? 0) - (b.sequence_id ?? 0))) {
+    for (const it of items.sort(
+      (a, b) => ((a.sequence_id ?? 0) as number) - ((b.sequence_id ?? 0) as number),
+    )) {
       const st = flowStateOf(it, states, labels);
       if (want === null || st === want) {
         console.log(`${proj.identifier}-${it.sequence_id}\t${st}\t${it.name ?? ""}`);
