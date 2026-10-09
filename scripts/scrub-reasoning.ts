@@ -145,8 +145,10 @@ export function firstNonWsChar(text: string): string {
   // The whole-file entry's first-character probe, shared so the promoter and
   // the detector cannot disagree on where the blob starts. Python whitespace
   // covers JSON's, so only unparseable bytes are ever skipped past; iteration
-  // keeps astral characters whole.
-  const trimmed = pyTrim(text);
+  // keeps astral characters whole. A UTF-8 byte-order mark rides ahead of
+  // the value and is skipped too, wherever it sits among the whitespace.
+  // Review round 11 (bug-60).
+  const trimmed = pyTrim(text.replace(/\uFEFF/gu, ""));
   for (const ch of trimmed) return ch;
   return "";
 }
@@ -160,8 +162,11 @@ export function maybeWholeJson(
 }
 
 export function parseWholeJson(text: string): unknown | undefined {
+  // A UTF-8 byte-order mark ahead of the value is skipped, matching the
+  // gate; one inside the value is content and left for JSON to judge.
+  // Review round 11 (bug-60).
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text.replace(/^\uFEFF+/u, "")) as unknown;
   } catch {
     return undefined;
   }

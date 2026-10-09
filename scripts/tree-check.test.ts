@@ -447,3 +447,50 @@ test("tree check --findings names run records under .postmaster/", () => {
     { commit: added, path: ".postmaster/run.json", line: 0, rule: "private-record" },
   ]);
 });
+
+test("tree check flags UTF-8 BOM records pretty-printed and one-line", () => {
+  // Review round 11 (bug-60): the gate read the BOM as the first
+  // character, so a BOM-prefixed spanning record skipped the whole entry.
+  const repo = initRepo();
+  const base = gitAt(repo, ["rev-parse", "HEAD"]);
+  mkdirSync(join(repo, "raw"));
+  const live = ["sealed", "blob"].join("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
+  writeFileSync(join(repo, "raw", "pretty.jsonl"), `\uFEFF${pretty}\n`);
+  writeFileSync(
+    join(repo, "raw", "single.jsonl"),
+    `\uFEFF${JSON.stringify({ encrypted_content: live })}\n`,
+  );
+  gitAt(repo, ["add", "raw/pretty.jsonl", "raw/single.jsonl"]);
+  commit(repo, "add BOM records");
+  const checked = runScript("tree-check", [base, "HEAD"], repo);
+  expect(checked.status).toBe(1);
+  expect(checked.stdout).toContain("raw/pretty.jsonl:1: encrypted-reasoning");
+  expect(checked.stdout).toContain("raw/single.jsonl:1: encrypted-reasoning");
+});
+
+test("tree check refuses UTF-16 BOM records loudly by name, exit 2", () => {
+  // Review round 11 (bug-60): only the UTF-8 mark is skipped; the UTF-16
+  // forms stay closed input, refused like any other encoding.
+  const little = Buffer.from(`{"note": "encoded"}\n`, "utf16le");
+  const big = Buffer.from(little);
+  for (let i = 0; i + 1 < big.length; i += 2) {
+    const lo = big[i]!;
+    big[i] = big[i + 1]!;
+    big[i + 1] = lo;
+  }
+  for (const bytes of [
+    Buffer.concat([Buffer.from([0xff, 0xfe]), little]),
+    Buffer.concat([Buffer.from([0xfe, 0xff]), big]),
+  ]) {
+    const repo = initRepo();
+    const base = gitAt(repo, ["rev-parse", "HEAD"]);
+    mkdirSync(join(repo, "raw"));
+    writeFileSync(join(repo, "raw", "record.jsonl"), bytes);
+    gitAt(repo, ["add", "raw/record.jsonl"]);
+    commit(repo, "add an encoded record");
+    const refused = runScript("tree-check", [base, "HEAD"], repo);
+    expect(refused.status).toBe(2);
+    expect(refused.stdout + refused.stderr).toContain("raw/record.jsonl");
+  }
+});

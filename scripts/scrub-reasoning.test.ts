@@ -88,6 +88,21 @@ test("a pretty-printed record counts on both sides through the whole-file entry"
   expect(parseWholeJson("not json at all")).toBe(undefined);
 });
 
+test("a byte-order mark ahead of JSON counts on both sides", () => {
+  // Review round 11 (bug-60): the whole-file gate read U+FEFF as the
+  // first character, so a BOM-prefixed record skipped the whole entry.
+  expect(firstNonWsChar("\uFEFF{")).toBe("{");
+  expect(firstNonWsChar("  \uFEFF{")).toBe("{");
+  expect(firstNonWsChar("\uFEFF\uFEFF{")).toBe("{");
+  expect(firstNonWsChar("\uFEFF")).toBe("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: sealed() }, null, 2);
+  const whole = parseWholeJson(`\uFEFF${pretty}`);
+  expect(whole).not.toBe(undefined);
+  expect(hasReasoning(whole)).toBe(true);
+  const kept = parseWholeJson(JSON.stringify({ note: "\uFEFFkept" }));
+  expect((kept as { note: string }).note).toBe("\uFEFFkept");
+});
+
 test("reasoning in a prose line's embedded JSON counts on both sides", () => {
   // Review round 10 (bug-53): both sides only recognised whole lines that
   // parse as JSON, so a prose line embedding a reasoning record sailed

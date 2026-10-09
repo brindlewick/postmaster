@@ -104,6 +104,27 @@ test("promotion strips pretty-printed reasoning spanning lines, one-line form un
   expect(JSON.parse(fixedSingle).encrypted_content).toBe("<redacted:encrypted-reasoning>");
 });
 
+test("promotion strips BOM-prefixed reasoning pretty-printed and one-line", () => {
+  // Review round 11 (bug-60): the mark rides ahead of the record on both
+  // sides, so the promoter must scrub what the detector flags.
+  const repo = initRepo();
+  const source = join(scratchDir(), "bom-source");
+  mkdirSync(source);
+  const live = ["sealed", "blob"].join("");
+  const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
+  writeFileSync(join(source, "pretty.jsonl"), `\uFEFF${pretty}\n`);
+  const single = JSON.stringify({ encrypted_content: live });
+  writeFileSync(join(source, "single.jsonl"), `\uFEFF${single}\n`);
+  const copied = runScript("raw-promote", [source, "raw/fixed"], repo);
+  expect(copied.status).toBe(0);
+  expect(copied.stdout).toContain("encrypted-reasoning scrubbed");
+  const fixedPretty = readFileSync(join(repo, "raw/fixed", "pretty.jsonl"), "utf8");
+  expect(fixedPretty.includes(live)).toBe(false);
+  const fixedSingle = readFileSync(join(repo, "raw/fixed", "single.jsonl"), "utf8");
+  expect(fixedSingle.includes(live)).toBe(false);
+  expect(JSON.parse(fixedSingle).encrypted_content).toBe("<redacted:encrypted-reasoning>");
+});
+
 test("promotion strips reasoning embedded in a prose line", () => {
   // Review round 10 (bug-53): the per-line transform only recognised whole
   // lines that parse as JSON, so a prose line embedding a reasoning record
