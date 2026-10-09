@@ -100,11 +100,4 @@ proof gone after cleanup fails this step. Mend what fails, and run your own clea
 after every failed round too, so broken rounds strand no processes and no ports. A
 verifier nobody has run is a draft, not a handover.
 
-Commit only verifiers with proof: a verifier whose drive left no proof file stays out
-of the branch — remove its folder rather than committing it. Then write HANDOVER.md at
-the top of this working copy: what you proved and under which drive name, where the
-proof file sits as an absolute path (or why there is none), and what you left undone.
-Give each verifier its own `## Verifier: <name>` section carrying a `Folder:` line with
-the verifier's folder relative to the top of the working copy and a `Proof:` line with
-the proof file's absolute path alone, or `none` and the reason when there is no proof
-file. Send the same text as your final message.
+Commit the verifier on this branch. {{HANDOVER_RULE}}
