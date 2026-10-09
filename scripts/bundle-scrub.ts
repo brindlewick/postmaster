@@ -107,7 +107,9 @@ function main(argv: string[]): number {
     const current = force ? null : embedded(out);
     if (current && current.sources === hash && digest(current.rest) === current.body) continue;
     if (check) {
-      console.error(errorText("bundle-scrub", `${out} is stale; regenerate with scripts/run bundle-scrub`));
+      console.error(
+        errorText("bundle-scrub", `${out} is stale; regenerate with scripts/run bundle-scrub`),
+      );
       stale = true;
       continue;
     }

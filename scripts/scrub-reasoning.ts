@@ -146,11 +146,7 @@ export function maybeWholeJson(
   firstNonWs: string,
   anyParseFail: boolean,
 ): boolean {
-  return (
-    lineCount > 1 &&
-    (firstNonWs === "{" || firstNonWs === "[") &&
-    anyParseFail
-  );
+  return lineCount > 1 && (firstNonWs === "{" || firstNonWs === "[") && anyParseFail;
 }
 
 export function parseWholeJson(text: string): unknown | undefined {

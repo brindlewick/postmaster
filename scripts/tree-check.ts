@@ -11,12 +11,7 @@ import {
   StreamScanner,
 } from "./scrub-core.ts";
 import { pyWords } from "./lib/text.ts";
-import {
-  hasReasoning,
-  maybeWholeJson,
-  parseWholeJson,
-  WHOLE_JSON_CAP,
-} from "./scrub-reasoning.ts";
+import { hasReasoning, maybeWholeJson, parseWholeJson, WHOLE_JSON_CAP } from "./scrub-reasoning.ts";
 import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -115,7 +110,9 @@ async function scanBlob(
 
 function blobId(root: string, rev: string, path: string): string | null {
   try {
-    const id = git(["rev-parse", "--verify", `${rev}:${path}`], root).toString("ascii").trim();
+    const id = git(["rev-parse", "--verify", `${rev}:${path}`], root)
+      .toString("ascii")
+      .trim();
     return id === "" ? null : id;
   } catch {
     return null;

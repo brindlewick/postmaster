@@ -119,7 +119,10 @@ test("tree check flags pretty-printed reasoning spanning lines", () => {
   const live = ["sealed", "blob"].join("");
   const pretty = JSON.stringify({ type: "reasoning", encrypted_content: live }, null, 2);
   writeFileSync(join(repo, "raw", "pretty.jsonl"), `${pretty}\n`);
-  writeFileSync(join(repo, "raw", "single.jsonl"), `${JSON.stringify({ encrypted_content: live })}\n`);
+  writeFileSync(
+    join(repo, "raw", "single.jsonl"),
+    `${JSON.stringify({ encrypted_content: live })}\n`,
+  );
   commit(repo, "add records");
   const checked = runScript("tree-check", [base, "HEAD"], repo);
   expect(checked.status).toBe(1);
