@@ -16,7 +16,7 @@
 //   exit 1  usage, a tool not on PATH, a refusal from new, or input that is not what it says
 //   exit 2  score, hidden: a check failed
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -26,6 +26,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -454,7 +455,7 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
   }
   const legs = legsOf(dispatch, manifest);
   const results: CheckResult[] = [
-    { name: "hidden-tests", ...checkHidden(dispatch, repo, app) },
+    { name: "hidden-tests", ...checkHidden(dispatch, repo, app, main) },
     { name: "gate", ...checkGate(app, repo, main) },
     { name: "stages", ...checkStages(dispatch), out: "" },
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
@@ -560,10 +561,61 @@ export function legsOf(dispatch: string, manifest: Record<string, unknown> | nul
   return Array.from({ length: max }, (_, i) => i + 1);
 }
 
+/** Scoring runs the example app's own checks: its hidden tests on main, on each lane's branch, and
+ * its gate from a clean checkout. That is about 17 seconds, and the same for every record of one
+ * app. A caller that scores many records of one app (the tests) sets POSTMASTER_FIXTURE_APP_CACHE
+ * to a directory it owns, and each result is kept there under a key made from everything it
+ * depends on, so the next record of the same app reads it. Nothing else sets it; with it unset
+ * every score runs everything. */
+export function appCached<T>(key: string, compute: () => T): T {
+  const dir = process.env.POSTMASTER_FIXTURE_APP_CACHE;
+  if (!dir) return compute();
+  const file = join(dir, `${createHash("sha256").update(key).digest("hex")}.json`);
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch {
+    // Not kept yet, or not readable: compute it.
+  }
+  const value = compute();
+  try {
+    mkdirSync(dir, { recursive: true });
+    const part = `${file}.${process.pid}.part`;
+    writeFileSync(part, JSON.stringify(value));
+    renameSync(part, file);
+  } catch {
+    // A cache that cannot be written only costs time.
+  }
+  return value;
+}
+
+/** What the lanes' scores depend on: the ticket, main, every local branch, the run's manifest and
+ * its waybill. */
+function laneKey(dispatch: string, repo: string, ticket: string, main: string): string {
+  const branches = sh([
+    "git",
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname) %(objectname)",
+    "refs/heads",
+  ]);
+  const read = (name: string): string => {
+    try {
+      return readFileSync(join(dispatch, name), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  return ["lanes", ticket, main, branches.out ?? "", read("manifest.json"), read("brief.md")].join(
+    "\0",
+  );
+}
+
 function checkHidden(
   dispatch: string,
   repo: string,
   app: string,
+  main: string,
 ): { ok: boolean; detail: string; out: string } {
   const brief = join(dispatch, "brief.md");
   const text = existsSync(brief) ? squash(readFileSync(brief, "utf8")) : "";
@@ -584,9 +636,12 @@ function checkHidden(
       out: "",
     };
   }
-  const h = hidden(found[0]!, app);
-  const mainDetail = `${found[0]}, from the waybill: ${h.detail} on main`;
-  const lanes = laneScores(dispatch, repo, found[0]!);
+  const ticket = found[0]!;
+  const h = appCached(`hidden\0${ticket}\0${main}`, () => hidden(ticket, app));
+  const mainDetail = `${ticket}, from the waybill: ${h.detail} on main`;
+  const lanes = appCached(laneKey(dispatch, repo, ticket, main), () =>
+    laneScores(dispatch, repo, ticket),
+  );
   return {
     ok: h.passed,
     detail: lanes ? `${mainDetail}; ${lanes}` : mainDetail,
@@ -595,6 +650,14 @@ function checkHidden(
 }
 
 function checkGate(
+  app: string,
+  repo: string,
+  branch: string,
+): { ok: boolean; detail: string; out: string } {
+  return appCached(`gate\0${branch}`, () => runGate(app, repo, branch));
+}
+
+function runGate(
   app: string,
   repo: string,
   branch: string,
