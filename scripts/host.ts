@@ -238,9 +238,34 @@ function count(value: string | undefined, what: string): number {
 function quote(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
-function parseJson(text: string): any {
+// Shapes of the Herdr CLI's JSON replies, per call site.
+interface HerdrReply {
+  result?: unknown;
+  error?: { code?: unknown };
+}
+interface HerdrTokens {
+  postmaster?: unknown;
+  state?: unknown;
+}
+interface HerdrSpace {
+  workspace_id?: unknown;
+  worktree?: unknown;
+  tokens?: HerdrTokens;
+}
+interface HerdrPane {
+  pane_id?: unknown;
+  tab_id?: unknown;
+  tokens?: HerdrTokens;
+}
+interface HerdrPlaced {
+  workspace?: HerdrSpace;
+  tab?: { tab_id?: unknown };
+  root_pane?: { pane_id?: unknown };
+}
+
+function parseJson<T = HerdrReply>(text: string): T | null {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as T;
   } catch {
     return null;
   }
@@ -248,7 +273,7 @@ function parseJson(text: string): any {
 function jsonValue(value: unknown): string {
   return value === undefined || value === null ? "" : String(value);
 }
-function _jsonStdout(text: string, expression: (data: any) => unknown): string {
+function _jsonStdout(text: string, expression: (data: HerdrReply | null) => unknown): string {
   const value = parseJson(text);
   return value === null ? "" : jsonValue(expression(value));
 }
@@ -355,9 +380,9 @@ function isPathComponent(value: unknown): boolean {
 }
 
 // Stores are third-party text: anything not a mapping is no store at all.
-function asRecord(value: unknown): Record<string, any> {
+function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, any>)
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -403,18 +428,28 @@ function nameCmd(dispatch: string, ...args: string[]): string {
       die("cannot resolve the coachman leg from manifest.json");
     return raw;
   };
-  const needLaneModel = (lane: string, role: string): Record<string, any> => {
-    const spec = hasOwn(lanes, lane) ? lanes[lane] : undefined;
-    if (typeof spec !== "object" || spec === null || Array.isArray(spec) || !spec.model)
+  const needLaneModel = (lane: string, role: string): Record<string, unknown> => {
+    const spec: unknown = hasOwn(lanes, lane) ? lanes[lane] : undefined;
+    if (
+      typeof spec !== "object" ||
+      spec === null ||
+      Array.isArray(spec) ||
+      !(spec as Record<string, unknown>)["model"]
+    )
       die(`no recorded model for ${role} lane ${lane}`);
-    return spec as Record<string, any>;
+    return spec as Record<string, unknown>;
   };
-  const needCoachmanModel = (legName: string): Record<string, any> => {
+  const needCoachmanModel = (legName: string): Record<string, unknown> => {
     const legs = asRecord(team.coachman_legs);
-    const spec = (hasOwn(legs, legName) ? legs[legName] : undefined) || team.coachman;
-    if (typeof spec !== "object" || spec === null || Array.isArray(spec) || !spec.model)
+    const spec: unknown = (hasOwn(legs, legName) ? legs[legName] : undefined) || team.coachman;
+    if (
+      typeof spec !== "object" ||
+      spec === null ||
+      Array.isArray(spec) ||
+      !(spec as Record<string, unknown>)["model"]
+    )
       die(`no recorded model for coachman leg ${legName}`);
-    return spec as Record<string, any>;
+    return spec as Record<string, unknown>;
   };
   const needLens = (lens: string): string => {
     if (lens !== "style" && lens !== "bug" && lens !== "security")
@@ -707,9 +742,11 @@ function registryScan(dir: string): Array<{ group: string; name: string; roots: 
 function herdr(args: string[], timeout = 0) {
   return timeout ? limit(timeout, "herdr", args) : run("herdr", args);
 }
-function herdrData(args: string[]): any {
+function herdrData(args: string[]): { agent?: { agent_status?: unknown } } | null {
   const result = herdr(args);
-  return result.code === 0 ? (parseJson(result.out)?.result ?? null) : null;
+  return result.code === 0
+    ? ((parseJson(result.out)?.result ?? null) as { agent?: { agent_status?: unknown } } | null)
+    : null;
 }
 function herdrPlace(
   name: string,
@@ -728,9 +765,9 @@ function herdrPlace(
   const listed = top ? herdr(["worktree", "list", "--cwd", cwd]) : null;
   if (listed?.code === 0) {
     try {
-      const data = parseJson(listed.out)?.result;
+      const data = parseJson<{ result?: Record<string, unknown> }>(listed.out)?.result;
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
-      const src = data.source ?? {};
+      const src = (data.source ?? {}) as Record<string, unknown>;
       if (typeof src !== "object" || src === null || Array.isArray(src))
         throw new Error("bad list");
       const rows = data.worktrees ?? [];
@@ -770,7 +807,7 @@ function herdrPlace(
       ...PLACE_ENV,
     ]);
     if (response.code !== 0) return null;
-    const data = parseJson(response.out)?.result;
+    const data = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     const space = jsonValue(data?.workspace?.workspace_id);
     const tab = jsonValue(data?.tab?.tab_id);
     const pane = jsonValue(data?.root_pane?.pane_id);
@@ -813,7 +850,7 @@ function herdrPlace(
       ...PLACE_ENV,
     ]);
     if (response.code !== 0) return null;
-    const created = parseJson(response.out)?.result;
+    const created = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     source = jsonValue(created?.workspace?.workspace_id);
     // This is the first pane of the project space. Use it for a project-level launch such as
     // the postmaster, instead of leaving an empty shell beside the launch tab.
@@ -837,7 +874,7 @@ function herdrPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    const data = parseJson(response.out)?.result;
+    const data = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     space = jsonValue(data?.workspace?.workspace_id);
     tab = jsonValue(data?.tab?.tab_id);
     pane = jsonValue(data?.root_pane?.pane_id);
@@ -858,7 +895,7 @@ function herdrPlace(
       ...PLACE_ENV,
     ]);
     if (response.code !== 0) return null;
-    const data = parseJson(response.out)?.result;
+    const data = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     tab = jsonValue(data?.tab?.tab_id);
     pane = jsonValue(data?.root_pane?.pane_id);
   }
@@ -966,13 +1003,20 @@ function undash(value: unknown): string {
 function herdrSpaceOpened(space: string): boolean {
   const info = herdr(["workspace", "get", space]);
   if (info.code !== 0) return false;
-  return _jsonStdout(info.out, (d) => d?.result?.workspace?.tokens?.postmaster) === "opened";
+  return (
+    _jsonStdout(
+      info.out,
+      (d) =>
+        (d as { result?: { workspace?: HerdrSpace } } | null)?.result?.workspace?.tokens
+          ?.postmaster,
+    ) === "opened"
+  );
 }
 
 function herdrSpaceGone(space: string): boolean {
   const list = herdr(["workspace", "list"]);
   if (list.code !== 0) return false;
-  const data = parseJson(list.out);
+  const data = parseJson<{ result?: { workspaces?: HerdrSpace[] } }>(list.out);
   if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
   const result = data.result;
   if (result === null || typeof result !== "object" || Array.isArray(result)) return false;
@@ -1003,18 +1047,18 @@ function tmuxWindowGone(window: string): boolean {
 }
 
 function finishOwnership(panesText: string, target: string, tab: string): string {
-  const rows = parseJson(panesText)?.result?.panes;
+  const rows = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!Array.isArray(rows)) throw new Error("bad panes");
   for (const row of rows) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("bad panes");
   }
-  const pane = rows.find((row: any) => row.pane_id === target) ?? null;
+  const pane = rows.find((row) => row.pane_id === target) ?? null;
   if (pane === null) return "missing";
   if (tokensOf(pane).postmaster !== "launch") return "unowned";
-  if (!HERDR_TAB_ID.test(pane.tab_id ?? "") || pane.tab_id !== tab) return "pane";
-  if (rows.some((row: any) => row.pane_id !== target && !HERDR_TAB_ID.test(row.tab_id ?? "")))
+  if (!HERDR_TAB_ID.test((pane.tab_id ?? "") as string) || pane.tab_id !== tab) return "pane";
+  if (rows.some((row) => row.pane_id !== target && !HERDR_TAB_ID.test((row.tab_id ?? "") as string)))
     return "pane";
-  if (rows.some((row: any) => row.pane_id !== target && row.tab_id === tab)) return "pane";
+  if (rows.some((row) => row.pane_id !== target && row.tab_id === tab)) return "pane";
   return "tab";
 }
 
@@ -1170,8 +1214,8 @@ function finishPriorHerdr(cwd: string, runPath: string): void {
       if (panes.code === 0) {
         let present = false;
         try {
-          const rows = parseJson(panes.out)?.result?.panes;
-          present = Array.isArray(rows) && rows.some((row: any) => row?.pane_id === pane);
+          const rows = parseJson<{ result?: { panes?: HerdrPane[] } }>(panes.out)?.result?.panes;
+          present = Array.isArray(rows) && rows.some((row) => row?.pane_id === pane);
         } catch {
           present = false;
         }
@@ -1304,21 +1348,21 @@ function herdrRunPlace(
   let repoName = "";
   let runSpace = "";
   try {
-    const data = parseJson(listed.out)?.result;
+    const data = parseJson<{ result?: Record<string, unknown> }>(listed.out)?.result;
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
     // Main reads d.get("source", {}): an explicit null is a failure, not an empty source.
     if (data.source === null) throw new Error("bad list");
-    const src = data.source ?? {};
+    const src = (data.source ?? {}) as Record<string, unknown>;
     if (typeof src !== "object" || Array.isArray(src)) throw new Error("bad list");
     const rows = data.worktrees ?? [];
     if (!Array.isArray(rows)) throw new Error("bad list");
     const runReal = realpathLoose(runPath);
-    let match: any = null;
+    let match: Record<string, unknown> | null = null;
     for (const entry of rows) {
       if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
         throw new Error("bad list");
       if (realpathLoose(entry.path) === runReal) {
-        match = entry;
+        match = entry as Record<string, unknown>;
         break;
       }
     }
@@ -1341,7 +1385,10 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    source = jsonValue(parseJson(response.out)?.result?.workspace?.workspace_id);
+    source = jsonValue(
+      parseJson<{ result?: { workspace?: HerdrSpace } }>(response.out)?.result?.workspace
+        ?.workspace_id,
+    );
   }
   let tab = "";
   let pane = "";
@@ -1358,7 +1405,7 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    const opened = parseJson(response.out)?.result;
+    const opened = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     runSpace = jsonValue(opened?.workspace?.workspace_id);
     const rootTab = jsonValue(opened?.tab?.tab_id);
     const rootPane = jsonValue(opened?.root_pane?.pane_id);
@@ -1413,7 +1460,7 @@ function herdrRunPlace(
       rollbackRootTab(rootTab);
       return null;
     }
-    const created = parseJson(launched.out)?.result;
+    const created = parseJson<{ result?: HerdrPlaced }>(launched.out)?.result;
     tab = jsonValue(created?.tab?.tab_id);
     pane = jsonValue(created?.root_pane?.pane_id);
     if (!tab || !pane) {
@@ -1437,7 +1484,7 @@ function herdrRunPlace(
       "--no-focus",
     ]);
     if (response.code !== 0) return null;
-    const created = parseJson(response.out)?.result;
+    const created = parseJson<{ result?: HerdrPlaced }>(response.out)?.result;
     tab = jsonValue(created?.tab?.tab_id);
     pane = jsonValue(created?.root_pane?.pane_id);
   }
@@ -1529,7 +1576,9 @@ const SPEC_FIELDS = [
 function writeSpec(spec: string, fields: Spec): void {
   mkdirSync(spec, { recursive: true, mode: 0o700 });
   for (const name of SPEC_FIELDS.slice(0, -2))
-    writeFileSync(join(spec, name), (fields as any)[name], { mode: 0o600 });
+    writeFileSync(join(spec, name), (fields as unknown as Record<string, string>)[name], {
+      mode: 0o600,
+    });
   writeFileSync(join(spec, "argv"), `${fields.argv.join("\0")}\0`, { mode: 0o600 });
 }
 function readSpec(spec: string): Spec {
@@ -2121,7 +2170,8 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
   const started = Date.now();
   const eventFile = `${specDir}.cap`;
   markerRemove(eventFile);
-  const stdioFor = (fd: number): any => (fd >= 0 ? fd : mode === "bg" ? "ignore" : "inherit");
+  const stdioFor = (fd: number): number | "ignore" | "inherit" =>
+    fd >= 0 ? fd : mode === "bg" ? "ignore" : "inherit";
   let child: ReturnType<typeof spawn> | null = null;
   let spawnError: unknown = null;
   try {
@@ -4995,28 +5045,28 @@ function placementFiles(): string[] {
   }
 }
 
-function tokensOf(entry: any): any {
+function tokensOf(entry: { tokens?: unknown }): Record<string, unknown> {
   const tokens = entry.tokens || {};
   if (typeof tokens !== "object" || tokens === null || Array.isArray(tokens))
     throw new Error("bad tokens");
-  return tokens;
+  return tokens as Record<string, unknown>;
 }
 
 function placementOwnership(panesText: string, paneId: string, tabId: string): string {
-  const panes = (parseJson(panesText) as any)?.result?.panes;
+  const panes = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!Array.isArray(panes)) throw new Error("bad panes");
   for (const entry of panes)
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("bad panes");
   const placed = (value: unknown): boolean => typeof value === "string" && HERDR_TAB_ID.test(value);
-  const pane = panes.find((entry: any) => entry.pane_id === paneId);
+  const pane = panes.find((entry) => entry.pane_id === paneId);
   if (!pane) return "missing";
   if (tokensOf(pane).postmaster !== "launch") return "unowned";
   if (!placed(pane.tab_id)) return "idless";
-  if (panes.some((entry: any) => !placed(entry.tab_id))) return "mixed";
+  if (panes.some((entry) => !placed(entry.tab_id))) return "mixed";
   if (
     panes
-      .filter((entry: any) => entry.tab_id === tabId)
-      .every((entry: any) => tokensOf(entry).postmaster === "launch")
+      .filter((entry) => entry.tab_id === tabId)
+      .every((entry) => tokensOf(entry).postmaster === "launch")
   )
     return "owned";
   return "split";
@@ -5124,15 +5174,15 @@ function herdrForgetSpace(workspace: string): void {
       continue;
     }
     try {
-      const item = JSON.parse(readFileSync(file, "utf8")) as any;
+      const item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> | null;
       if (item?.workspace === workspace) markerRemove(file);
     } catch {}
   }
 }
 
 function spaceVerdict(infoText: string, panesText: string): string {
-  const ws = (parseJson(infoText) as any)?.result?.workspace;
-  const panes = (parseJson(panesText) as any)?.result?.panes;
+  const ws = parseJson<{ result?: { workspace?: HerdrSpace } }>(infoText)?.result?.workspace;
+  const panes = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!ws || typeof ws !== "object" || Array.isArray(ws)) throw new Error("bad space");
   if (!Array.isArray(panes)) throw new Error("bad panes");
   for (const entry of panes)
@@ -5162,9 +5212,9 @@ function spaceVerdict(infoText: string, panesText: string): string {
 
 function herdrPlacementCwd(workspace: string, pane: string): string {
   for (const file of placementFiles()) {
-    let item: any = null;
+    let item: Record<string, unknown> | null = null;
     try {
-      item = JSON.parse(readFileSync(file, "utf8"));
+      item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     } catch {
       continue;
     }
@@ -5191,17 +5241,17 @@ function closeHerdr(path: string): number {
     kind = "main";
   } else {
     try {
-      const data = (parseJson(listText) as any)?.result;
+      const data = parseJson<{ result?: Record<string, unknown> }>(listText)?.result;
       if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("bad list");
       const rows = data.worktrees ?? [];
       if (!Array.isArray(rows)) throw new Error("bad list");
       const here = realpathLoose(path);
-      let match: any = null;
+      let match: Record<string, unknown> | null = null;
       for (const entry of rows) {
         if (!entry || typeof entry !== "object" || typeof entry.path !== "string")
           throw new Error("bad list");
         if (realpathLoose(entry.path) === here) {
-          match = entry;
+          match = entry as Record<string, unknown>;
           break;
         }
       }
@@ -5218,7 +5268,7 @@ function closeHerdr(path: string): number {
     let candidates: string[] = [];
     if (workspaces.code === 0) {
       try {
-        const data = parseJson(workspaces.out);
+        const data = parseJson<{ result?: { workspaces?: HerdrSpace[] } }>(workspaces.out);
         const result = data?.result;
         if (result === null || typeof result !== "object" || Array.isArray(result))
           throw new Error("bad spaces");
@@ -5242,7 +5292,9 @@ function closeHerdr(path: string): number {
         warn(`could not inspect space ${candidate}; left it open`);
         return 2;
       }
-      const tree = asRecord(parseJson(got.out)?.result?.workspace?.worktree);
+      const tree = asRecord(
+        parseJson<{ result?: { workspace?: HerdrSpace } }>(got.out)?.result?.workspace?.worktree,
+      );
       const actualPath = jsonValue(tree.checkout_path || tree.path);
       let resolved = "";
       try {
@@ -5269,7 +5321,9 @@ function closeHerdr(path: string): number {
     }
     infoText = infoResult.out;
   }
-  const tree = asRecord((parseJson(infoText) as any)?.result?.workspace?.worktree);
+  const tree = asRecord(
+    parseJson<{ result?: { workspace?: HerdrSpace } }>(infoText)?.result?.workspace?.worktree,
+  );
   const actualPath = jsonValue(tree.checkout_path || tree.path);
   if (!actualPath) return 0;
   try {
@@ -5470,9 +5524,12 @@ export function runWorktreePaths(givenDispatch: string): string[] {
     // Only the round records: findings lists, usage records and anything else
     // that shares the folder are not state for this lookup.
     if (!REVIEW_ROUND_FILE.test(entry)) continue;
-    let state: any = null;
+    let state: Record<string, unknown> | null = null;
     try {
-      state = JSON.parse(readFileSync(join(dispatch, "logs", entry), "utf8"));
+      state = JSON.parse(readFileSync(join(dispatch, "logs", entry), "utf8")) as Record<
+        string,
+        unknown
+      >;
     } catch {
       continue;
     }
@@ -5497,9 +5554,9 @@ export function runWorktreePaths(givenDispatch: string): string[] {
   try {
     const actionLog = join(dispatch, "actions.jsonl");
     for (const [lineIndex, line] of pySplitLines(readFileSync(actionLog, "utf8")).entries()) {
-      let action: any = null;
+      let action: Record<string, unknown> | null = null;
       try {
-        action = JSON.parse(line);
+        action = JSON.parse(line) as Record<string, unknown>;
       } catch {
         continue;
       }
@@ -5570,9 +5627,9 @@ async function stopRunCmd(args: string[]): Promise<void> {
 }
 
 function runSpaceVerdict(infoText: string, panesText: string): string {
-  const ws = parseJson(infoText)?.result?.workspace;
+  const ws = parseJson<{ result?: { workspace?: HerdrSpace } }>(infoText)?.result?.workspace;
   if (ws === null || typeof ws !== "object" || Array.isArray(ws)) throw new Error("bad space");
-  const panes = parseJson(panesText)?.result?.panes;
+  const panes = parseJson<{ result?: { panes?: HerdrPane[] } }>(panesText)?.result?.panes;
   if (!Array.isArray(panes)) throw new Error("bad panes");
   for (const entry of panes) {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry))
@@ -5601,9 +5658,9 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
   const found = new Set<string>();
   let collectOk = true;
   for (const file of placementFiles()) {
-    let item: any = null;
+    let item: Record<string, unknown> | null = null;
     try {
-      item = JSON.parse(readFileSync(file, "utf8"));
+      item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     } catch {
       continue;
     }
@@ -5629,7 +5686,7 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     }
     let fields: string[] | null = null;
     try {
-      const item: any = JSON.parse(readFileSync(file, "utf8"));
+      const item = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
       if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
       if (item.run !== dispatch) continue;
       fields = ["workspace", "tab", "pane", "cwd"].map((key) => jsonValue(item[key]));
