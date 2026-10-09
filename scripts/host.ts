@@ -87,8 +87,9 @@
 // POSTMASTER_HOST_CLAIM_WAIT (20) is how long a new pane has to start its launch,
 // POSTMASTER_HOST_CLOSE_WAIT (15) how long close waits for a launch that is just ending, and
 // POSTMASTER_HOST_FINISH_DELAY (0.2) lets the pane finish rendering after its marker lands,
-// POSTMASTER_HOST_STOP_WAIT (20) how long stop waits after TERM before it sends KILL, and
-// POSTMASTER_HOST_STOP_MAX (512) the most processes one stop may signal.
+// POSTMASTER_HOST_SPAWN_WAIT (30) how long spawn waits for a Herdr pane's agent to take its
+// handle before it fails, POSTMASTER_HOST_STOP_WAIT (20) how long stop waits after TERM before
+// it sends KILL, and POSTMASTER_HOST_STOP_MAX (512) the most processes one stop may signal.
 //
 //   exit 0  detected, named, started, stopped, closed, sent, settled or read
 //   exit 1  usage, or nothing could be started
@@ -821,8 +822,10 @@ function herdrPlace(
     const created = parseJson(response.out)?.result;
     source = jsonValue(created?.workspace?.workspace_id);
     // This is the first pane of the project space. Use it for a project-level launch such as
-    // the postmaster, instead of leaving an empty shell beside the launch tab.
-    if (where === "repo" || worktreeKind === "main") {
+    // the postmaster, instead of leaving an empty shell beside the launch tab. Only when the
+    // launch runs at the repo root: a session in a linked worktree gets a tab of its own at
+    // its directory below, in this same space.
+    if (worktreeKind === "main") {
       tab = jsonValue(created?.tab?.tab_id);
       pane = jsonValue(created?.root_pane?.pane_id);
     }
@@ -3058,6 +3061,28 @@ function herdrReport(pid: number, name: string): Promise<void> {
     ]);
   })();
 }
+/** POSTMASTER_HOST_SPAWN_WAIT seconds for the spawned pane's agent to take its
+ * handle: Herdr names it only once it has detected the harness, and a slow
+ * start (an update on first run) outlasts an immediate rename. The rename
+ * repeats until the handle resolves, so spawn prints handle= only for a name
+ * send can reach, and dies loudly instead of leaving send to fail. */
+function waitForSpawnedName(
+  placed: { space: string; tab: string; pane: string },
+  handle: string,
+): void {
+  const wait = count(process.env.POSTMASTER_HOST_SPAWN_WAIT ?? "30", "POSTMASTER_HOST_SPAWN_WAIT");
+  const deadline = Date.now() + wait * 1000;
+  for (;;) {
+    herdr(["agent", "rename", placed.pane, handle]);
+    if (herdr(["agent", "get", handle]).code === 0) return;
+    if (Date.now() >= deadline) {
+      die(
+        `herdr did not name the agent ${handle} within ${wait}s; its tab ${placed.tab} is left open`,
+      );
+    }
+    sleepSync(2000);
+  }
+}
 function spawnCmd(args: string[]): void {
   const originalHandle = args[0] ?? "";
   const givenCwd = args[1] ?? "";
@@ -3120,7 +3145,7 @@ function spawnCmd(args: string[]): void {
       const shellCommand = commandArgs.map(quote).join(" ");
       if (herdr(["pane", "run", placed.pane, shellCommand]).code !== 0)
         die(`herdr could not start ${handle}`);
-      herdr(["agent", "rename", placed.pane, handle]);
+      waitForSpawnedName(placed, handle);
     }
     console.log(
       `host=herdr space=${placed.space} tab=${placed.tab} pane=${placed.pane} handle=${handle}`,

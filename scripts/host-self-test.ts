@@ -396,6 +396,23 @@ function herdrStubInner(args: string[], stateDir: string): void {
     if (flag(join(stateDir, "agent.notready"))) fail("agent_not_ready");
     return;
   }
+  if (command === "agent rename") {
+    const name = args[3]!;
+    // A rename lands only once Herdr has detected the harness: agent.rename-never
+    // fails every rename, and agent.rename-late holds how many more fail first.
+    if (flag(join(stateDir, "agent.rename-never"))) fail("agent_not_found");
+    const late = join(stateDir, "agent.rename-late");
+    if (existsSync(late)) {
+      const left = Number(readFileSync(late, "utf8").trim() || "0");
+      if (left > 0) {
+        writeFileSync(late, String(left - 1));
+        fail("agent_not_found");
+      }
+    }
+    if (!st.agents.includes(name)) st.agents.push(name);
+    save(path, st);
+    return;
+  }
   if (command === "agent prompt") {
     st.prompt.push(args.slice(2));
     save(path, st);
@@ -4089,13 +4106,17 @@ export async function runControls(): Promise<number> {
       { POSTMASTER_CONFIG: "/elsewhere/config.toml" },
     );
     const herdrCalls = calls(root, "herdr");
+    const wtLane = join(f.repo, ".worktrees/T-1-luna");
     await pass(
       "Herdr: spawn starts the agent in a tab of the repository's own space",
       () =>
         spawnHerdr.code === 0 &&
-        herdrCalls.includes("tab\trename\tw1:t1\tpostmaster") &&
+        herdrCalls.includes("tab\trename\tw1:t2\tpostmaster") &&
         herdrCalls.includes(
-          "agent\tstart\tpostmaster-repo\t--kind\tclaude\t--pane\tp2\t--\t--model\tm",
+          "agent\tstart\tpostmaster-repo\t--kind\tclaude\t--pane\tp3\t--\t--model\tm",
+        ) &&
+        herdrCalls.some(
+          (line) => line.includes(`tab\tcreate`) && line.includes(`--cwd\t${wtLane}`),
         ),
       herdrCalls.join("\n"),
     );
@@ -4116,6 +4137,28 @@ export async function runControls(): Promise<number> {
     await pass(
       "a harness asking something on first start: spawn says so, and does not fail",
       () => notReady.code === 0 && notReady.err.includes("asking something"),
+    );
+    writeFileSync(join(stub, "agent.rename-late"), "2");
+    const lateRename = execHost(["spawn", "pane-late", f.repo, "--", "true"], stubs, root);
+    rmSync(join(stub, "agent.rename-late"), { force: true });
+    await pass(
+      "a harness detected late still gets its handle: spawn repeats the rename",
+      () =>
+        lateRename.code === 0 &&
+        lateRename.out.includes("handle=pane-late") &&
+        calls(root, "herdr").filter((line) => line.startsWith("agent\trename\t")).length >= 2,
+    );
+    writeFileSync(join(stub, "agent.rename-never"), "");
+    const neverRename = execHost(["spawn", "pane-never", f.repo, "--", "true"], stubs, root, {
+      POSTMASTER_HOST_SPAWN_WAIT: "2",
+    });
+    rmSync(join(stub, "agent.rename-never"), { force: true });
+    await pass(
+      "a harness never detected fails the spawn loudly instead of printing a dead handle",
+      () =>
+        neverRename.code === 1 &&
+        neverRename.err.includes("did not name the agent pane-never") &&
+        !neverRename.out.includes("handle="),
     );
     const normalized = execHost(
       ["spawn", "My.Project postmaster", f.repo, "--", "claude"],

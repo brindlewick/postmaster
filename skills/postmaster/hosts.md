@@ -248,7 +248,12 @@ onto the fragment it supersedes.
   no hand-off or summary and treats the launch as spent.
 - **`spawn`** passes the caller's `POSTMASTER_*` settings to the new pane, so the postmaster
   runs on the same config and host as the session that started it. Its tab label is `postmaster`;
-  the project's space already names the project.
+  the project's space already names the project. The tab opens at the cwd it was given, in the
+  repository's space: a session in a linked worktree gets a tab of its own there, and the
+  project space keeps its shell tab. A printed `handle=` means the name resolves: where the
+  harness starts behind a wrapper, spawn repeats the rename until the agent takes its handle,
+  up to `POSTMASTER_HOST_SPAWN_WAIT` (30s), and fails loudly past it, leaving the tab open,
+  instead of printing a name no send can reach.
 - **Never** prompt, close, move or rename a pane, tab, space or agent `run host` did not open, and
   never stop or restart the Herdr server.
 
