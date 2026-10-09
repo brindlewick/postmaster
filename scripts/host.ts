@@ -17,8 +17,11 @@
 //   run host leg backfill <dispatch> <leg> <number>
 //   run host leg waiting add|remove|list <runs> <ticket> [<question-file>]
 //   run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
-//               [--out <file>] [--err <file>] [--append] [--marker <file>]
+//               [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>]
 //               [--pidfile <file>] -- <command...>
+//   run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
+//                                         print the launch limits that would apply:
+//                                         memory=<max> and tasks=<max>
 //   run host stop <worktree>               stop every launch still running in a worktree, and
 //                                         everything each one started
 //   run host close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
@@ -122,6 +125,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTomlText } from "./lib/data.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
@@ -1607,6 +1611,7 @@ function launchLimits(
   role: string,
   dispatch: string,
   configPath: string,
+  project = "",
 ): { memory: string; tasks: number } {
   const memoryDefault = "8G";
   const tasksDefault = 512;
@@ -1627,6 +1632,13 @@ function launchLimits(
     if (typeof top !== "object" || top === null || Array.isArray(top))
       die("run.json must hold an object");
     config = (top as Record<string, unknown>).config ?? {};
+  } else if (project) {
+    const resolved = effectiveConfigForProject(project, configPath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      die(`cannot read launch limits: ${resolved.error ?? "cannot resolve project settings"}`);
+    }
+    config = resolved.config;
   } else if (isRegularFile(configPath)) {
     let text: string;
     try {
@@ -1666,6 +1678,31 @@ function launchLimits(
   if (typeof tasks !== "number" || !Number.isInteger(tasks) || tasks < 1 || tasks > 2147483647)
     die("tasks_max must be a whole number from 1 to 2147483647");
   return { memory, tasks };
+}
+
+function limitsCmd(args: string[]): void {
+  let role = "default";
+  let dispatch = "";
+  let project = "";
+  let at = 0;
+  while (at < args.length) {
+    const option = args[at]!;
+    if (option === "--role" || option === "--run" || option === "--project") {
+      if (at + 1 >= args.length) die(`${option} needs a value`);
+      if (option === "--role") role = args[at + 1]!;
+      else if (option === "--run") dispatch = args[at + 1]!;
+      else project = args[at + 1]!;
+      at += 2;
+    } else {
+      die(
+        "usage: run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]",
+      );
+    }
+  }
+  if (role !== "default" && role !== "lane" && role !== "coachman" && role !== "reviewer")
+    die(`unknown launch role: ${role}`);
+  const limits = launchLimits(role, absolute(dispatch), globalConfigPath(), absolute(project));
+  console.log(`memory=${limits.memory}\ntasks=${limits.tasks}`);
 }
 
 function random31(): number {
@@ -2388,6 +2425,7 @@ async function runCmd(args: string[]): Promise<void> {
   let under = "";
   let role = "default";
   let dispatch = "";
+  let project = "";
   let out = "";
   let err = "";
   let marker = "";
@@ -2401,6 +2439,7 @@ async function runCmd(args: string[]): Promise<void> {
       option === "--under" ||
       option === "--role" ||
       option === "--run" ||
+      option === "--project" ||
       option === "--out" ||
       option === "--err" ||
       option === "--marker" ||
@@ -2413,6 +2452,7 @@ async function runCmd(args: string[]): Promise<void> {
       if (option === "--under") under = args[at + 1]!;
       else if (option === "--role") role = args[at + 1]!;
       else if (option === "--run") dispatch = args[at + 1]!;
+      else if (option === "--project") project = args[at + 1]!;
       else if (option === "--out") out = args[at + 1]!;
       else if (option === "--err") err = args[at + 1]!;
       else if (option === "--marker") marker = args[at + 1]!;
@@ -2434,6 +2474,7 @@ async function runCmd(args: string[]): Promise<void> {
   marker = absolute(marker);
   pidfile = absolute(pidfile);
   dispatch = absolute(dispatch);
+  project = absolute(project);
   under = absolute(under);
   if (bad) appendFailure(err, marker, bad);
   if (!name || !givenCwd)
@@ -2496,11 +2537,7 @@ async function runCmd(args: string[]): Promise<void> {
   let memory = "";
   let tasks = "";
   try {
-    const limits = launchLimits(
-      role,
-      dispatch,
-      process.env.POSTMASTER_CONFIG || join(homedir(), ".postmaster", "config.toml"),
-    );
+    const limits = launchLimits(role, dispatch, globalConfigPath(), project);
     memory = limits.memory;
     tasks = String(limits.tasks);
   } catch (error) {
@@ -4927,6 +4964,9 @@ async function main(): Promise<void> {
     case "run":
       await runCmd(args);
       return;
+    case "limits":
+      limitsCmd(args);
+      return;
     case "stop":
       await stopCmd(args);
       return;
@@ -5012,7 +5052,7 @@ async function main(): Promise<void> {
       return;
     default:
       die(
-        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
+        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] | limits | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
       );
   }
 }

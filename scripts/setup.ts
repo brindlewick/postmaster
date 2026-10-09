@@ -24,6 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { readTomlFile } from "./lib/data.ts";
+import { globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
 
@@ -138,7 +139,7 @@ const argv = process.argv.slice(2);
 const onLinux = run("uname", ["-s"]).out.replace(/\n+$/u, "") === "Linux";
 let DRY = 0;
 let ANSWERS = "";
-let CONFIG = join(process.env.HOME ?? "~", ".postmaster", "config.toml");
+let CONFIG = globalConfigPath();
 let ADD_CLERK = false;
 let i = 0;
 while (i < argv.length) {

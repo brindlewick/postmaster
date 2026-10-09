@@ -63,14 +63,18 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readTomlFile, tryJsonFile } from "./lib/data.ts";
+import {
+  effectiveConfigForProject,
+  globalConfigPath,
+  specPairFor,
+} from "./lib/effective-config.ts";
 import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { BOUND_L, BOUND_R, PY_S_CLASS } from "./lib/text.ts";
 import { parseWallReset } from "./lib/wall.ts";
 
-const CONFIG =
-  process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
+const CONFIG = globalConfigPath();
 const LEGS = ["synthesis", "review", "ship"] as const;
 
 // The harness top review level, named when the lane's config names no effort. Without a named
@@ -118,6 +122,9 @@ interface Spec {
   model: string;
   effort: string;
   envFile: string;
+  // The project root a relative env_file resolves against when the
+  // project's settings set it; "" keeps the global config's directory.
+  envFileBase: string;
   confine: boolean;
 }
 
@@ -133,6 +140,8 @@ function resolveSpec(
   project: string,
 ): Spec {
   let cfg: Record<string, unknown>;
+  let localLayer: Record<string, unknown> | null = null;
+  let projectRootDir = "";
   if (recorded) {
     const data = tryJsonFile<Record<string, unknown>>(sourcePath);
     if (!data) die(`cannot read ${sourcePath}: it does not parse`);
@@ -142,22 +151,15 @@ function resolveSpec(
     }
     cfg = c as Record<string, unknown>;
   } else if (project) {
-    try {
-      readTomlFile(sourcePath);
-    } catch (e) {
-      die(`cannot read ${sourcePath}: ${String(e)}`);
+    const resolved = effectiveConfigForProject(project, sourcePath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      die(resolved.error ?? "cannot resolve project settings");
     }
-    const r = run(join(scriptsDir(import.meta), "run"), [
-      "project-settings",
-      "effective",
-      project,
-      sourcePath,
-    ]);
-    if (r.code !== 0) die(r.err.trim() || "cannot resolve project role choices");
-    try {
-      cfg = JSON.parse(r.out);
-    } catch (e) {
-      die(`project settings gave no effective config: ${String(e)}`);
+    cfg = resolved.config;
+    localLayer = resolved.local;
+    if (resolved.projectFile !== null) {
+      projectRootDir = dirname(dirname(resolved.projectFile));
     }
   } else {
     try {
@@ -235,11 +237,20 @@ function resolveSpec(
   }
   const s = spec as Record<string, unknown>;
   const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
+  // A relative env_file the project's settings set resolves against the
+  // project root; one the global config sets keeps the global directory.
+  // The shared selection decides which file set it.
+  let envFileBase = "";
+  if (localLayer !== null && projectRootDir !== "") {
+    const site = specPairFor(cfg, localLayer, name, leg);
+    if (str(site.local.env_file) !== "") envFileBase = projectRootDir;
+  }
   return {
     harness: str(s.harness),
     model: str(s.model),
     effort: str(s.effort),
     envFile: str(s.env_file),
+    envFileBase,
     confine: String(cfg.confine ?? "") === "on",
   };
 }
@@ -1396,7 +1407,8 @@ if (import.meta.main) {
     recorded = true;
   } else {
     source = CONFIG;
-    if (!existsSync(source)) {
+    // With --project the loader decides: a complete project file needs no global config.
+    if (!PROJECT && !existsSync(source)) {
       die(`no config at ${CONFIG} (POSTMASTER_CONFIG overrides the path)`);
     }
   }
@@ -1405,6 +1417,7 @@ if (import.meta.main) {
   const MODEL = spec.model;
   const EFFORT = spec.effort;
   let ENV_FILE = spec.envFile;
+  const ENV_BASE = spec.envFileBase;
   if (!HARNESS) die(`${NAME} has no harness in ${source}`);
   if (!MODEL) die(`${NAME} has no model in ${source}`);
   // A lane in the effective [lanes] table runs in a process space of its own
@@ -1468,12 +1481,16 @@ if (import.meta.main) {
       ENV_FILE = (process.env.HOME ?? "") + ENV_FILE.slice(1);
     }
     if (!ENV_FILE.startsWith("/")) {
-      // A relative path is read from the live config's directory, under --run too.
-      let configDir: string;
-      try {
-        configDir = dirname(realpathSync(CONFIG));
-      } catch {
-        configDir = dirname(resolve(CONFIG));
+      // A relative path the project's settings set is read from the project
+      // root; any other relative path is read from the live config's
+      // directory, under --run too.
+      let configDir = ENV_BASE;
+      if (configDir === "") {
+        try {
+          configDir = dirname(realpathSync(CONFIG));
+        } catch {
+          configDir = dirname(resolve(CONFIG));
+        }
       }
       ENV_FILE = join(configDir, ENV_FILE);
     }

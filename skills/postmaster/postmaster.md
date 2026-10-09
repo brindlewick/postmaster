@@ -21,8 +21,8 @@ cards, and you never do its job.
 | `<runs>/postmaster/` | your own dispatch directory: `brief.md`, `actions.jsonl`, `ESCALATION.md` (the waiting list, written only through `<tool>/scripts/run host leg waiting`) |
 | `<runs>/<TICKET>/` | one run: the waybill, manifest, logs, cards, hand-offs (`coachman.md`, Where things live) |
 | `<repo>/.worktrees/<TICKET>` | the synthesis worktree you cut at dispatch, branch `<TICKET>` |
-| `<repo>/.postmaster/project.toml` | what the project requires of a run, if it declares one; the one file it may commit |
-| `<repo>/.postmaster/settings.toml` | this person's choices on this machine; never committed |
+| `<repo>/.postmaster/project.toml` | what the project requires of a run, if it declares one; the shared file, committed on purpose |
+| `<repo>/.postmaster/settings.toml` | this person's choices for the project; committed only to share, used only after acceptance |
 
 ## Memory is the disk
 

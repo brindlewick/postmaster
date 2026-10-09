@@ -49,7 +49,8 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host name <dispatch> postmaster
 <tool>/scripts/run host name <dispatch> role <text...>
 <tool>/scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...
-<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
 <tool>/scripts/run host stop <worktree>
 <tool>/scripts/run host close <worktree>
 <tool>/scripts/run host stop-run <dispatch>
@@ -125,7 +126,9 @@ onto the fragment it supersedes.
 - **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
   `lane` for a workhorse, `coachman` for a leg, and `reviewer` for a review launch. Direct host
   launches use the default limits. With `--run <dispatch>`, the limits come from the config in
-  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run.
+  `<dispatch>/run.json`, so an edit to the live config does not change an in-flight run. With
+  `--project <repo>` and no `--run`, they come from the project's effective config. `host
+  limits` prints the limits a launch would get, as `memory=<max>` and `tasks=<max>`.
 - **A Linux user scope contains each launch and its descendants.** When systemd can verify a
   cgroup v2 memory controller, pids controller and the requested scope properties, `run host`
   applies `MemoryMax` (default `8G`), `MemorySwapMax=0` and `TasksMax` (default `512`). Systemd
