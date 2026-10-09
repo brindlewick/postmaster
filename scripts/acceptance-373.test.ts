@@ -121,12 +121,12 @@ describe("C1: close-run on a fixture copy", () => {
     }
   });
 
-  test("a settled root pane outliving the tabs closes with the copy's space", () => {
+  test("a root pane outliving the tabs closes with the copy's space", () => {
     const t = setupFixture("c1fixroot", false);
     try {
       const st0 = readHerdr(t.fx);
       const root = hTab(st0, t.fixSpace, t.fix, basename(t.fix));
-      st0.panes[root.pane]!.tokens = { postmaster: "root", state: "done" };
+      st0.panes[root.pane]!.tokens = { postmaster: "root" };
       saveHerdr(t.fx, st0);
       const r = sh(SELF, ["host", "close-run", t.dispatch], fxEnv(t.fx), t.fx.root);
       expect(r.code).toBe(0);
@@ -270,7 +270,7 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
     }
   });
 
-  test("a run launch on a fixture copy tags the source space and settles its root pane", async () => {
+  test("a run launch on a fixture copy tags the source space and its root pane", async () => {
     const fx = makeFx("create-run");
     try {
       const fix = makeFixtureRepo(fx, "fixcopy");
@@ -313,7 +313,7 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
       expect(source).not.toBe("");
       expect(st.spaces[source]!.tokens).toEqual({ postmaster: "opened" });
       const rootPane = st.spaces[source]!.panes[0]!;
-      expect(st.panes[rootPane]!.tokens).toEqual({ postmaster: "root", state: "done" });
+      expect(st.panes[rootPane]!.tokens).toEqual({ postmaster: "root" });
     } finally {
       testStopFinishers(fx.root);
       rmSync(fx.root, { recursive: true, force: true });
