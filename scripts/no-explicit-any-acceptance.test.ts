@@ -29,19 +29,19 @@ const CLEAN: RunResult = { code: 0, out: "", err: "", ran: true };
 const ZERO: RunResult = { code: 0, out: "", err: "", ran: true };
 const FLAGGED: RunResult = {
   code: 1,
-  out: `scripts/zz-probe.ts:1:21: Unexpected any. [Error/${RULE}]\n\n1 problem\n`,
+  out: "scripts/zz-probe.ts:1:22: error typescript(no-explicit-any): Unexpected `any`. Specify a different type. help: Use `unknown` instead, this will force you to explicitly, and safely, assert the type is correct.\n",
   err: "",
   ran: true,
 };
 const MANY: RunResult = {
   code: 1,
-  out: "scripts/host.ts:9:9: Unexpected any.\n\n181 problems\n",
+  out: "scripts/host.ts:9:9: Unexpected `any`. Specify a different type. [Error/typescript(no-explicit-any)]\n\n181 problems\n",
   err: "",
   ran: true,
 };
 const ONE: RunResult = {
   code: 1,
-  out: "scripts/zz-probe.ts:1:21: Unexpected any.\n\n1 problem\n",
+  out: "scripts/zz-probe.ts:1:10: Unexpected `any`. Specify a different type. [Error/typescript(no-explicit-any)]\n\n1 problem\n",
   err: "",
   ran: true,
 };
@@ -253,6 +253,16 @@ describe("strippedEqual", () => {
 
   test("a value change compares different", () => {
     expect(strippedEqual("const v = 1;\n", "const v = 2;\n")).toBe(false);
+  });
+
+  test("a reflowed program compares equal", () => {
+    expect(
+      strippedEqual("const o = { a: 1, b: 2 };\n", "const o = {\n  a: 1,\n  b: 2,\n};\n"),
+    ).toBe(true);
+  });
+
+  test("whitespace inside strings still counts", () => {
+    expect(strippedEqual('const s = "a b";\n', 'const s = "ab";\n')).toBe(false);
   });
 });
 
