@@ -65,9 +65,12 @@ jobs:
           bun-version: ${{ steps.bun.outputs.version }}
       - run: bun install --frozen-lockfile
       - name: The full check, or only the named test files on a manual run
+        # Bound, never interpolated: the script validates FILES against the tracked test files.
+        env:
+          FILES: ${{ inputs.files }}
         run: |
-          if [ -n "${{ inputs.files }}" ]; then
-            bun test ${{ inputs.files }}
+          if [ -n "$FILES" ]; then
+            bun scripts/manual-test-files.ts
           else
             bun run check
           fi
