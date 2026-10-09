@@ -163,6 +163,23 @@ describe("brief", () => {
     expect(labelsLine).not.toContain("ready");
   });
 
+  test("brief reads the review link from the project settings over the global config", () => {
+    const repo = localRepo();
+    const id = localTicket(repo, "Fix the list");
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = stubConfig(cfgDir, `[planning]\nreview_link = "https://global.example/{path}"`);
+    mkdirSync(join(repo, ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(repo, ".postmaster", "settings.toml"),
+      `[planning]\nreview_link = "https://project.example/{path}"\n`,
+    );
+    const r = sh(SELF, ["clerk", "brief", repo, id], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(0);
+    const brief = readFileSync(join(repo, ".postmaster", "clerk", `${id}.brief.md`), "utf8");
+    expect(brief).toContain("Editor link: https://project.example/");
+    expect(brief).not.toContain("global.example");
+  });
+
   test("brief leaves one label holding a comma alone: it is not the ready mark", () => {
     const repo = localRepo();
     const id = localTicket(repo, "Fix the list");

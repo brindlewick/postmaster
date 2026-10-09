@@ -15,10 +15,11 @@
 //   run plane comment <IDENT-n> <actor> <text>        one comment, dated to the minute, actor first
 //   run plane list <IDENT> [state]                    one line per work item: id, state, title
 //
-// The instance and workspace come from [tracker] in ~/.postmaster/config.toml (url and
-// workspace; POSTMASTER_CONFIG overrides the path). The key is PLANE_API_KEY in the
-// environment, else in the file [tracker] env_file names (default ~/.postmaster/plane.env),
-// loaded first. The key never enters the config or this repo.
+// The instance and workspace come from the effective [tracker]: the project's own
+// settings over ~/.postmaster/config.toml (url and workspace; POSTMASTER_CONFIG
+// overrides the path). The key is PLANE_API_KEY in the environment, else in the file
+// [tracker] env_file names (default ~/.postmaster/plane.env), loaded first. The key
+// never enters the config or this repo.
 //
 // The flow's states map onto Plane's state groups: todo is the first state in the unstarted
 // group (backlog if none), in-progress is started, done is completed, cancelled is cancelled.
@@ -39,9 +40,15 @@
 //   exit 2  invalid state
 //   exit 4  the work item changed since the base was read
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
-import { scriptsDir } from "./lib/paths.ts";
+import {
+  acceptanceStorePath,
+  effectiveConfigForProject,
+  globalConfigPath,
+  inspect,
+  isDie,
+} from "./lib/effective-config.ts";
 import { run } from "./lib/proc.ts";
 import { thrownDetail } from "./lib/thrown.ts";
 import {
@@ -1022,41 +1029,65 @@ interface PlanePage {
 }
 
 function loadConfig(): PlaneConfig {
-  const configPath =
-    process.env.POSTMASTER_CONFIG || join(process.env.HOME ?? "", ".postmaster/config.toml");
-  if (!existsSync(configPath))
-    dieP(`no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
-  const cfg = tryTomlFile(configPath);
-  if (!cfg) dieP(`cannot read ${configPath}`);
-  const tracker = (cfg.tracker ?? {}) as Record<string, unknown>;
-  const envFileRaw = (tracker.env_file as string) || "~/.postmaster/plane.env";
-  const envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
-  const machineWorkspace = String(tracker.workspace ?? "");
+  const configPath = globalConfigPath();
   const toplevel = run("git", ["rev-parse", "--show-toplevel"]);
   const project =
     process.env.POSTMASTER_PROJECT || (toplevel.code === 0 ? toplevel.out.trim() : "");
+  let tracker: Record<string, unknown>;
+  let binding = "";
+  let source = configPath;
+  let projectEnvBase = "";
   if (project !== "") {
-    const insp = run(join(scriptsDir(import.meta), "run"), [
-      "project-settings",
-      "inspect",
-      project,
-    ]);
-    if (insp.code !== 0) {
-      if (insp.err.trim() !== "") console.error(insp.err.trim());
-      dieP("cannot read the project's tracker binding");
+    const resolved = effectiveConfigForProject(project, configPath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      dieP(resolved.error ?? "cannot resolve project settings");
     }
-    let binding = "";
+    tracker = (resolved.config.tracker ?? {}) as Record<string, unknown>;
+    // A relative env_file the project's settings set resolves against the
+    // project root; one the global config sets reads as before.
+    const localTracker = resolved.local.tracker;
+    if (
+      resolved.projectFile !== null &&
+      localTracker !== null &&
+      typeof localTracker === "object" &&
+      !Array.isArray(localTracker) &&
+      typeof (localTracker as Record<string, unknown>).env_file === "string" &&
+      ((localTracker as Record<string, unknown>).env_file as string) !== ""
+    ) {
+      projectEnvBase = dirname(dirname(resolved.projectFile));
+    }
+    // The tracker's values came from the effective config: name the project
+    // file that carries them, not the global path, which may not hold them.
+    if (resolved.projectFile !== null) source = resolved.projectFile;
     try {
-      binding = (JSON.parse(insp.out).tracker ?? {}).binding ?? "";
+      const facts = inspect(project, { storePath: acceptanceStorePath(configPath) });
+      const bound = (facts.tracker as Record<string, unknown> | undefined)?.binding;
+      binding = typeof bound === "string" ? bound : "";
     } catch (e) {
-      console.error(`project settings gave no JSON: ${e instanceof Error ? e.message : e}`);
-      dieP("cannot read the project's tracker binding");
+      if (isDie(e)) {
+        console.error(`project-settings: ${e.message}`);
+        dieP("cannot read the project's tracker binding");
+      }
+      throw e;
     }
-    if (binding !== "" && binding !== machineWorkspace)
-      dieP(
-        `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${configPath}`,
-      );
+  } else {
+    if (!existsSync(configPath))
+      dieP(`no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
+    const cfg = tryTomlFile(configPath);
+    if (!cfg) dieP(`cannot read ${configPath}`);
+    tracker = (cfg.tracker ?? {}) as Record<string, unknown>;
   }
+  const envFileRaw = (tracker.env_file as string) || "~/.postmaster/plane.env";
+  let envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
+  if (projectEnvBase !== "" && !envFile.startsWith("/")) {
+    envFile = join(projectEnvBase, envFile);
+  }
+  const machineWorkspace = String(tracker.workspace ?? "");
+  if (binding !== "" && binding !== machineWorkspace)
+    dieP(
+      `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${source}`,
+    );
   if (!process.env.PLANE_API_KEY && existsSync(envFile)) {
     const text = readFileSync(envFile, "utf8");
     for (const line of text.split("\n")) {
@@ -1073,7 +1104,7 @@ function loadConfig(): PlaneConfig {
   const WS = String(tracker.workspace ?? "");
   if (!BASE || !WS) {
     dieP(
-      `[tracker] url and workspace are needed in ${configPath} (skills/postmaster/trackers.md, plane)`,
+      `[tracker] url and workspace are needed in ${source} (skills/postmaster/trackers.md, plane)`,
     );
   }
   return { BASE, WS, KEY };

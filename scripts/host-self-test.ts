@@ -19,7 +19,14 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
-import { processCommandLine, processInfo, processStart, processState } from "./lib/processes.ts";
+import {
+  bootId,
+  bootTime,
+  processCommandLine,
+  processInfo,
+  processStart,
+  processState,
+} from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
@@ -114,6 +121,19 @@ function json<T>(path: string, fallback: unknown): T {
   } catch {
     return fallback as T;
   }
+}
+// A test-side read of stub state, under the same lock the stubs take: the
+// state files are truncated and rewritten, and a lockless read can land
+// between and parse a torn half, which reads as empty state.
+function readStubJson(stubDir: string, name: string, fallback: Partial<HerdrStubState>): HerdrStubState;
+function readStubJson(stubDir: string, name: string, fallback: Partial<TmuxStubState>): TmuxStubState;
+function readStubJson(
+  stubDir: string,
+  name: string,
+  fallback: unknown,
+): HerdrStubState | TmuxStubState {
+  // The cast bridges the overloads: the inner read casts to the state either way.
+  return withStubLock(stubDir, () => json(join(stubDir, name), fallback as Partial<HerdrStubState>));
 }
 function save(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value));
@@ -625,7 +645,12 @@ function symlinkCommand(name: string, bin: string): void {
     if (existsSync(path)) {
       try {
         symlinkSync(path, join(bin, name));
-      } catch {}
+      } catch (error) {
+        // The tool list names some twice; anything else is a real failure,
+        // and a silent one would surface pages later as a missing command.
+        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST")
+          throw new Error(`cannot link ${path} into ${bin}: ${String(error)}`);
+      }
       return;
     }
   }
@@ -696,6 +721,29 @@ function calls(root: string, which: string): string[] {
 }
 function field(text: string, key: string): string {
   return new RegExp(`(?:^|\\n|\\|)${key}=([^|\\n]*)`, "u").exec(text)?.[1] ?? "";
+}
+// A process's POSIX session id from the kernel's own call, through the
+// fixture's python3: the sess column is one reading, getsid is the thing
+// itself. Null when the link cannot run at all; an error string when
+// the link is viable but the call fails, which names a broken session
+// maker rather than a wrong session.
+function posixSession(pid: number, sysDir: string): { sid: number } | { error: string } | null {
+  const tool = join(sysDir, "python3");
+  try {
+    accessSync(tool, constants.X_OK);
+  } catch {
+    return null;
+  }
+  const result = exec(tool, [
+    "-c",
+    "import os,sys;print(os.getsid(int(sys.argv[1])))",
+    String(pid),
+  ]);
+  const sid = Number(result.out.trim());
+  if (result.code === 0 && Number.isInteger(sid)) return { sid };
+  return {
+    error: `code=${result.code} out=${result.out.trim().slice(0, 200)} err=${result.err.trim().slice(0, 200)}`,
+  };
 }
 const UNCAPPED_NOTICE = "host: launch running uncapped (no supported per-launch limits available)";
 function titleAbsent(text: string): boolean {
@@ -891,6 +939,10 @@ async function makeHarness(
     "mkfifo",
     "mktemp",
     "sleep",
+    // The escapee's session makers: setsid(1) where it exists, else python's
+    // setsid. symlinkCommand passes over whichever is missing.
+    "setsid",
+    "python3",
     "date",
     "touch",
     "wc",
@@ -913,6 +965,8 @@ async function makeHarness(
     "ps",
     "sysctl",
     "getconf",
+    "python3",
+    "setsid",
     "chmod",
     "ln",
     "cp",
@@ -1051,6 +1105,26 @@ export async function runControls(): Promise<number> {
       () => TRIPLE_RE.exec("space=a tab=t pane=p\n")?.[3] === "p",
     );
     const paths = await makeHarness(root);
+    // The headless launch makes its session with setsid(1) where the
+    // fixture has it, else the python3 link below; without either it can
+    // only detach, which is a group but no session on some systems. Fail
+    // here, naming the miss, rather than pages later on the session check.
+    for (const tool of ["setsid", "python3"]) {
+      const linked = join(root, "sys", tool);
+      const onPath = (process.env.PATH ?? "").split(":").some((dir) => existsSync(join(dir, tool)));
+      let viable = false;
+      try {
+        accessSync(linked, constants.X_OK);
+        viable = true;
+      } catch {
+        viable = false;
+      }
+      await pass(
+        `the fixture ${tool} link matches its PATH availability`,
+        () => viable === onPath,
+        `PATH=${process.env.PATH ?? ""} link=${linked} onPath=${onPath} viable=${viable}`,
+      );
+    }
     const f = await setup(root);
     const noHost = paths.sys,
       stubs = paths.stubs;
@@ -1405,14 +1479,17 @@ export async function runControls(): Promise<number> {
       () => field(probeText, "pane") === "" && field(probeText, "tmuxpane") === "",
       probeText,
     );
+    const sessionPid = Number(field(probeText, "pid"));
+    const sessionInfo = processInfo(sessionPid);
+    const sessionSid = posixSession(sessionPid, noHost);
     await pass(
       "it is a session of its own: its group is its pid, not the caller's session",
-      () => {
-        const pid = Number(field(probeText, "pid"));
-        const info = processInfo(pid);
-        return info?.group === pid && info.session === pid;
-      },
-      `${probeText}\n${JSON.stringify(processInfo(Number(field(probeText, "pid"))))}`,
+      () =>
+        sessionInfo?.group === sessionPid &&
+        (sessionSid === null
+          ? sessionInfo.session === sessionPid
+          : "sid" in sessionSid && sessionSid.sid === sessionPid),
+      `${probeText}\n${JSON.stringify(sessionInfo)}\nsid=${JSON.stringify(sessionSid)}`,
     );
     await pass(
       "--pidfile holds the launch's pid",
@@ -1609,7 +1686,14 @@ export async function runControls(): Promise<number> {
       [
         "#!/usr/bin/env bash",
         "trap 'echo term >> \"$TREE/term\"; exit 0' TERM",
-        'setsid sleep 120 & echo $! > "$TREE/escapee.pid"',
+        // Record the escaped sleep's pid, not the background shell that starts setsid.
+        // A session of its own: setsid(1) where it exists, else python's setsid, since
+        // macOS ships no setsid binary.
+        "if command -v setsid >/dev/null 2>&1; then",
+        "  setsid sh -c 'echo $$ > \"$TREE/escapee.pid\"; exec sleep 120'",
+        "else",
+        '  python3 -c \'import os; os.setsid(); os.execlp("sh", "sh", "-c", "echo $$ > \\"$TREE/escapee.pid\\"; exec sleep 120")\'',
+        "fi &",
         'sh -c \'trap "" TERM; while :; do sleep 1; done\' & echo $! > "$TREE/deaf.pid"',
         "sleep 120 & wait",
         "",
@@ -1639,25 +1723,39 @@ export async function runControls(): Promise<number> {
       i++
     )
       await sleep(100);
+    const alive = (pid: string) => processState(Number(pid)) === "live";
+    const escapee = readFileSync(join(root, "tree/escapee.pid"), "utf8").trim();
+    const deaf = readFileSync(join(root, "tree/deaf.pid"), "utf8").trim();
+    // Both must be running as the stop begins: without this the controls below would
+    // pass on a machine where neither ever started. Retry: the session leader and
+    // the deaf child may need a moment after their pid files land.
+    let escapeeRan = false;
+    let deafRan = false;
+    for (let i = 0; i < 50 && !(escapeeRan && deafRan); i++) {
+      escapeeRan = escapeeRan || alive(escapee);
+      deafRan = deafRan || alive(deaf);
+      if (!(escapeeRan && deafRan)) await sleep(100);
+    }
+    const ranBeforeStop = escapeeRan && deafRan;
     const outsider = spawn("sleep", ["60"], { cwd: sol, detached: true, stdio: "ignore" });
     outsider.unref();
     const termStop = execHost(["stop", join(f.repo, ".worktrees/T-1-luna")], noHost, root, {
       POSTMASTER_HOST_STOP_WAIT: "2",
     });
-    const alive = (pid: string) => processState(Number(pid)) === "live";
-    const escapee = readFileSync(join(root, "tree/escapee.pid"), "utf8").trim();
-    const deaf = readFileSync(join(root, "tree/deaf.pid"), "utf8").trim();
     await pass(
       "the launch got TERM first, and a child deaf to it is killed after the wait",
       () =>
         termRun.code === 0 &&
         termStop.code === 0 &&
+        ranBeforeStop &&
         existsSync(join(root, "tree/term")) &&
         !alive(deaf),
+      `termRun=${termRun.code} termStop=${termStop.code} before=${ranBeforeStop} deafRan=${deafRan} term=${existsSync(join(root, "tree/term"))}`,
     );
     await pass(
       "a process that works in the worktree but that no launch started is left alone",
-      () => !!outsider.pid && alive(String(outsider.pid)) && !alive(escapee),
+      () => !!outsider.pid && ranBeforeStop && alive(String(outsider.pid)) && !alive(escapee),
+      `before=${ranBeforeStop} escapeeRan=${escapeeRan} deafRan=${deafRan} outsiderAlive=${!!outsider.pid && alive(String(outsider.pid))} escapeeAlive=${alive(escapee)} escapee=${escapee} err=${termRun.err.slice(0, 400)}`,
     );
     try {
       if (outsider.pid) process.kill(outsider.pid, "SIGKILL");
@@ -1667,13 +1765,8 @@ export async function runControls(): Promise<number> {
     console.log("stop: registry identity and process membership");
     const launchDir = join(root, "state", "launches");
     mkdirSync(launchDir, { recursive: true });
-    const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
-    const bootLine =
-      readFileSync("/proc/stat", "utf8")
-        .split("\n")
-        .find((line: string) => line.startsWith("btime ")) ?? "btime 0";
-    // ASCII: /proc/stat is kernel-emitted ASCII; btime's fields split on spaces.
-    const bootSeconds = Number(bootLine.split(/\s+/u)[1]);
+    const boot = bootId();
+    const bootSeconds = bootTime() ?? 0;
     const ticks = Number(exec("getconf", ["CLK_TCK"]).out.trim()) || 100;
     const procStart = (pid: string): string => processStart(Number(pid)) ?? "";
     const startedSeconds = (pid: string) => {
@@ -1905,7 +1998,7 @@ export async function runControls(): Promise<number> {
       herdrRun.out + herdrRun.err,
     );
     const pane = place?.[3] ?? "";
-    const state = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, open: {} });
+    const state = readStubJson(stub, "herdr.json", { spaces: {}, panes: {}, open: {} });
     const spaceId = place?.[1] ?? "";
     const worktree = join(f.repo, ".worktrees/T-1-luna");
     const listedCalls = readCalls("herdr");
@@ -1998,7 +2091,7 @@ export async function runControls(): Promise<number> {
     const paneHasNoBun =
       exec("bash", ["-c", "command -v bun"], { env: { PATH: paths.paneNoBun } }).code !== 0;
     const paneText = existsSync(noBunPaneOut) ? readFileSync(noBunPaneOut, "utf8") : "";
-    const runningHerdr = json(join(stub, "herdr.json"), { panes: {} });
+    const runningHerdr = readStubJson(stub, "herdr.json", { panes: {} });
     const liveHerdrCalls = readCalls("herdr");
     await pass(
       "with no Bun in its PATH, the Herdr pane runs the launch, shows output, and stays open",
@@ -2027,7 +2120,7 @@ export async function runControls(): Promise<number> {
       "the Herdr pane closes after the launch marker lands",
       () =>
         existsSync(markerPath("h-bunless")) &&
-        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        !(noBunPane in readStubJson(stub, "herdr.json", { panes: {} }).panes) &&
         doneHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`),
     );
     const secondHerdr = execHost(
@@ -2167,7 +2260,7 @@ export async function runControls(): Promise<number> {
       "a space run host opened, its launches done, is closed",
       () =>
         closedHerdr.code === 0 &&
-        (json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
+        (readStubJson(stub, "herdr.json", { open: {} }).open[worktree] ?? "") === "",
       closedHerdr.err,
     );
     const ownClose = execHost(["close", f.repo], stubs, root);
@@ -2262,7 +2355,7 @@ export async function runControls(): Promise<number> {
     await pass(
       "run host marks that space as its own",
       () =>
-        json(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
+        readStubJson(stub, "herdr.json", { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
         "opened",
     );
     await marker(markerPath("c1"));
@@ -2286,7 +2379,7 @@ export async function runControls(): Promise<number> {
       "close shuts it",
       () =>
         cloneClose.code === 0 &&
-        (json(join(stub, "herdr.json"), { open: {} }).open[f.clone] ?? "") === "",
+        (readStubJson(stub, "herdr.json", { open: {} }).open[f.clone] ?? "") === "",
       cloneClose.err,
     );
     const plain = join(root, "plain");
@@ -2309,7 +2402,7 @@ export async function runControls(): Promise<number> {
     await pass(
       "a plain clone is no scratch: close removes its finished launch and preserves the user's tab",
       () => {
-        const st = json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {} });
+        const st = readStubJson(stub, "herdr.json", { spaces: {}, panes: {}, tabs: {} });
         const tabs = st.spaces[plainSpace]?.tabs ?? [];
         return (
           calls(root, "herdr").some(
@@ -2471,7 +2564,7 @@ export async function runControls(): Promise<number> {
       { POSTMASTER_HOST: "tmux" },
     );
     await marker(markerPath("t3"));
-    const tmuxState = json(join(stub, "tmux.json"), { sessions: [], windows: {} });
+    const tmuxState = readStubJson(stub, "tmux.json", { sessions: [], windows: {} });
     const cloneWindow = Object.values(tmuxState.windows).some(
       (window) =>
         window.session === `postmaster-${basename(f.repo)}` &&
@@ -2547,8 +2640,8 @@ export async function runControls(): Promise<number> {
       const lunaReal = realpathSync(luna);
       const solReal = realpathSync(sol);
       const herdrState = () =>
-        json(join(stub, "herdr.json"), { spaces: {}, panes: {}, tabs: {}, open: {} });
-      const tmuxState = () => json(join(stub, "tmux.json"), { sessions: [], windows: {} });
+        readStubJson(stub, "herdr.json", { spaces: {}, panes: {}, tabs: {}, open: {} });
+      const tmuxState = () => readStubJson(stub, "tmux.json", { sessions: [], windows: {} });
       const resumeScript = join(f.caller, "resume.sh");
 
       console.log("completion cleanup controls, Herdr (stub)");
@@ -2565,6 +2658,11 @@ export async function runControls(): Promise<number> {
         ].join("\n"),
       );
       exec("chmod", ["+x", resumeScript]);
+      // Both legs share one marker, as a real resume does: its existence
+      // settles the previous launch, and runCmd kills the prior leg's
+      // still-polling _watch on reuse, so its late touch cannot finish the
+      // new leg early. The events file stays shared too: both legs'
+      // records landing there is what the second check asserts.
       const resumeArgs = (extraEnv: Record<string, string>, outArgs: string[]) => ({
         argv: [
           "run",
@@ -2600,27 +2698,52 @@ export async function runControls(): Promise<number> {
       const secondSpace = kvOf(secondRun.out, "space");
       const secondTab = kvOf(secondRun.out, "tab");
       const secondPane = kvOf(secondRun.out, "pane");
-      await pass("a resumed leg has one live tab, with the previous tab gone", () => {
-        const st = herdrState();
-        const tabs = st.spaces[secondSpace]?.tabs ?? [];
-        return (
-          tabs.length === 1 &&
-          tabs[0] === secondTab &&
-          (st.open ?? {})[lunaReal] === secondSpace &&
-          !(firstSpace in (st.spaces ?? {}))
-        );
-      });
+      await pass(
+        "a resumed leg has one live tab, with the previous tab gone",
+        () => {
+          const st = herdrState();
+          const tabs = st.spaces[secondSpace]?.tabs ?? [];
+          return (
+            tabs.length === 1 &&
+            tabs[0] === secondTab &&
+            (st.open ?? {})[lunaReal] === secondSpace &&
+            !(firstSpace in (st.spaces ?? {}))
+          );
+        },
+        `code=${secondRun.code} out=${secondRun.out} err=${secondRun.err} firstSpace=${firstSpace} secondSpace=${secondSpace} secondTab=${secondTab} spaces=${JSON.stringify(herdrState().spaces ?? {})} open=${JSON.stringify(herdrState().open ?? {})}`,
+      );
       await marker(markerPath("resume"));
       await waitHerdrPaneGone(root, secondPane);
-      await pass("the resumed leg leaves no history tab and preserves both event records", () => {
+      // The events land when the payload prints, the history tab goes when
+      // the finisher closes it: wait for the asserted state rather than
+      // reading once after the waits, which a loaded runner misses.
+      for (let i = 0; i < 300; i++) {
         const st = herdrState();
-        const data = readFileSync(join(logs, "resume.events"), "utf8");
-        return (
+        let data = "";
+        try {
+          data = readFileSync(join(logs, "resume.events"), "utf8");
+        } catch {}
+        if (
           !Object.values(st.spaces ?? {}).some((w) => w.label === RUN_NAME) &&
           data.split("resume").length - 1 === 2 &&
           data.split("success").length - 1 === 2
-        );
-      });
+        )
+          break;
+        await sleep(100);
+      }
+      await pass(
+        "the resumed leg leaves no history tab and preserves both event records",
+        () => {
+          const st = herdrState();
+          const data = readFileSync(join(logs, "resume.events"), "utf8");
+          return (
+            !Object.values(st.spaces ?? {}).some((w) => w.label === RUN_NAME) &&
+            data.split("resume").length - 1 === 2 &&
+            data.split("success").length - 1 === 2
+          );
+        },
+        `spaces=${JSON.stringify(herdrState().spaces ?? {})} events=${JSON.stringify(readFileSync(join(logs, "resume.events"), "utf8").slice(0, 600))}`,
+      );
 
       console.log("finished review round cleanup, Herdr (stub)");
       resetHarness(root);
@@ -2806,14 +2929,19 @@ export async function runControls(): Promise<number> {
       );
       const tmuxFirstWin = kvOf(tmuxFirst.out, "window");
       const tmuxFirstPane = Object.keys(tmuxState().windows[tmuxFirstWin]?.panes ?? {})[0] ?? "";
-      await pass("tmux has one live launch window for the first leg", () => {
-        const st = tmuxState();
-        const wins = Object.keys(st.windows ?? {});
-        return (
-          wins.length === 1 &&
-          Object.keys(st.windows[tmuxFirstWin]?.panes ?? {}).join(",") === tmuxFirstPane
-        );
-      });
+      await pass(
+        "tmux has one live launch window for the first leg",
+        () => {
+          const st = tmuxState();
+          const wins = Object.keys(st.windows ?? {});
+          return (
+            tmuxFirst.code === 0 &&
+            wins.length === 1 &&
+            Object.keys(st.windows[tmuxFirstWin]?.panes ?? {}).join(",") === tmuxFirstPane
+          );
+        },
+        `code=${tmuxFirst.code} out=${tmuxFirst.out} err=${tmuxFirst.err} wins=${JSON.stringify(tmuxState().windows ?? {})}`,
+      );
       await marker(join(logs, "tmux-resume.done"));
       const tmuxSecond = execHost(
         [
@@ -2829,6 +2957,10 @@ export async function runControls(): Promise<number> {
           "--out",
           "../logs/tmux-resume.events",
           "--append",
+          // The first leg's marker, as a real resume reuses it: its
+          // existence settles the previous launch, and runCmd kills the
+          // prior leg's still-polling _watch on reuse, so its late touch
+          // cannot finish this leg early.
           "--marker",
           "../logs/tmux-resume.done",
           "--",
@@ -2846,14 +2978,33 @@ export async function runControls(): Promise<number> {
           const st = tmuxState();
           const wins = Object.keys(st.windows ?? {});
           return (
+            tmuxSecond.code === 0 &&
             wins.length === 1 &&
             Object.keys(st.windows[tmuxSecondWin]?.panes ?? {}).join(",") === tmuxSecondPane &&
             !(tmuxFirstWin in (st.windows ?? {}))
           );
         },
+        `code=${tmuxSecond.code} out=${tmuxSecond.out} err=${tmuxSecond.err} firstWin=${tmuxFirstWin} secondWin=${tmuxSecondWin} wins=${JSON.stringify(tmuxState().windows ?? {})}`,
       );
       await marker(join(logs, "tmux-resume.done"));
       await waitTmuxPaneGone(root, tmuxSecondPane);
+      // Wait for the asserted state: the second record lands when the
+      // payload prints, the window goes when the finisher closes it, and a
+      // loaded runner misses a single read after the waits.
+      for (let i = 0; i < 300; i++) {
+        const st = tmuxState();
+        let data = "";
+        try {
+          data = readFileSync(join(logs, "tmux-resume.events"), "utf8");
+        } catch {}
+        if (
+          Object.keys(st.windows ?? {}).length === 0 &&
+          data.split("resume").length - 1 === 2 &&
+          data.split("success").length - 1 === 2
+        )
+          break;
+        await sleep(100);
+      }
       await pass(
         "the resumed tmux leg leaves no history window and keeps both event records",
         () => {
@@ -2865,6 +3016,7 @@ export async function runControls(): Promise<number> {
             data.split("success").length - 1 === 2
           );
         },
+        `wins=${JSON.stringify(tmuxState().windows ?? {})} events=${JSON.stringify(readFileSync(join(logs, "tmux-resume.events"), "utf8").slice(0, 600))}`,
       );
 
       console.log("finished review round cleanup, tmux (stub)");
@@ -4059,7 +4211,8 @@ export async function runControls(): Promise<number> {
       "case $h in [a-z]*) ;; *) h=p$h;; esac; " +
       "if [ ${#h} -gt 32 ]; then sum=$(printf '%s' \"$1\" | cksum | cut -d' ' -f1); " +
       'h=$(printf \'%s-%08x\' "${h:0:23}" "$sum"); fi; printf \'%s\' "$h"';
-    const baseOf = (text: string): string => exec("bash", ["-c", baseHandle, "_", text]).out;
+    const baseOf = (text: string): string =>
+      exec("bash", ["-c", baseHandle, "_", text], { env: { ...process.env, LC_ALL: "C" } }).out;
     const handleCases = [
       "My.Project 1",
       "9lives",
@@ -4327,7 +4480,7 @@ export async function runControls(): Promise<number> {
         '    printf \'{"session_id":"thread-chatter"}\\n\'',
         "    printf '429 rate limit exceeded\\n' >&2",
         "    python3 -c 'import os",
-        'for fd in os.listdir("/proc/self/fd"):',
+        'for fd in os.listdir("/dev/fd"):',
         "    try: n = int(fd)",
         "    except ValueError: continue",
         "    if n > 2:",
@@ -4369,6 +4522,14 @@ export async function runControls(): Promise<number> {
         '    printf \'{"session_id":"thread-gated"}\\n\'',
         "    exit 1 ;;",
         '  *sleepy*) sleep "${TEST_SLEEP:-5}"; printf \'{"session_id":"thread-sleepy"}\\n\'; exit 1 ;;',
+        // ? for the space: an unquoted space is a syntax error in a pattern.
+        "  *direct?claim*)",
+        // The paired-claim race holds the lock while the loser arrives: on a
+        // fast machine the winner would otherwise finish and release before
+        // the loser reads, and the pair would run twice in a row.
+        "    sleep 0.5",
+        '    printf \'{"session_id":"thread-plain"}\\n\'',
+        "    exit 1 ;;",
         "  *)",
         '    printf \'{"session_id":"thread-plain"}\\n\'',
         "    exit 1 ;;",

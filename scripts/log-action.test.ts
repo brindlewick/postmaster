@@ -1,7 +1,6 @@
 // Tests beside scripts/log-action.ts, moved from its --self-test on #109: 61 controls.
 // Each test repeats the write it checks, so it passes alone as well as in file order.
 // Repeated tool-fault argument lists are module constants; the mixed bad-byte write is a helper.
-// Without iconv the differential is gated off and the file logs a skip notice naming it.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -13,12 +12,15 @@ import { controlOf, kindsOf } from "./log-action";
 
 const SELF = join(import.meta.dir, "run");
 const TOOL = toolRoot(import.meta);
-const noIconv = spawnSync("bash", ["-c", "command -v iconv"], { encoding: "utf8" }).status !== 0;
-if (noIconv) {
-  console.log(
-    "skip the decoder matches iconv -c on 300 seeded cases: no iconv here; BASE skips it too",
-  );
-}
+// The differential pins glibc's iconv, byte for byte; macOS ships libiconv with
+// different corner behaviour, and some systems ship no iconv at all. Both skips
+// and their reasons live in scripts/skips.toml.
+const noIconv =
+  process.platform !== "linux" ||
+  spawnSync("bash", ["-c", "command -v iconv"], { encoding: "utf8" }).status !== 0;
+// Raw non-UTF-8 argv can only be told from U+FFFD through /proc/self/cmdline,
+// which macOS does not have.
+const skipRawArgv = !existsSync("/proc/self/cmdline");
 
 const FIELDS = [
   "--ran",
@@ -638,7 +640,7 @@ describe("positive controls", () => {
     expect(lines()).toBe(before + 1);
   });
 
-  test("the separator escaped and the byte dropped", () => {
+  test.skipIf(skipRawArgv)("the separator escaped and the byte dropped", () => {
     const r = rawDetail("one\\342\\200\\250two \\377 three", "postmaster", "note", "RUN-1");
     expect(r.code).toBe(0);
     const last = lastLine();
@@ -666,7 +668,7 @@ describe("positive controls", () => {
     expect(lines()).toBe(before + 1);
   });
 
-  test("the damage dropped and the legitimate character kept", () => {
+  test.skipIf(skipRawArgv)("the damage dropped and the legitimate character kept", () => {
     const r = mixedRawWrite();
     expect(r.code).toBe(0);
     const last = lastLine();

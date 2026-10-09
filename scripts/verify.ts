@@ -604,7 +604,14 @@ async function _runOne(
         why = `killed by signal ${k.num}: ${last}`;
       } else {
         exitCode = code;
-        if (code === 126 || code === 127) {
+        // Bash 3.2, the macOS stock shell, exits 1 rather than 127 or 126
+        // when the -c command cannot be started; the message stays bash's
+        // own, which is what tells it from a check that ran and failed.
+        const bashCouldNotStart =
+          code === 126 ||
+          code === 127 ||
+          (code === 1 && /^bash: .+: (No such file or directory|Permission denied)/u.test(last));
+        if (bashCouldNotStart) {
           result = "not run";
           why = `bash could not start it: ${last}`;
         } else if (c.kind === "tool") {
@@ -722,7 +729,14 @@ function runOneSync(
   } else {
     exitCode = r.status;
     const code = r.status!;
-    if (code === 126 || code === 127) {
+    // Bash 3.2, the macOS stock shell, exits 1 rather than 127 or 126
+    // when the -c command cannot be started; the message stays bash's
+    // own, which is what tells it from a check that ran and failed.
+    const bashCouldNotStart =
+      code === 126 ||
+      code === 127 ||
+      (code === 1 && /^bash: .+: (No such file or directory|Permission denied)/u.test(last));
+    if (bashCouldNotStart) {
       result = "not run";
       why = `bash could not start it: ${last}`;
     } else if (c.kind === "tool") {
