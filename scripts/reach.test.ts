@@ -625,7 +625,7 @@ describe("C8-C9: escalation boundary", () => {
       ),
     ).toBe(false);
     const coachman = readFileSync(join(TOOL, "skills/postmaster/coachman.md"), "utf8");
-    const roundCheck = coachman.indexOf("run reach check <dispatch> r<round>");
+    const roundCheck = coachman.indexOf("run reach round <dispatch> r<round>");
     const userFinding = coachman.indexOf("escalate:", roundCheck);
     expect(roundCheck).toBeGreaterThanOrEqual(0);
     expect(userFinding).toBeGreaterThanOrEqual(0);
@@ -1324,39 +1324,37 @@ describe("R6: ruled round fixes", () => {
   });
 
   test("R6 the round reach step stops before restore when the check faults", () => {
-    const text = readFileSync(join(TOOL, "skills/postmaster/coachman.md"), "utf8");
-    const marker = "**Check reach and restore before any fix.**";
-    const at = text.indexOf(marker);
-    expect(at).toBeGreaterThan(-1);
-    const fence = text.indexOf("```sh", at);
-    const end = text.indexOf("```", fence + 5);
-    const block = text.slice(fence + 5, end);
-    const runBlock = (checkExit: number): { code: number; restored: boolean } => {
-      const dir = mkdtempSync(join(tmpdir(), "postmaster-r6-"));
-      CREATED.push(dir);
-      const dispatch = join(dir, "dispatch");
-      mkdirSync(join(dispatch, "logs"), { recursive: true });
-      const toolDir = join(dir, "tool", "scripts");
-      mkdirSync(toolDir, { recursive: true });
-      writeFileSync(
-        join(toolDir, "run"),
-        `#!/bin/sh\nif printf '%s' "$*" | grep -q restore; then touch ${dir}/restored; exit 0; fi\nexit ${checkExit}\n`,
-        { mode: 0o755 },
-      );
-      const script = block
-        .replaceAll("<tool>", join(dir, "tool"))
-        .replaceAll("<dispatch>", dispatch)
-        .replaceAll("r<round>", "r1");
-      const result = run("sh", ["-c", script], { env: { PATH: "/usr/bin:/bin" } });
-      return { code: result.code, restored: existsSync(join(dir, "restored")) };
-    };
-    // The sentence under the step: exit 1 from check is a control fault, stop.
-    const faulted = runBlock(1);
-    expect(faulted.restored).toBe(false);
-    expect(faulted.code).not.toBe(0);
-    const control = runBlock(0);
-    expect(control.restored).toBe(true);
-    expect(control.code).toBe(0);
+    const layout = makeLayout();
+    before(layout);
+    // A reviewer record the check cannot read faults the check; restore,
+    // which reads only the snapshot and git, would still run.
+    writeFileSync(join(layout.dispatch, "logs", "review-r1.json"), "{not json\n");
+    const stepped = call(layout, ["round", layout.dispatch, "r1"]);
+    expect(stepped.code).toBe(1);
+    expect(stepped.out).not.toContain("restored r1");
+    expect(existsSync(join(layout.dispatch, "reach", "r1"))).toBe(false);
+  });
+
+  test("R6 the round reach step restores when the check runs clean", () => {
+    const layout = makeLayout();
+    before(layout);
+    const stepped = call(layout, ["round", layout.dispatch, "r1"]);
+    expect(stepped.code).toBe(0);
+    expect(stepped.out).toContain("restored r1");
+    expect(existsSync(join(layout.dispatch, "reach", "r1"))).toBe(true);
+  });
+
+  test("R6 the round reach step restores when the check finds an observed change", () => {
+    const layout = makeLayout();
+    before(layout);
+    const outside = join(layout.repo, "x.txt");
+    writeReviewer(layout, "mimo", [mimo("write_file", { path: outside })]);
+    writeFileSync(outside, "written\n");
+    const stepped = call(layout, ["round", layout.dispatch, "r1"]);
+    expect(stepped.out).toContain("r1: finding");
+    expect(stepped.out).toContain("restored r1");
+    expect(stepped.code).toBe(0);
+    expect(existsSync(join(layout.dispatch, "reach", "r1"))).toBe(true);
   });
 });
 

@@ -987,8 +987,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    scratch's tracked diff has been checked, but before teardown or triage, run:
 
    ```sh
-   <tool>/scripts/run reach check <dispatch> r<round>
-   <tool>/scripts/run reach restore <dispatch> r<round>
+   <tool>/scripts/run reach round <dispatch> r<round>
    ```
 
    Exit 1 from `check` or `restore` is a fault in the `reach` control: follow Tool faults and
