@@ -15,7 +15,7 @@ import { hasReasoning } from "./scrub-reasoning.ts";
 import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const USAGE = "usage: tree-check.sh [<base> [<head>]] | --help";
+const USAGE = "usage: run tree-check [<base> [<head>]] | --help";
 // Read lazily, like the core's set: main sheds the test hook first.
 let DISABLED: Set<string> | null = null;
 function disabled(rule: string): boolean {

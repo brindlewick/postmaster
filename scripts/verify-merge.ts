@@ -6,7 +6,7 @@ import { git, resolveCommit } from "./scrub-core.ts";
 import { fail } from "./scrub-report.ts";
 import { pyWords } from "./lib/text.ts";
 
-const USAGE = "usage: verify-merge.sh <repo> [<merge>] [--dispatch <dir>] | --help";
+const USAGE = "usage: run verify-merge <repo> [<merge>] [--dispatch <dir>] | --help";
 
 async function main(args: string[]): Promise<number> {
   if (args[0] === "--help" && args.length === 1) {
@@ -32,14 +32,13 @@ async function main(args: string[]): Promise<number> {
   );
   if (row.length !== 3) fail("verify-merge", "the requested commit is not a two-parent merge");
   const base = row[1]!;
-  const scrub = resolve(import.meta.dir, "scrub-check.sh");
-  const tree = resolve(import.meta.dir, "tree-check.sh");
+  const runner = resolve(import.meta.dir, "run");
   // The merge scans log to the dispatch when one is named, so merge-only
   // findings reach TELL and the card like any other finding.
   const env: Record<string, string | undefined> = { SCRUB_CHECK_DISABLE: undefined };
   if (dispatch) env.POSTMASTER_DETECTIONS_LOG = join(dispatch, "detections.jsonl");
-  const scan = run(scrub, [base, merge], { cwd: root, env });
-  const treeScan = run(tree, [base, merge], { cwd: root, env });
+  const scan = run(runner, ["scrub-check", base, merge], { cwd: root, env });
+  const treeScan = run(runner, ["tree-check", base, merge], { cwd: root, env });
   if (scan.out) process.stdout.write(scan.out);
   if (treeScan.out) process.stdout.write(treeScan.out);
   if ([scan.code, treeScan.code].some((code) => code === 2 || (code !== 0 && code !== 1)))

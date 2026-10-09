@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EXTENSIONS } from "./export-session";
 
-const SELF = join(import.meta.dir, "export-session.sh");
+const SELF = join(import.meta.dir, "run");
 
 interface Run {
   code: number;
@@ -34,7 +34,12 @@ function runCli(args: string[], env?: Record<string, string | undefined>, cwd?: 
       else merged[k] = v;
     }
   }
-  const r = spawnSync(SELF, args, { encoding: "utf8", timeout: 10000, env: merged, cwd });
+  const r = spawnSync(SELF, ["export-session", ...args], {
+    encoding: "utf8",
+    timeout: 10000,
+    env: merged,
+    cwd,
+  });
   return { code: r.status ?? 1, out: String(r.stdout ?? ""), err: String(r.stderr ?? "") };
 }
 
@@ -125,7 +130,7 @@ describe("harness exports", () => {
     );
     expect(r.code).toBe(0);
     expect(savedOk("thread-codex", "codex")).toBe(true);
-  }, 10000);
+  });
 
   test("claude export is saved", () => {
     const r = check(
@@ -136,7 +141,7 @@ describe("harness exports", () => {
     );
     expect(r.code).toBe(0);
     expect(savedOk("thread-claude", "claude")).toBe(true);
-  }, 10000);
+  });
 
   test("pi export is saved", () => {
     const r = check(
@@ -147,19 +152,19 @@ describe("harness exports", () => {
     );
     expect(r.code).toBe(0);
     expect(savedOk("thread-pi", "pi")).toBe(true);
-  }, 10000);
+  });
 
   test("agy export is saved", () => {
     const r = check("agy", "thread-agy", { conversationId: "thread-agy" });
     expect(r.code).toBe(0);
     expect(savedOk("thread-agy", "agy")).toBe(true);
-  }, 10000);
+  });
 
   test("grok export is saved", () => {
     const r = check("grok", "thread-grok", { thread_id: "thread-grok" });
     expect(r.code).toBe(0);
     expect(savedOk("thread-grok", "grok")).toBe(true);
-  }, 10000);
+  });
 
   test("muse export is saved", () => {
     const r = check(
@@ -171,7 +176,7 @@ describe("harness exports", () => {
     );
     expect(r.code).toBe(0);
     expect(savedOk("thread-muse", "muse")).toBe(true);
-  }, 10000);
+  });
 
   test("mimo export is saved", () => {
     const r = check(
@@ -183,11 +188,11 @@ describe("harness exports", () => {
     );
     expect(r.code).toBe(0);
     expect(savedOk("thread-mimo", "mimo")).toBe(true);
-  }, 10000);
+  });
 
   test("all seven harnesses export", () => {
     expect(count).toBe(7);
-  }, 10000);
+  });
 });
 
 describe("store matching and session identity", () => {
@@ -221,7 +226,7 @@ describe("store matching and session identity", () => {
     const r = runCli([dispatch, "lane", "codex", cwd, decoyEvents, ""], baseEnv);
     expect(r.code).toBe(0);
     expect(savedText("thread-1")).toBe("RIGHT thread one\n");
-  }, 10000);
+  });
 
   test("a thread whose id extends the thread's with a dash does not shadow its session", () => {
     const loneHome = join(root, "lone-home");
@@ -240,7 +245,7 @@ describe("store matching and session identity", () => {
     const r = runCli([dispatch, "lone", "codex", cwd, suffixEvents, ""], loneEnv);
     expect(r.code).toBe(1);
     expect(r.err).toContain("no durable codex record was found");
-  }, 10000);
+  });
 
   test("an exact store file wins over a newer suffixed decoy", () => {
     const claudeDir = join(home, ".claude", "projects", "project");
@@ -254,7 +259,7 @@ describe("store matching and session identity", () => {
     const r = runCli([dispatch, "lane", "claude", cwd, decoy2Events, ""], baseEnv);
     expect(r.code).toBe(0);
     expect(savedText("thread-2")).toBe("RIGHT exact\n");
-  }, 10000);
+  });
 
   test("a suffixed decoy alone is no record for claude", () => {
     const loneDir = join(home, ".claude", "projects", "lone");
@@ -265,7 +270,7 @@ describe("store matching and session identity", () => {
     const r = runCli([dispatch, "lane", "claude", cwd, loneEvents, ""], baseEnv);
     expect(r.code).toBe(1);
     expect(r.err).toContain("no durable claude record was found");
-  }, 10000);
+  });
 
   test("a top-level session id wins over a nested id in an earlier line", () => {
     const claudeDir = join(home, ".claude", "projects", "project");
@@ -281,7 +286,7 @@ describe("store matching and session identity", () => {
     const r = runCli([dispatch, "lane", "claude", cwd, nestedEvents, ""], baseEnv);
     expect(r.code).toBe(0);
     expect(savedText("RIGHT-top")).toBe("RIGHT\n");
-  }, 10000);
+  });
 
   test("several records for one thread keep the newest, loudly", () => {
     const codexSessions = join(home, ".codex", "sessions");
@@ -314,7 +319,7 @@ describe("store matching and session identity", () => {
     expect(r.code).toBe(0);
     expect(savedText("thread-7")).toBe("NEW segment\n");
     expect(r.err).toContain("2 codex records name thread thread-7; keeping the newest");
-  }, 10000);
+  });
 });
 
 describe("run root and import isolation", () => {
@@ -346,7 +351,7 @@ describe("run root and import isolation", () => {
     expect(r.code).toBe(0);
     expect(marker).toBe(false);
     expect(exported).toBe(true);
-  }, 10000);
+  });
 
   test("a dispatch outside the project run root is skipped, not failed", () => {
     const legacy = join(root, "legacy", "RUN-0");
@@ -366,5 +371,5 @@ describe("run root and import isolation", () => {
     }
     expect(r.code).toBe(0);
     expect(skipped).toBe(true);
-  }, 10000);
+  });
 });

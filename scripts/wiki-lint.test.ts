@@ -90,24 +90,24 @@ describe("pattern ports", () => {
   test("front matter keeps a CR in the value", () => {
     const fm = [..."title: A\rB\n".matchAll(FM_RE)].map((m) => [m[1], m[2]]);
     expect(fm).toEqual([["title", "A\rB"]]);
-  }, 10000);
+  });
 
   test("sources stop an ident at U+001C", () => {
     const src = [..."papers/a\x1cb".matchAll(SOURCES_RE)].map((m) => [m[1], m[2]]);
     expect(src).toEqual([["papers", "a"]]);
-  }, 10000);
+  });
 
   test("citations stop an ident at U+001C", () => {
     const cite = [..."see [@papers/a\x1cb] x".matchAll(CITE_RE)].map((m) => [m[1], m[2]]);
     expect(cite).toEqual([["papers", "a"]]);
-  }, 10000);
+  });
 });
 
 describe("negative controls", () => {
   test("the unmodified wiki passes", () => {
     fresh();
     expectLint("pass");
-  }, 10000);
+  });
 
   test("a settled concept on a trial, with a well-formed capture, passes", () => {
     fresh();
@@ -115,7 +115,7 @@ describe("negative controls", () => {
     capture("papers", "p1", GOOD_SOURCE);
     concept("ok", "settled", "trials/t1, papers/p1");
     expectLint("pass");
-  }, 10000);
+  });
 });
 
 describe("positive controls: each check fails on its own fault", () => {
@@ -127,39 +127,39 @@ describe("positive controls: each check fails on its own fault", () => {
     const link = `${readFileSync(idx, "utf8")}\n- [bare](concepts/bare.md)\n`;
     writeFileSync(idx, link, "utf8");
     expectLint("fail", "no front matter");
-  }, 10000);
+  });
 
   test("a concept with no standing", () => {
     fresh();
     page("nostanding", "title: x\ntype: concept\nupdated: 2026-01-01\n");
     expectLint("fail", "concept with no standing");
-  }, 10000);
+  });
 
   test("a standing that is not one of the five", () => {
     fresh();
     concept("badstanding", "probable", "");
     expectLint("fail", "is not one of");
-  }, 10000);
+  });
 
   test("a front-matter source that does not resolve", () => {
     fresh();
     concept("badsource", "claimed", "runs/no-such-run");
     expectLint("fail", "in front matter does not resolve");
-  }, 10000);
+  });
 
   test("a standing moved by outside work alone", () => {
     fresh();
     capture("papers", "p1", GOOD_SOURCE);
     concept("paperonly", "settled", "papers/p1");
     expectLint("fail", "rests on no run or trial");
-  }, 10000);
+  });
 
   test("supported on fewer than three runs or trials", () => {
     fresh();
     trial("t1");
     concept("thin", "supported", "trials/t1");
     expectLint("fail", "three are needed");
-  }, 10000);
+  });
 
   test("a citation that does not resolve", () => {
     fresh();
@@ -167,7 +167,7 @@ describe("positive controls: each check fails on its own fault", () => {
     const p = join(tmpRoot, "wiki", "concepts", "cites.md");
     writeFileSync(p, `${readFileSync(p, "utf8")}See [@runs/no-such-run].\n`, "utf8");
     expectLint("fail", "does not resolve under raw/");
-  }, 10000);
+  });
 
   test("a wikilink with no page", () => {
     fresh();
@@ -175,7 +175,7 @@ describe("positive controls: each check fails on its own fault", () => {
     const p = join(tmpRoot, "wiki", "concepts", "wl.md");
     writeFileSync(p, `${readFileSync(p, "utf8")}See [[no-such-page]].\n`, "utf8");
     expectLint("fail", "has no page");
-  }, 10000);
+  });
 
   test("a relative link that does not resolve", () => {
     fresh();
@@ -183,7 +183,7 @@ describe("positive controls: each check fails on its own fault", () => {
     const link = `${readFileSync(idx, "utf8")}\n[a dangling link](nowhere.md)\n`;
     writeFileSync(idx, link, "utf8");
     expectLint("fail", "link to nowhere.md");
-  }, 10000);
+  });
 
   test("an orphan page", () => {
     fresh();
@@ -191,29 +191,29 @@ describe("positive controls: each check fails on its own fault", () => {
     const fm = "---\ntitle: o\ntype: concept\nstanding: claimed\nupdated: 2026-01-01\n---\n";
     writeFileSync(p, fm, "utf8");
     expectLint("fail", "orphan");
-  }, 10000);
+  });
 
   test("a trial with no method.md", () => {
     fresh();
     mkdirSync(join(tmpRoot, "raw", "trials", "t2"), { recursive: true });
     expectLint("fail", "no method.md");
-  }, 10000);
+  });
 
   test("a capture with no source.md", () => {
     fresh();
     mkdirSync(join(tmpRoot, "raw", "articles", "a1"), { recursive: true });
     expectLint("fail", "has no source.md");
-  }, 10000);
+  });
 
   test("a source.md with no url", () => {
     fresh();
     capture("papers", "p2", "retrieved: 2026-01-01\n");
     expectLint("fail", "has no url");
-  }, 10000);
+  });
 
   test("a source.md with no retrieval date", () => {
     fresh();
     capture("papers", "p3", "url: https://example.org/x\n");
     expectLint("fail", "has no retrieved");
-  }, 10000);
+  });
 });

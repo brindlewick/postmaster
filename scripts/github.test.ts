@@ -1,4 +1,4 @@
-// Tests beside scripts/github.ts, moved from its --self-test on #109: 29 controls.
+// Tests beside scripts/github.ts, moved from its --self-test on #109: 35 controls.
 // Each CLI test rewrites the stub state it needs, so it passes alone as well as in file order.
 // Failure-only byte dumps (catA) are dropped: expect() shows the mismatch itself.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pyLower } from "./lib/text.ts";
 import { DATE_PREFIX_RE, NONWORD_RE, NUMBER_RE } from "./github";
 
-const SELF = join(import.meta.dir, "github.sh");
+const SELF = join(import.meta.dir, "run");
 const BOARD =
   '{"data": {"repository": {"projectsV2": {"nodes": [{"id": "PVT_1", "number": 1, ' +
   '"title": "r", "closed": false, "url": "https://github.com/users/o/projects/1", ' +
@@ -27,15 +27,14 @@ const TWO_DUP =
   '{"id":"PVT_2","number":2,"title":"dup","closed":false,' +
   '"url":"https://github.com/users/o/projects/2","owner":{"login":"o"}}]}}}}';
 const NO_BOARDS = '{"data": {"repository": {"projectsV2": {"nodes": []}}}}';
-const ITEMS =
-  '{"items": [{"id": "PVTI_7", "status": "Todo", "content": {"type": "Issue", ' +
-  '"number": 7, "repository": "o/r"}}]}';
+// The answer to the direct query for the board's Status field.
 const FIELDS_JSON =
-  '{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Todo"}, ' +
-  '{"id": "o2", "name": "In Progress"}, {"id": "o3", "name": "Done"}]}]}';
+  '{"data": {"node": {"field": {"id": "F1", "options": [{"id": "o1", "name": "Todo"}, ' +
+  '{"id": "o2", "name": "In Progress"}, {"id": "o3", "name": "Done"}]}}}}';
 const NO_TODO_FIELDS =
-  '{"fields": [{"id": "F1", "name": "Status", "options": [{"id": "o1", "name": "Backlog"}, ' +
-  '{"id": "o3", "name": "Done"}]}]}';
+  '{"data": {"node": {"field": {"id": "F1", "options": [{"id": "o1", "name": "Backlog"}, ' +
+  '{"id": "o3", "name": "Done"}]}}}}';
+const NO_STATUS_FIELD = '{"data": {"node": {"field": null}}}';
 const ACCESS_ADMIN = '{"data": {"repository": {"viewerPermission": "ADMIN"}}}';
 const ACCESS_READ = '{"data": {"repository": {"viewerPermission": "READ"}}}';
 const ACCESS_NONE = '{"data": {"repository": null}}';
@@ -57,6 +56,7 @@ const STALE_MD = "## Problem / feature\nChanged in the tracker since.\n";
 // edit, so nothing reaches GitHub.
 const STUB_GH = `#!/usr/bin/env bash
 d=$GITHUB_SH_STUB
+printf '%s\\n' "$1 $2" >> "$d/calls.log"
 case "$1 $2" in
   "auth status") exit 0 ;;
   "api graphql")
@@ -65,23 +65,41 @@ case "$1 $2" in
     case $q in
       *projectsV2*) cat "$d/boards.json" ;;
       *viewerPermission*) cat "$d/access.json" ;;
+      *ProjectV2SingleSelectField*) cat "$d/fields.json" ;;
       *"issue(number:"*) if [ -f "$d/issue-$n.json" ]; then cat "$d/issue-$n.json"
                          else echo '{"data": {"repository": {"issue": null}}}'; fi ;;
+      *"issues(first:100"*) cat "$d/issues.json" ;;
       *) echo "stub gh: unexpected query" >&2; exit 1 ;;
     esac ;;
-  "project item-list") cat "$d/items.json" ;;
-  "project field-list") cat "$d/fields.json" ;;
+  "api "*)
+    printf 'call:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/rest.log"
+    case "$*" in
+      "api -X POST repos/o/r/labels "*) printf 'create:%s\\n' "$*" >> "$d/labels.log"; echo '{}' ;;
+      "api -X POST repos/o/r/issues/"*)
+        if [ -f "$d/rest-fails" ]; then echo 'HTTP 500: Server Error' >&2; exit 1; fi
+        echo '[]' ;;
+      "api -X DELETE repos/o/r/issues/"*)
+        if [ -f "$d/not-on-issue" ]; then echo '{"message": "Label does not exist"}' >&2; exit 1; fi
+        echo '[]' ;;
+      "api repos/o/r/labels/"*)
+        name=\${2##*/}
+        if [ -f "$d/repo-labels.json" ] && grep -q "\\"$name\\"" "$d/repo-labels.json"; then echo '{}'
+        else echo '{"message": "Not Found", "status": "404"}' >&2; exit 1; fi ;;
+      *) echo "stub gh: unexpected REST call: $*" >&2; exit 1 ;;
+    esac ;;
+  "project item-list") echo "stub gh: the board must not be listed" >&2; exit 1 ;;
+  "project field-list") echo "stub gh: the fields must be asked for directly" >&2; exit 1 ;;
   "project item-add") if [ -f "$d/no-item-add" ]; then \\
     echo "stub gh: item-add refused" >&2; exit 1; fi
                       echo '{"id": "PVTI_new"}' ;;
-  "project item-edit") exit 0 ;;
+  "project item-edit") printf 'edit:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/item-edits.log"; exit 0 ;;
   "issue create") printf 'create\\n' >> "$d/creates.log"; echo "https://github.com/o/r/issues/60";;
   "search issues") printf '%s\\n' "$*" >> "$d/searches.log"; cat "$d/search.json" ;;
   "issue edit")
-    f="" prev=""
-    for a in "$@"; do [ "$prev" = --body-file ] && f=$a; prev=$a; done
+    f="" prev="" body=0
+    for a in "$@"; do [ "$prev" = --body-file ] && { f=$a; body=1; }; prev=$a; done
     printf 'call:%s\\n' "$(printf ' [%s]' "$@")" >> "$d/edits.log"
-    cp -- "$f" "$d/edited-body" ;;
+    if [ $body = 1 ]; then cp -- "$f" "$d/edited-body"; fi ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
 esac
 `;
@@ -92,7 +110,7 @@ let bin = "";
 let repo = "";
 
 function ghSh(args: string[]): { code: number; out: string; err: string } {
-  const r = spawnSync("bash", [SELF, repo, ...args], {
+  const r = spawnSync(SELF, ["github", repo, ...args], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -103,7 +121,12 @@ function ghSh(args: string[]): { code: number; out: string; err: string } {
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
-function stored(n: number, file: string): void {
+function stored(
+  n: number,
+  file: string,
+  labels: string[] = [],
+  items: Array<{ id: string; project: string; status: string | null }> = [],
+): void {
   const body = readFileSync(file, "utf8");
   const obj = {
     data: {
@@ -116,13 +139,52 @@ function stored(n: number, file: string): void {
           stateReason: null,
           url: `https://github.com/o/r/issues/${n}`,
           createdAt: "2026-09-23T00:00:00Z",
-          labels: { nodes: [] },
+          labels: { nodes: labels.map((name) => ({ name })) },
           comments: { nodes: [] },
+          projectItems: {
+            nodes: items.map((it) => ({
+              id: it.id,
+              project: { id: it.project },
+              fieldValueByName: it.status === null ? null : { name: it.status },
+            })),
+          },
         },
       },
     },
   };
   writeFileSync(join(S, `issue-${n}.json`), `${JSON.stringify(obj)}\n`);
+}
+
+function callsLog(): string {
+  try {
+    return readFileSync(join(S, "calls.log"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function itemEdits(): string {
+  try {
+    return readFileSync(join(S, "item-edits.log"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function restLog(): string {
+  try {
+    return readFileSync(join(S, "rest.log"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function labelsLog(): string {
+  try {
+    return readFileSync(join(S, "labels.log"), "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function editsCount(): number {
@@ -168,7 +230,6 @@ beforeAll(() => {
   );
   if (remote.status !== 0) throw new Error(`git remote add failed: ${remote.stderr}`);
   writeFileSync(join(S, "boards.json"), `${BOARD}\n`);
-  writeFileSync(join(S, "items.json"), `${ITEMS}\n`);
   writeFileSync(join(S, "fields.json"), `${FIELDS_JSON}\n`);
   writeFileSync(join(tmp, "lf.md"), LF_MD);
   writeFileSync(join(tmp, "crlf.md"), CRLF_MD);
@@ -182,28 +243,28 @@ afterAll(() => {
 describe("unicode primitives", () => {
   test("option keys keep non-ASCII word chars", () => {
     expect(pyLower("café-2".replace(NONWORD_RE, ""))).toBe("café2");
-  }, 30000);
+  });
 
   test("option keys keep decimal digits", () => {
     expect(pyLower("a٣b!".replace(NONWORD_RE, ""))).toBe("a٣b");
-  }, 30000);
+  });
 
   test("issue numbers may be Arabic-Indic", () => {
     expect(NUMBER_RE.test("١٢")).toBe(true);
-  }, 30000);
+  });
 
   test("issue numbers reject a trailing LF (fullmatch)", () => {
     expect(NUMBER_RE.test("12\n")).toBe(false);
-  }, 30000);
+  });
 
   test("comment dates may be Arabic-Indic", () => {
     expect(DATE_PREFIX_RE.test("٠٢٠٦-٠١-٠١ x")).toBe(true);
-  }, 30000);
+  });
 
   test("comment dates keep the ASCII shape", () => {
     expect(DATE_PREFIX_RE.test("2026-01-01 x")).toBe(true);
     expect(DATE_PREFIX_RE.test("2026-1-1 x")).toBe(false);
-  }, 30000);
+  });
 });
 
 describe("positive controls", () => {
@@ -218,7 +279,7 @@ describe("positive controls", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("a binding naming no linked board is refused", () => {
     mkdirSync(join(repo, ".postmaster"), { recursive: true });
@@ -231,7 +292,7 @@ describe("positive controls", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("a binding matching two linked boards is refused", () => {
     mkdirSync(join(repo, ".postmaster"), { recursive: true });
@@ -244,7 +305,7 @@ describe("positive controls", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("read --body prints the stored body byte for byte, then one newline", () => {
     plainBoards();
@@ -253,7 +314,7 @@ describe("positive controls", () => {
     const want = Buffer.concat([readFileSync(join(tmp, "lf.md")), Buffer.from("\n")]);
     expect(r.code).toBe(0);
     expect(Buffer.compare(Buffer.from(r.out, "utf8"), want)).toBe(0);
-  }, 30000);
+  });
 
   test("read --body keeps a CRLF body's line endings", () => {
     plainBoards();
@@ -262,7 +323,7 @@ describe("positive controls", () => {
     const want = Buffer.concat([readFileSync(join(tmp, "crlf.md")), Buffer.from("\n")]);
     expect(r.code).toBe(0);
     expect(Buffer.compare(Buffer.from(r.out, "utf8"), want)).toBe(0);
-  }, 30000);
+  });
 
   test("read without --body still prints the header before the body", () => {
     plainBoards();
@@ -271,7 +332,7 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     expect(r.out.split("\n")[0]).toBe("id: #7");
     expect(r.out.split("\n").includes("title: Check a ticket's shape")).toBe(true);
-  }, 30000);
+  });
 
   test("edit against the body as read calls gh issue edit once, with the body file and no title", () => {
     plainBoards();
@@ -301,7 +362,7 @@ describe("positive controls", () => {
     expect(editsLog.includes("[--body-file]")).toBe(true);
     expect(editsLog.includes("[--title]")).toBe(false);
     expect(editedBodyMatches).toBe(true);
-  }, 30000);
+  });
 
   test("a body stored with CRLF matches the same base with LF", () => {
     plainBoards();
@@ -313,7 +374,7 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("#7: edited");
     expect(editsCount()).toBe(1);
-  }, 30000);
+  });
 });
 
 describe("negative controls: nothing is written", () => {
@@ -339,7 +400,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(4);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("#7 changed since")).toBe(true);
-  }, 30000);
+  });
 
   test("an empty body file exits 1", () => {
     negativeSetup();
@@ -347,7 +408,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("is empty")).toBe(true);
-  }, 30000);
+  });
 
   test("a missing base file exits 1", () => {
     negativeSetup();
@@ -355,7 +416,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("cannot read base file")).toBe(true);
-  }, 30000);
+  });
 
   test("a pull request number exits 1", () => {
     negativeSetup();
@@ -363,7 +424,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("no issue #34")).toBe(true);
-  }, 30000);
+  });
 
   test("the old form, with a title, is a usage error", () => {
     negativeSetup();
@@ -371,7 +432,7 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(r.ed).toBe(0);
     expect((r.out + r.err).includes("usage:")).toBe(true);
-  }, 30000);
+  });
 
   test("no linked board exits 3", () => {
     negativeSetup();
@@ -384,7 +445,7 @@ describe("negative controls: nothing is written", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 
   test("read --body without a linked board exits 3", () => {
     negativeSetup();
@@ -395,7 +456,7 @@ describe("negative controls: nothing is written", () => {
     } finally {
       plainBoards();
     }
-  }, 30000);
+  });
 });
 
 describe("access", () => {
@@ -404,21 +465,21 @@ describe("access", () => {
     const r = ghSh(["access"]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("ADMIN");
-  }, 30000);
+  });
 
   test("a repository the user only reads says READ", () => {
     writeFileSync(join(S, "access.json"), `${ACCESS_READ}\n`);
     const r = ghSh(["access"]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("READ");
-  }, 30000);
+  });
 
   test("a repository gh cannot see exits 1", () => {
     writeFileSync(join(S, "access.json"), `${ACCESS_NONE}\n`);
     const r = ghSh(["access"]);
     expect(r.code).toBe(1);
     expect((r.out + r.err).includes("no permission on o/r")).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("create and search", () => {
@@ -429,7 +490,7 @@ describe("create and search", () => {
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("60");
     expect(createsCount()).toBe(1);
-  }, 30000);
+  });
 
   test("an issue that misses the board still prints its number, and exits 5", () => {
     plainBoards();
@@ -444,7 +505,22 @@ describe("create and search", () => {
     } finally {
       rmSync(join(S, "no-item-add"), { force: true });
     }
-  }, 30000);
+  });
+
+  test("a board with no Status field is refused before anything is created", () => {
+    plainBoards();
+    writeFileSync(join(S, "creates.log"), "");
+    const origFields = readFileSync(join(S, "fields.json"));
+    writeFileSync(join(S, "fields.json"), `${NO_STATUS_FIELD}\n`);
+    try {
+      const r = ghSh(["create", "A title", join(tmp, "new.md")]);
+      expect(r.code).toBe(1);
+      expect(createsCount()).toBe(0);
+      expect((r.out + r.err).includes("has no Status field")).toBe(true);
+    } finally {
+      writeFileSync(join(S, "fields.json"), origFields);
+    }
+  });
 
   test("a board with no Todo column is refused before anything is created", () => {
     plainBoards();
@@ -459,7 +535,7 @@ describe("create and search", () => {
     } finally {
       writeFileSync(join(S, "fields.json"), origFields);
     }
-  }, 30000);
+  });
 
   test("search asks for the phrase in this repository, and prints number, state and title", () => {
     plainBoards();
@@ -474,7 +550,7 @@ describe("create and search", () => {
     expect(r.code).toBe(0);
     expect(r.out.trimEnd()).toBe("#4\topen\tEarlier\n#9\tclosed\tLater");
     expect(searchesLog.includes('"tf-0a1b2c3d" --repo o/r')).toBe(true);
-  }, 30000);
+  });
 
   test("a colon in the text is searched as a space, which GitHub's query accepts", () => {
     plainBoards();
@@ -488,5 +564,258 @@ describe("create and search", () => {
     }
     const lastSearch = searchesLog.trimEnd().split("\n").pop() ?? "";
     expect(lastSearch.includes('"Tool fault in scripts/x.sh" --repo o/r')).toBe(true);
-  }, 30000);
+  });
+});
+
+describe("labels and titles", () => {
+  test("label add creates the missing repo label, then adds it", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    rmSync(join(S, "labels.log"), { force: true });
+    rmSync(join(S, "repo-labels.json"), { force: true });
+    rmSync(join(S, "rest.log"), { force: true });
+    const r = ghSh(["label", "7", "add", "ready"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("#7: label added ready");
+    const created = labelsLog();
+    expect(created.includes("create:")).toBe(true);
+    expect(created.includes("name=ready")).toBe(true);
+    expect(restLog().includes("[repos/o/r/issues/7/labels] [-f] [labels[]=ready]")).toBe(true);
+  });
+
+  test("label add uses the repo label when it exists, creating nothing", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    writeFileSync(join(S, "repo-labels.json"), '[{"name": "ready"}]\n');
+    rmSync(join(S, "labels.log"), { force: true });
+    rmSync(join(S, "rest.log"), { force: true });
+    try {
+      const r = ghSh(["label", "7", "add", "ready"]);
+      expect(r.code).toBe(0);
+      expect(labelsLog()).toBe("");
+      expect(restLog().includes("[repos/o/r/issues/7/labels] [-f] [labels[]=ready]")).toBe(true);
+    } finally {
+      rmSync(join(S, "repo-labels.json"), { force: true });
+    }
+  });
+
+  test("label remove drops the label without creating anything", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["ready"]);
+    rmSync(join(S, "labels.log"), { force: true });
+    rmSync(join(S, "rest.log"), { force: true });
+    const r = ghSh(["label", "7", "remove", "ready"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("#7: label removed ready");
+    expect(labelsLog()).toBe("");
+    expect(restLog().includes("[DELETE] [repos/o/r/issues/7/labels/ready]")).toBe(true);
+  });
+
+  test("read shows the issue's labels", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["ready", "blocked"]);
+    const r = ghSh(["read", "7"]);
+    expect(r.code).toBe(0);
+    expect(r.out.split("\n")).toContain("labels: ready, blocked");
+  });
+
+  test("has-label answers exact membership, and a comma in a name is one label", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["blocked, ready"]);
+    const absent = ghSh(["has-label", "7", "ready"]);
+    expect(absent.code).toBe(0);
+    expect(absent.out.trim()).toBe("absent");
+    const folded = ghSh(["has-label", "7", "BLOCKED, READY"]);
+    expect(folded.code).toBe(0);
+    expect(folded.out.trim()).toBe("present");
+    const present = ghSh(["has-label", "7", "blocked, ready"]);
+    expect(present.code).toBe(0);
+    expect(present.out.trim()).toBe("present");
+  });
+
+  test("title retitles the issue", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    writeFileSync(join(S, "edits.log"), "");
+    const r = ghSh(["title", "7", "A new title"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("#7: title changed");
+    const log = readFileSync(join(S, "edits.log"), "utf8");
+    expect(log.includes("[--title] [A new title]")).toBe(true);
+    expect(log.includes("[--body-file]")).toBe(false);
+  });
+
+  test("a state change leaves the ready label alone", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), ["ready"]);
+    rmSync(join(S, "rest.log"), { force: true });
+    const blocked = ghSh(["state", "7", "blocked"]);
+    expect(blocked.code).toBe(0);
+    let log = restLog();
+    expect(log.includes("[labels[]=blocked]")).toBe(true);
+    expect(log.includes("DELETE")).toBe(false);
+    stored(7, join(tmp, "lf.md"), ["ready", "blocked"]);
+    rmSync(join(S, "rest.log"), { force: true });
+    const todo = ghSh(["state", "7", "todo"]);
+    expect(todo.code).toBe(0);
+    log = restLog();
+    expect(log.includes("[DELETE] [repos/o/r/issues/7/labels/blocked]")).toBe(true);
+    expect(log.includes("labels/ready")).toBe(false);
+  });
+});
+
+describe("the board is never listed", () => {
+  const ON_BOARD = (status: string | null) => [{ id: "PVTI_7", project: "PVT_1", status }];
+
+  test("positive control: the stub refuses a board listing, so a regression would fail", () => {
+    const r = spawnSync(join(bin, "gh"), ["project", "item-list", "1"], {
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_SH_STUB: S },
+    });
+    expect(r.status).toBe(1);
+  });
+
+  test("read takes the column from the issue's own board item", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), [], ON_BOARD("In Progress"));
+    writeFileSync(join(S, "calls.log"), "");
+    const r = ghSh(["read", "7"]);
+    expect(r.code).toBe(0);
+    expect(r.out.split("\n")).toContain("state: in-progress");
+    expect(callsLog().includes("project item-list")).toBe(false);
+  });
+
+  test("negative control: an item on another board does not set the column", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), [], [{ id: "PVTI_x", project: "PVT_other", status: "Done" }]);
+    const r = ghSh(["read", "7"]);
+    expect(r.code).toBe(0);
+    expect(r.out.split("\n")).toContain("state: todo");
+  });
+
+  test("negative control: an item with no Status value reads as todo", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), [], ON_BOARD(null));
+    const r = ghSh(["read", "7"]);
+    expect(r.code).toBe(0);
+    expect(r.out.split("\n")).toContain("state: todo");
+  });
+
+  test("state moves the issue's own item without adding or listing anything", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), [], ON_BOARD("Todo"));
+    writeFileSync(join(S, "calls.log"), "");
+    rmSync(join(S, "item-edits.log"), { force: true });
+    const r = ghSh(["state", "7", "in-progress"]);
+    expect(r.code).toBe(0);
+    expect(itemEdits().includes("[--id] [PVTI_7]")).toBe(true);
+    expect(itemEdits().includes("[--single-select-option-id] [o2]")).toBe(true);
+    expect(callsLog().includes("project item-add")).toBe(false);
+    expect(callsLog().includes("project item-list")).toBe(false);
+  });
+
+  test("state adds an issue that is not on the board, then moves its new item", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"), [], []);
+    writeFileSync(join(S, "calls.log"), "");
+    rmSync(join(S, "item-edits.log"), { force: true });
+    const r = ghSh(["state", "7", "in-progress"]);
+    expect(r.code).toBe(0);
+    expect(
+      callsLog()
+        .split("\n")
+        .filter((l) => l === "project item-add").length,
+    ).toBe(1);
+    expect(itemEdits().includes("[--id] [PVTI_new]")).toBe(true);
+  });
+
+  test("create adds the new issue to the board and moves its item, listing nothing", () => {
+    plainBoards();
+    writeFileSync(join(S, "creates.log"), "");
+    writeFileSync(join(S, "calls.log"), "");
+    rmSync(join(S, "item-edits.log"), { force: true });
+    const r = ghSh(["create", "A title", join(tmp, "new.md")]);
+    expect(r.code).toBe(0);
+    expect(callsLog().includes("project item-list")).toBe(false);
+    expect(itemEdits().includes("[--id] [PVTI_new]")).toBe(true);
+    expect(itemEdits().includes("[--single-select-option-id] [o1]")).toBe(true);
+  });
+
+  test("list reads each column from the issue query and prints state and title", () => {
+    plainBoards();
+    const node = (number: number, title: string, state: string, status: string | null) => ({
+      number,
+      title,
+      state,
+      stateReason: state === "CLOSED" ? "COMPLETED" : null,
+      labels: { nodes: [] },
+      projectItems: {
+        nodes:
+          status === null
+            ? []
+            : [
+                {
+                  id: `PVTI_${number}`,
+                  project: { id: "PVT_1" },
+                  fieldValueByName: { name: status },
+                },
+              ],
+      },
+    });
+    const page = {
+      data: {
+        repository: {
+          issues: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              node(9, "Later", "OPEN", "In Progress"),
+              node(4, "Earlier", "CLOSED", "Done"),
+              node(6, "Not on the board", "OPEN", null),
+            ],
+          },
+        },
+      },
+    };
+    writeFileSync(join(S, "issues.json"), `${JSON.stringify(page)}\n`);
+    writeFileSync(join(S, "calls.log"), "");
+    const r = ghSh(["list"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim().split("\n")).toEqual([
+      "#4\tdone\tEarlier",
+      "#6\ttodo\tNot on the board",
+      "#9\tin-progress\tLater",
+    ]);
+    expect(callsLog().includes("project item-list")).toBe(false);
+    const only = ghSh(["list", "in-progress"]);
+    expect(only.out.trim()).toBe("#9\tin-progress\tLater");
+  });
+});
+
+describe("labels over REST", () => {
+  test("removing a label the issue lacks succeeds", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    writeFileSync(join(S, "not-on-issue"), "");
+    try {
+      const r = ghSh(["label", "7", "remove", "ready"]);
+      expect(r.code).toBe(0);
+    } finally {
+      rmSync(join(S, "not-on-issue"), { force: true });
+    }
+  });
+
+  test("negative control: a REST failure that is not a 404 stops the label change", () => {
+    plainBoards();
+    stored(7, join(tmp, "lf.md"));
+    writeFileSync(join(S, "repo-labels.json"), '[{"name": "ready"}]\n');
+    writeFileSync(join(S, "rest-fails"), "");
+    try {
+      const r = ghSh(["label", "7", "add", "ready"]);
+      expect(r.code).toBe(1);
+      expect(r.err.includes("HTTP 500")).toBe(true);
+    } finally {
+      rmSync(join(S, "rest-fails"), { force: true });
+      rmSync(join(S, "repo-labels.json"), { force: true });
+    }
+  });
 });

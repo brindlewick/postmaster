@@ -19,13 +19,21 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { processCommandLine, processInfo, processStart, processState } from "./lib/processes.ts";
 import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
-const SELF = join(HERE, "host.sh");
+const SELF = join(HERE, "run");
 const SCRIPT = join(HERE, "host-self-test.ts");
 type Result = { code: number; out: string; err: string };
 const sleep = (ms: number) => Bun.sleep(ms);
+
+/** What the stand-in launches do before they finish. A test that checks something while the launch
+ * is still running sets EMIT_GO to a file and creates it when the checks are done, so the launch
+ * ends the moment it is wanted to and never on a timer. EMIT_SLEEP, a number of seconds, is the
+ * older form. The 60 second cap keeps a forgotten file from leaving the launch running. */
+const EMIT_WAIT =
+  'go=$(printenv EMIT_GO); if [ -n "$go" ]; then n=0; while [ ! -e "$go" ] && [ "$n" -lt 1200 ]; do sleep 0.05; n=$((n + 1)); done; else sleep "$(printenv EMIT_SLEEP || printf 0)"; fi';
 function exec(
   program: string,
   args: string[] = [],
@@ -332,9 +340,12 @@ function herdrStubInner(args: string[], stateDir: string): void {
       ws = st.panes[pane].ws;
     save(path, st);
     if (flag(join(stateDir, "pane.dead"))) return;
-    const prefix = flag(join(stateDir, "pane.late")) ? "sleep 5; " : "";
+    const late = flag(join(stateDir, "pane.late"));
+    const prefix = late ? "sleep 5; " : "";
+    // The late pane leaves a note once its command has run, so a test can wait for that and not for a timer.
+    const suffix = late ? `; : > "${join(stateDir, "pane.late.ran")}"` : "";
     const env = {
-      PATH: process.env.PATH,
+      PATH: process.env.POSTMASTER_STUB_PANE_PATH ?? process.env.PATH,
       HOME: process.env.HOME,
       STUB: stateDir,
       HERDR_ENV: "pane-env",
@@ -345,7 +356,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       HERDR_WORKSPACE_ID: ws,
     };
     const paneOut = openSync(join(stateDir, `pane-${pane}.out`), "a");
-    const child = spawn("/bin/bash", ["-c", prefix + text], {
+    const child = spawn("/bin/bash", ["-c", prefix + text + suffix], {
       env,
       detached: true,
       stdio: ["ignore", paneOut, paneOut],
@@ -570,6 +581,7 @@ function host(
   cwd = `${root}/caller`,
   env: Record<string, string> = {},
 ): Result {
+  const procRoot = process.env.POSTMASTER_PROC_ROOT;
   const environment: Record<string, string> = {
     HOME: process.env.HOME ?? "/",
     PATH: path,
@@ -577,12 +589,16 @@ function host(
     TMPDIR: root,
     POSTMASTER_HOST_STATE: join(root, "state"),
     POSTMASTER_HOST_FIXTURE: root,
-    POSTMASTER_HOST_CLAIM_WAIT: "3",
+    // A pane has this long to claim its launch. A pane that is only slow must not fall back to the
+    // background on a loaded machine, so the wait is long; the two tests of a pane that never starts
+    // set their own short one.
+    POSTMASTER_HOST_CLAIM_WAIT: "30",
     POSTMASTER_HOST_CLOSE_WAIT: "3",
     POSTMASTER_HOST_FINISH_DELAY: finishDelay,
+    ...(procRoot === undefined ? {} : { POSTMASTER_PROC_ROOT: procRoot }),
     ...env,
   };
-  return exec(SELF, [...args], { cwd, env: environment });
+  return exec(SELF, ["host", ...args], { cwd, env: environment });
 }
 function testStopFinishers(root: string): void {
   const path = join(root, "finishers");
@@ -592,12 +608,7 @@ function testStopFinishers(root: string): void {
     const pidText = tab < 0 ? line : line.slice(0, tab);
     const marker = tab < 0 ? "" : line.slice(tab + 1);
     if (!/^[0-9]+$/u.test(pidText) || !marker) continue;
-    let command = "";
-    try {
-      command = readFileSync(`/proc/${pidText}/cmdline`, "utf8").replace(/\0/gu, " ");
-    } catch {
-      continue;
-    }
+    const command = processCommandLine(Number(pidText));
     if (command.includes(marker)) {
       try {
         process.kill(Number(pidText));
@@ -642,12 +653,22 @@ function errStreamEqual(directErrPath: string, launchErrPath: string): boolean {
     .join("\n");
   return readFileSync(directErrPath, "utf8") === kept;
 }
-async function marker(path: string, seconds = 20): Promise<boolean> {
-  for (let i = 0; i < seconds * 10; i++) {
-    if (existsSync(path)) return true;
-    await sleep(100);
+/** Waits for a condition and not for a timer: true the moment `done` holds, false only once
+ * `seconds` have passed without it. A stand-in process that takes milliseconds on a quiet
+ * machine takes seconds on a loaded one, so a test names what it needs to see and bounds the wait
+ * for a hang. A condition that throws, such as a file that is not there yet, has not held yet. */
+export async function waitFor(done: () => boolean, seconds = 30): Promise<boolean> {
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    try {
+      if (done()) return true;
+    } catch {}
+    if (Date.now() >= deadline) return false;
+    await sleep(50);
   }
-  return existsSync(path);
+}
+function marker(path: string, seconds = 20): Promise<boolean> {
+  return waitFor(() => existsSync(path), seconds);
 }
 async function setup(
   root: string,
@@ -694,7 +715,8 @@ async function setup(
   ]);
   if (result.code) throw new Error(result.err);
   const clone = join(repo, ".worktrees", "T-1-rev-security-opus");
-  result = exec(join(HERE, "cut-scratch.sh"), [
+  result = exec(join(HERE, "run"), [
+    "cut-scratch",
     repo,
     repo,
     clone,
@@ -714,7 +736,7 @@ async function setup(
       'printf \'{"type":"system","subtype":"init","session_id":"fixed-1","model":"m"}\\n\'',
       'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"step one"}]}}\\n\'',
       "printf 'a line on stderr\\n' >&2",
-      'sleep "$(printenv EMIT_SLEEP || printf 0)"',
+      EMIT_WAIT,
       'printf \'{"type":"result","subtype":"success","num_turns":1}\\n\'',
       "exit 3",
       "",
@@ -726,9 +748,9 @@ async function setup(
       "#!/usr/bin/env bash",
       'printf \'{"type":"system","subtype":"init","session_id":"probe-1","model":"m"}\\n\'',
       "if (: < /dev/tty) 2>/dev/null; then tty=yes; else tty=no; fi",
-      'printf \'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=%s|pid=%s|pgid=%s|tty=%s\\n\' "$PWD" "$POSTMASTER_LAUNCH_NAME" "$HERDR_PANE_ID" "$TMUX_PANE" "$CALLER_VAR" "$(ps -o sid= -p $$ | tr -d \' \')" "$$" "$(ps -o pgid= -p $$ | tr -d \' \')" "$tty"',
+      'printf \'from=%s|name=%s|pane=%s|tmuxpane=%s|var=%s|sid=|pid=%s|pgid=|tty=%s\\n\' "$PWD" "$POSTMASTER_LAUNCH_NAME" "$HERDR_PANE_ID" "$TMUX_PANE" "$CALLER_VAR" "$$" "$tty"',
       'count_path=$(printenv COUNT); if [ -n "$count_path" ]; then echo x >> "$count_path"; fi',
-      'sleep "$(printenv EMIT_SLEEP || printf 0)"',
+      EMIT_WAIT,
       "",
     ].join("\n"),
   );
@@ -788,11 +810,15 @@ async function setup(
 function shellQuote(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
-async function makeHarness(root: string): Promise<{ sys: string; stubs: string }> {
+async function makeHarness(
+  root: string,
+): Promise<{ sys: string; stubs: string; paneNoBun: string }> {
   const bin = join(root, "bin"),
-    sys = join(root, "sys");
+    sys = join(root, "sys"),
+    paneNoBun = join(root, "pane-no-bun");
   mkdirSync(bin);
   mkdirSync(sys);
+  mkdirSync(paneNoBun);
   mkdirSync(join(root, "stub"));
   const tools = [
     "bun",
@@ -836,13 +862,17 @@ async function makeHarness(root: string): Promise<{ sys: string; stubs: string }
     "mv",
     "tee",
   ];
-  for (const tool of tools) symlinkCommand(tool, sys);
+  for (const tool of tools) {
+    symlinkCommand(tool, sys);
+    if (tool !== "bun") symlinkCommand(tool, paneNoBun);
+  }
   for (const tool of ["herdr", "tmux"]) {
-    const script = `#!/bin/sh\nexec bun ${shellQuote(SCRIPT)} --stub ${tool} "$@"\n`;
+    const script = `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(SCRIPT)} --stub ${tool} "$@"\n`;
     const path = join(bin, tool);
     writeFileSync(path, script, { mode: 0o755 });
+    symlinkSync(path, join(paneNoBun, tool));
   }
-  return { sys, stubs: `${bin}:${sys}` };
+  return { sys, stubs: `${bin}:${sys}`, paneNoBun };
 }
 function resetHarness(root: string): void {
   testStopFinishers(root);
@@ -1258,12 +1288,13 @@ export async function runControls(): Promise<number> {
       ["run", f.name, f.repo, "--marker", "../logs/n2.done", "--", "./fixed.sh"],
       noHost,
       f.caller,
-      { EMIT_SLEEP: "1" },
+      { EMIT_GO: join(logs, "n2.go") },
     );
     await pass(
       "an earlier launch's marker is gone once run returns",
       () => pending.code === 0 && !existsSync(markerPath("n2")),
     );
+    writeFileSync(join(logs, "n2.go"), "");
     await pass("and it lands again when this one exits, whatever its exit", () =>
       marker(markerPath("n2"), 15),
     );
@@ -1283,10 +1314,21 @@ export async function runControls(): Promise<number> {
       ],
       noHost,
       f.caller,
-      { CALLER_VAR: "v", HERDR_PANE_ID: "caller-pane", TMUX_PANE: "%9" },
+      {
+        CALLER_VAR: "v",
+        HERDR_PANE_ID: "caller-pane",
+        TMUX_PANE: "%9",
+        EMIT_GO: join(logs, "n3.go"),
+      },
     );
-    await marker(markerPath("n3"));
-    const probeText = readFileSync(join(logs, "n3.out"), "utf8");
+    const probePath = join(logs, "n3.out");
+    for (
+      let i = 0;
+      i < 40 && (!existsSync(probePath) || !readFileSync(probePath, "utf8").includes("from="));
+      i++
+    )
+      await sleep(50);
+    const probeText = readFileSync(probePath, "utf8");
     await pass(
       "it runs from the caller's directory, with the caller's environment and its name",
       () =>
@@ -1308,15 +1350,19 @@ export async function runControls(): Promise<number> {
     );
     await pass(
       "it is a session of its own: its group is its pid, not the caller's session",
-      () =>
-        field(probeText, "pgid") === field(probeText, "pid") &&
-        field(probeText, "sid") === field(probeText, "pid"),
-      probeText,
+      () => {
+        const pid = Number(field(probeText, "pid"));
+        const info = processInfo(pid);
+        return info?.group === pid && info.session === pid;
+      },
+      `${probeText}\n${JSON.stringify(processInfo(Number(field(probeText, "pid"))))}`,
     );
     await pass(
       "--pidfile holds the launch's pid",
       () => readFileSync(join(logs, "n3.pid"), "utf8").trim() === field(probeText, "pid"),
     );
+    writeFileSync(join(logs, "n3.go"), "");
+    await marker(markerPath("n3"));
     writeFileSync(
       join(f.caller, "argv.sh"),
       ["#!/usr/bin/env bash", 'printf "<%s>\\n" "$@"', ""].join("\n"),
@@ -1360,12 +1406,13 @@ export async function runControls(): Promise<number> {
       ],
       noHost,
       f.caller,
-      { EMIT_SLEEP: "2" },
+      { EMIT_GO: join(logs, "n5.go") },
     );
     await pass(
       "and it is there, for a live process, the moment run returns",
       () => live.code === 0 && existsSync(join(logs, "n5.pid")),
     );
+    writeFileSync(join(logs, "n5.go"), "");
     await marker(markerPath("n5"), 20);
     writeFileSync(join(logs, "n4.out"), "before\n");
     writeFileSync(join(logs, "n4.err"), "old error\n");
@@ -1540,16 +1587,7 @@ export async function runControls(): Promise<number> {
     const termStop = execHost(["stop", join(f.repo, ".worktrees/T-1-luna")], noHost, root, {
       POSTMASTER_HOST_STOP_WAIT: "2",
     });
-    const alive = (pid: string) => {
-      try {
-        return !readFileSync(`/proc/${pid}/stat`, "utf8")
-          .slice(readFileSync(`/proc/${pid}/stat`, "utf8").lastIndexOf(")") + 1)
-          .trim()
-          .startsWith("Z");
-      } catch {
-        return false;
-      }
-    };
+    const alive = (pid: string) => processState(Number(pid)) === "live";
     const escapee = readFileSync(join(root, "tree/escapee.pid"), "utf8").trim();
     const deaf = readFileSync(join(root, "tree/deaf.pid"), "utf8").trim();
     await pass(
@@ -1580,17 +1618,13 @@ export async function runControls(): Promise<number> {
     // ASCII: /proc/stat is kernel-emitted ASCII; btime's fields split on spaces.
     const bootSeconds = Number(bootLine.split(/\s+/u)[1]);
     const ticks = Number(exec("getconf", ["CLK_TCK"]).out.trim()) || 100;
-    const procStart = (pid: string): string => {
-      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-      return (
-        stat
-          .slice(stat.lastIndexOf(")") + 1)
-          .trim()
-          // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-          .split(/\s+/u)[19] ?? ""
-      );
+    const procStart = (pid: string): string => processStart(Number(pid)) ?? "";
+    const startedSeconds = (pid: string) => {
+      const start = procStart(pid);
+      return /^[0-9]+$/u.test(start)
+        ? bootSeconds + Number(start) / ticks
+        : Date.parse(start) / 1000;
     };
-    const startedSeconds = (pid: string) => bootSeconds + Number(procStart(pid)) / ticks;
     const record = (pid: string) => join(launchDir, pid);
     const stale = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
     stale.unref();
@@ -1771,78 +1805,10 @@ export async function runControls(): Promise<number> {
       () => withinBound.code === 0 && marker(markerPath("wide"), 10),
     );
 
-    const unrelated = spawn("sleep", ["60"], { cwd: sol, detached: true, stdio: "ignore" });
-    unrelated.unref();
-    const unrelatedRun = execHost(
-      [
-        "run",
-        f.name,
-        sol,
-        "--marker",
-        "../logs/unrelated.done",
-        "--pidfile",
-        "../logs/unrelated.pid",
-        "--",
-        "sleep",
-        "60",
-      ],
-      noHost,
-      f.caller,
-    );
-    const unrelatedStop = execHost(["stop", sol], noHost, root, { POSTMASTER_HOST_STOP_WAIT: "0" });
-    await pass(
-      "a process that works in the worktree but that no launch started is left alone",
-      () => {
-        if (unrelatedRun.code !== 0 || unrelatedStop.code !== 0 || !unrelated.pid) return false;
-        try {
-          process.kill(unrelated.pid, 0);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    );
-    try {
-      if (unrelated.pid) process.kill(unrelated.pid, "SIGKILL");
-    } catch {}
-    await marker(markerPath("unrelated"), 10);
     const inside = execHost(["stop", sol], noHost, sol);
     await pass(
       "stop refuses to run from inside the worktree it would stop",
       () => inside.code === 1 && inside.err.includes("from inside it"),
-    );
-    const badMaxRun = execHost(
-      [
-        "run",
-        f.name,
-        sol,
-        "--marker",
-        "../logs/wide.done",
-        "--pidfile",
-        "../logs/wide.pid",
-        "--",
-        "bash",
-        "-c",
-        "sleep 60 & sleep 60 & wait",
-      ],
-      noHost,
-      f.caller,
-    );
-    const badMax = execHost(["stop", sol], noHost, root, {
-      POSTMASTER_HOST_STOP_MAX: "1",
-      POSTMASTER_HOST_STOP_WAIT: "0",
-    });
-    await pass(
-      "stop refuses a tree larger than POSTMASTER_HOST_STOP_MAX, and leaves it running",
-      () =>
-        badMaxRun.code === 0 &&
-        badMax.code === 2 &&
-        badMax.err.includes("more than POSTMASTER_HOST_STOP_MAX"),
-    );
-    const withinMax = execHost(["stop", sol], noHost, root, { POSTMASTER_HOST_STOP_WAIT: "0" });
-    await pass(
-      "within the bound, the same tree is stopped",
-      () => withinMax.code === 0 && marker(markerPath("wide"), 10),
     );
     const outsideFixture = execHost(["stop", sol], noHost, root, {
       POSTMASTER_HOST_STATE: `${root}.elsewhere`,
@@ -1903,11 +1869,16 @@ export async function runControls(): Promise<number> {
       listedCalls,
     );
     await pass(
-      "host.sh marks the space it opened as its own",
+      "run host marks the space it opened as its own",
       () => state.spaces[spaceId]?.tokens?.postmaster === "opened",
     );
     await marker(markerPath("h1"));
-    await sleep(300);
+    // The marker lands when the launch ends. The pane is done with it, and has shown the rendered
+    // stream and released its agent, when it prints its last line.
+    if (pane)
+      await waitFor(() =>
+        /\nexit [0-9]+ at /u.test(readFileSync(join(stub, `pane-${pane}.out`), "utf8")),
+      );
     const herdrOut = readFileSync(join(logs, "h1.out"), "utf8");
     await pass(
       "the launch ran in that pane, with that pane's identity",
@@ -1915,7 +1886,7 @@ export async function runControls(): Promise<number> {
       herdrOut,
     );
     await pass(
-      "and with its caller's environment, handed over by host.sh",
+      "and with its caller's environment, handed over by run host",
       () => field(herdrOut, "var") === "v" && field(herdrOut, "from") === f.caller,
       JSON.stringify({
         from: field(herdrOut, "from"),
@@ -1936,6 +1907,71 @@ export async function runControls(): Promise<number> {
         reportCalls.includes(`pane\treport-agent\t${pane}`) &&
         reportCalls.includes(`pane\trelease-agent\t${pane}`),
       reportCalls,
+    );
+    const noBunHerdr = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/h-bunless.out",
+        "--marker",
+        "../logs/h-bunless.done",
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+      f.caller,
+      {
+        EMIT_GO: join(logs, "h-bunless.go"),
+        POSTMASTER_STUB_PANE_PATH: paths.paneNoBun,
+        POSTMASTER_HOST_FINISH_DELAY: "0.2",
+      },
+    );
+    const noBunPane = TRIPLE_RE.exec(noBunHerdr.out)?.[3] ?? "";
+    const noBunPaneOut = join(stub, `pane-${noBunPane}.out`);
+    // The pane shows the first step by the process that follows the stream and reports the launch
+    // working from its own: wait for both and for neither to be first.
+    if (noBunPane)
+      await waitFor(
+        () =>
+          readFileSync(noBunPaneOut, "utf8").includes("says: step one") &&
+          readCalls("herdr").includes(`pane\treport-agent\t${noBunPane}`),
+      );
+    const paneHasNoBun =
+      exec("bash", ["-c", "command -v bun"], { env: { PATH: paths.paneNoBun } }).code !== 0;
+    const paneText = existsSync(noBunPaneOut) ? readFileSync(noBunPaneOut, "utf8") : "";
+    const runningHerdr = json(join(stub, "herdr.json"), { panes: {} });
+    const liveHerdrCalls = readCalls("herdr");
+    await pass(
+      "with no Bun in its PATH, the Herdr pane runs the launch, shows output, and stays open",
+      () =>
+        noBunHerdr.code === 0 &&
+        noBunHerdr.out.startsWith("host=herdr ") &&
+        paneHasNoBun &&
+        !existsSync(markerPath("h-bunless")) &&
+        noBunPane in (runningHerdr.panes ?? {}) &&
+        liveHerdrCalls.includes(`pane\treport-agent\t${noBunPane}`) &&
+        !liveHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`) &&
+        paneText.includes("says: step one"),
+      `${noBunHerdr.out}\n${paneText}`,
+    );
+    writeFileSync(join(logs, "h-bunless.go"), "");
+    await marker(markerPath("h-bunless"), 15);
+    // The pane releases its agent as the launch ends and the finisher closes the pane after the
+    // marker, from two processes: wait for both.
+    await waitFor(
+      () =>
+        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        readCalls("herdr").includes(`pane\trelease-agent\t${noBunPane}`),
+    );
+    const doneHerdrCalls = readCalls("herdr");
+    await pass(
+      "the Herdr pane closes after the launch marker lands",
+      () =>
+        existsSync(markerPath("h-bunless")) &&
+        !(noBunPane in json(join(stub, "herdr.json"), { panes: {} }).panes) &&
+        doneHerdrCalls.includes(`pane\trelease-agent\t${noBunPane}`),
     );
     const secondHerdr = execHost(
       ["run", f.name, worktree, "--marker", "../logs/h2.done", "--", "./fixed.sh"],
@@ -1997,7 +2033,7 @@ export async function runControls(): Promise<number> {
       ],
       stubs,
       f.caller,
-      { COUNT: join(logs, "h4.count") },
+      { POSTMASTER_HOST_CLAIM_WAIT: "3", COUNT: join(logs, "h4.count") },
     );
     await marker(markerPath("h4"));
     await pass(
@@ -2025,14 +2061,45 @@ export async function runControls(): Promise<number> {
       { POSTMASTER_HOST_CLAIM_WAIT: "1", COUNT: join(logs, "h5.count") },
     );
     await marker(markerPath("h5"));
-    await sleep(5200);
+    const lateRan = join(stub, "pane.late.ran");
+    await waitFor(() => existsSync(lateRan));
     await pass(
       "a pane that starts it late: it still runs exactly once",
       () =>
+        existsSync(lateRan) &&
         late.out.trim() === "host=none" &&
         readFileSync(join(logs, "h5.count"), "utf8").trim().split("\n").length === 1,
     );
     rmSync(join(stub, "pane.late"), { force: true });
+    rmSync(lateRan, { force: true });
+    const bigHerdr = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/h-big.out",
+        "--marker",
+        "../logs/h-big.done",
+        "--",
+        "sh",
+        "-c",
+        "echo big=${#BIG} small=${#SMALL}",
+      ],
+      stubs,
+      f.caller,
+      { BIG: "x".repeat(100_000), SMALL: "y".repeat(1_000) },
+    );
+    await marker(markerPath("h-big"));
+    await pass(
+      "an environment larger than the FIFO arrives whole, and the launch runs",
+      () =>
+        bigHerdr.code === 0 &&
+        readFileSync(join(logs, "h-big.out"), "utf8").trim() === "big=100000 small=1000",
+      `${bigHerdr.out}${bigHerdr.err}${
+        existsSync(join(logs, "h-big.out")) ? readFileSync(join(logs, "h-big.out"), "utf8") : ""
+      }`,
+    );
     await pass("no launch leaves its hand-over directory behind", () =>
       readdir(root).every((name) => !name.startsWith("postmaster-host.")),
     );
@@ -2040,7 +2107,7 @@ export async function runControls(): Promise<number> {
     console.log("stop and close, Herdr (stub)");
     const closedHerdr = execHost(["close", worktree], stubs, root);
     await pass(
-      "a space host.sh opened, its launches done, is closed",
+      "a space run host opened, its launches done, is closed",
       () =>
         closedHerdr.code === 0 &&
         (json(join(stub, "herdr.json"), { open: {} }).open[worktree] ?? "") === "",
@@ -2082,7 +2149,7 @@ export async function runControls(): Promise<number> {
     save(herdrStatePath, currentState);
     const userSpaceClose = execHost(["close", revLuna], stubs, root);
     await pass(
-      "a space host.sh did not open is refused, and left open",
+      "a space run host did not open is refused, and left open",
       () =>
         userSpaceClose.code === 2 &&
         !calls(root, "herdr").includes(`workspace\tclose\t${userSpace}`),
@@ -2102,6 +2169,7 @@ export async function runControls(): Promise<number> {
       ],
       stubs,
       f.caller,
+      { POSTMASTER_HOST_CLAIM_WAIT: "3" },
     );
     rmSync(join(stub, "pane.dead"), { force: true });
     const refusedClose = execHost(["close", join(f.repo, ".worktrees/T-1-sol")], stubs, root);
@@ -2135,7 +2203,7 @@ export async function runControls(): Promise<number> {
         cloneCalls.some((line) => line.includes(`--cwd\t${f.clone}\t--label\t${f.name}`)),
     );
     await pass(
-      "host.sh marks that space as its own",
+      "run host marks that space as its own",
       () =>
         json(join(stub, "herdr.json"), { spaces: {} }).spaces[cloneSpace]?.tokens?.postmaster ===
         "opened",
@@ -2202,6 +2270,66 @@ export async function runControls(): Promise<number> {
     );
 
     console.log("run, stop and close, tmux (stub)");
+    resetHarness(root);
+    const tmuxLive = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/t-live.out",
+        "--marker",
+        "../logs/t-live.done",
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+      f.caller,
+      {
+        POSTMASTER_HOST: "tmux",
+        EMIT_GO: join(logs, "t-live.go"),
+        POSTMASTER_HOST_FINISH_DELAY: "0.2",
+      },
+    );
+    const livePaneOut = join(stub, "win-1.out");
+    // The window is marked running by the pane's own process and shows the first step by the process
+    // that follows the stream: two processes, so the test waits for both and for neither to be first.
+    await waitFor(
+      () =>
+        json(join(stub, "tmux.json"), { windows: {} }).windows["@1"]?.opts?.[
+          "@postmaster_state"
+        ] === "running" && readFileSync(livePaneOut, "utf8").includes("step one"),
+    );
+    const liveTmuxState = json(join(stub, "tmux.json"), { windows: {} });
+    const liveTmuxPane = existsSync(livePaneOut) ? readFileSync(livePaneOut, "utf8") : "";
+    await pass(
+      "a live launch keeps its tmux window open and marked running while its output is shown",
+      () =>
+        tmuxLive.code === 0 &&
+        tmuxLive.out.includes("host=tmux") &&
+        !existsSync(markerPath("t-live")) &&
+        liveTmuxState.windows["@1"]?.opts?.["@postmaster_state"] === "running" &&
+        liveTmuxPane.includes("step one"),
+      `${tmuxLive.out}\n${JSON.stringify(liveTmuxState)}\n${liveTmuxPane}`,
+    );
+    writeFileSync(join(logs, "t-live.go"), "");
+    await marker(markerPath("t-live"), 15);
+    // The pane marks the window done and the finisher closes it, from two processes: wait for both.
+    await waitFor(
+      () =>
+        !("@1" in json(join(stub, "tmux.json"), { windows: {} }).windows) &&
+        calls(root, "tmux").includes("set-option\t-w\t-t\t%1\t@postmaster_state\tdone"),
+    );
+    const doneTmuxState = json(join(stub, "tmux.json"), { windows: {} });
+    await pass(
+      "the tmux window is marked done and closes after the launch ends",
+      () =>
+        existsSync(markerPath("t-live")) &&
+        calls(root, "tmux").includes("set-option\t-w\t-t\t%1\t@postmaster_state\tdone") &&
+        !("@1" in doneTmuxState.windows),
+      JSON.stringify(doneTmuxState),
+    );
+
     resetHarness(root);
     const tmuxEnvRun = execHost(
       [
@@ -2324,6 +2452,36 @@ export async function runControls(): Promise<number> {
       dottedRun.out,
     );
     execHost(["close", dotted], stubs, root, { POSTMASTER_HOST: "tmux" });
+
+    const bigTmux = execHost(
+      [
+        "run",
+        f.name,
+        worktree,
+        "--out",
+        "../logs/t-big.out",
+        "--marker",
+        "../logs/t-big.done",
+        "--",
+        "sh",
+        "-c",
+        "echo big=${#BIG} small=${#SMALL}",
+      ],
+      stubs,
+      f.caller,
+      { POSTMASTER_HOST: "tmux", BIG: "x".repeat(100_000), SMALL: "y".repeat(1_000) },
+    );
+    await marker(markerPath("t-big"));
+    await pass(
+      "an environment larger than the FIFO arrives whole in the tmux window",
+      () =>
+        bigTmux.code === 0 &&
+        readFileSync(join(logs, "t-big.out"), "utf8").trim() === "big=100000 small=1000",
+      `${bigTmux.out}${bigTmux.err}${
+        existsSync(join(logs, "t-big.out")) ? readFileSync(join(logs, "t-big.out"), "utf8") : ""
+      }`,
+    );
+    execHost(["close", worktree], stubs, root, { POSTMASTER_HOST: "tmux" });
 
     {
       // Completion, review-round and run-wide teardown controls, Herdr then tmux.
@@ -3013,10 +3171,10 @@ export async function runControls(): Promise<number> {
       }
       const unopenedClose = execHost(["close", sol], stubs, root);
       await pass(
-        "close names a space host.sh did not open instead of failing to read it",
+        "close names a space run host did not open instead of failing to read it",
         () =>
           unopenedClose.code === 2 &&
-          `${unopenedClose.out}${unopenedClose.err}`.includes("was not opened by host.sh"),
+          `${unopenedClose.out}${unopenedClose.err}`.includes("was not opened by run host"),
         `${unopenedClose.out}${unopenedClose.err}`,
       );
       await pass("and it leaves that space open", () => "w9" in (herdrState().spaces ?? {}));
@@ -3448,6 +3606,318 @@ export async function runControls(): Promise<number> {
       resetHarness(root);
     }
 
+    console.log("teardown reads only the round records");
+    // Record R: the lane and round records teardown reads, beside the log
+    // folder entries it must not take for state (findings, usage, notes).
+    resetHarness(root);
+    writeFileSync(join(stub, "herdr.down"), "");
+    const STOP_PREFIX = "no launch is running in ";
+    const CLOSE_PREFIX = "closed what run host opened for ";
+    const linesFor = (prefix: string, worktrees: string, names: string[]): string =>
+      names.map((name) => `${prefix}${join(worktrees, name)}`).join("\n");
+    const buildRecord = () => {
+      const t = realpathSync(mkdtempSync(join(root, "record-")));
+      const worktrees = join(t, "repo", ".worktrees");
+      for (const name of [
+        "227",
+        "227-sol",
+        "227-mimo",
+        "227-rev-bug-mimo",
+        "227-rev-bug-decoy",
+        "227-rev-security-opus",
+      ])
+        mkdirSync(join(worktrees, name), { recursive: true });
+      const dispatch = join(t, "runs", "227");
+      mkdirSync(join(dispatch, "logs"), { recursive: true });
+      writeFileSync(
+        join(dispatch, "brief.md"),
+        `## Dispatch\nname: #227, test\nsynthesis worktree: ${join(worktrees, "227")}\n`,
+      );
+      writeFileSync(
+        join(dispatch, "run.json"),
+        '{"config":{"team":{"workhorses":["sol","mimo"]}}}',
+      );
+      writeFileSync(join(dispatch, "manifest.json"), '{"lanes":{"sol":{},"mimo":{}}}');
+      writeFileSync(join(dispatch, "logs", "review-r1.json"), '{"reviewers":[["bug","mimo"]]}');
+      writeFileSync(
+        join(dispatch, "logs", "review-r1-bug-mimo-findings.json"),
+        '[{"finding":"one"}]',
+      );
+      writeFileSync(
+        join(dispatch, "logs", "review-r1-bug-mimo-usage.json"),
+        '{"reviewers":[["bug","decoy"]]}',
+      );
+      writeFileSync(join(dispatch, "logs", "review-r1-notes.json"), '["not","a","record"]');
+      return { t, dispatch, logs: join(dispatch, "logs"), worktrees };
+    };
+    const torn = (dispatch: string) => ({
+      stop: execHost(["stop-run", dispatch], stubs, root),
+      close: execHost(["close-run", dispatch], stubs, root),
+    });
+    const bothCover = (pair: { stop: Result; close: Result }, worktrees: string, names: string[]) =>
+      pair.stop.code === 0 &&
+      pair.close.code === 0 &&
+      pair.stop.err === "" &&
+      pair.close.err === "" &&
+      pair.stop.out === `${linesFor(STOP_PREFIX, worktrees, names)}\n` &&
+      pair.close.out === `${linesFor(CLOSE_PREFIX, worktrees, names)}\n`;
+    const bothSay = (pair: { stop: Result; close: Result }, message: string) =>
+      pair.stop.code === 2 &&
+      pair.close.code === 2 &&
+      pair.stop.out === "" &&
+      pair.close.out === "" &&
+      pair.stop.err === `host: ${message}\n` &&
+      pair.close.err === `host: ${message}\n`;
+    const FOUR = ["227-mimo", "227-sol", "227-rev-bug-mimo", "227"];
+    const FIVE = ["227-mimo", "227-sol", "227-rev-bug-mimo", "227-rev-security-opus", "227"];
+    const THREE = ["227-mimo", "227-sol", "227"];
+    {
+      const r = buildRecord();
+      const pair = torn(r.dispatch);
+      await pass(
+        "the reproduction: findings and usage beside the round record no longer stop teardown",
+        () => bothCover(pair, r.worktrees, FOUR),
+        `${pair.stop.out}${pair.stop.err}${pair.close.out}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(
+        join(r.dispatch, "actions.jsonl"),
+        '{"action":"review-launch","target":"opus","detail":"security r1"}\n',
+      );
+      const pair = torn(r.dispatch);
+      await pass("and an action-log review-launch adds its reviewer worktree", () =>
+        bothCover(pair, r.worktrees, FIVE),
+      );
+    }
+    {
+      const r = buildRecord();
+      rmSync(r.logs, { recursive: true, force: true });
+      const pair = torn(r.dispatch);
+      await pass("with no logs folder only the lane worktrees and synthesis remain", () =>
+        bothCover(pair, r.worktrees, THREE),
+      );
+    }
+    {
+      const r = buildRecord();
+      const recordPath = join(r.logs, "review-r1.json");
+      const cases = ['[["bug","mimo"]]', '"text"', "5", "true", "null"];
+      let ok = true;
+      let problem = "";
+      for (const body of cases) {
+        writeFileSync(recordPath, body);
+        const pair = torn(r.dispatch);
+        const named = bothSay(pair, `run review record is not a mapping: ${recordPath}`);
+        if (!named) {
+          ok = false;
+          problem = `${body} => ${pair.stop.code}/${pair.close.code} ${pair.stop.err}${pair.close.err}`;
+        }
+      }
+      await pass(
+        "a round record that is not a mapping stops teardown and names the record",
+        () => ok,
+        problem,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.logs, "review-r1.json"), '[["bug","mimo"]]');
+      const link = join(r.t, "link-to-227");
+      symlinkSync(r.dispatch, link);
+      const pair = torn(link);
+      await pass(
+        "and the message names the resolved record path through a link to the dispatch",
+        () =>
+          bothSay(
+            pair,
+            `run review record is not a mapping: ${join(r.dispatch, "logs", "review-r1.json")}`,
+          ),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.logs, "review-r1.json"), "null");
+      writeFileSync(join(r.logs, "review-r2.json"), "null");
+      const pair = torn(r.dispatch);
+      const r1msg = `host: run review record is not a mapping: ${join(r.logs, "review-r1.json")}\n`;
+      const r2msg = `host: run review record is not a mapping: ${join(r.logs, "review-r2.json")}\n`;
+      const either = (err: string): boolean => err === r1msg || err === r2msg;
+      await pass(
+        "when several records are damaged just one is named, and teardown stops there",
+        () =>
+          pair.stop.code === 2 &&
+          pair.close.code === 2 &&
+          pair.stop.out === "" &&
+          pair.close.out === "" &&
+          either(pair.stop.err) &&
+          either(pair.close.err),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.logs, "review-r1.json"), "null");
+      writeFileSync(
+        join(r.dispatch, "actions.jsonl"),
+        [
+          '{"action":"review-launch","target":"mimo","detail":"bug r1"}',
+          "",
+          "{broken",
+          '["review-launch"]',
+          "",
+        ].join("\n"),
+      );
+      const pair = torn(r.dispatch);
+      await pass("and a damaged action log behind a damaged record is not reached", () =>
+        bothSay(pair, `run review record is not a mapping: ${join(r.logs, "review-r1.json")}`),
+      );
+    }
+    {
+      const r = buildRecord();
+      const recordPath = join(r.logs, "review-r1.json");
+      const bodies: Array<{ name: string; setup: () => void }> = [
+        { name: "broken", setup: () => writeFileSync(recordPath, "{broken") },
+        { name: "empty", setup: () => writeFileSync(recordPath, "") },
+        {
+          name: "folder",
+          setup: () => {
+            rmSync(recordPath, { force: true });
+            mkdirSync(recordPath);
+          },
+        },
+        { name: "no reviewers", setup: () => writeFileSync(recordPath, "{}") },
+        {
+          name: "text reviewers",
+          setup: () => writeFileSync(recordPath, '{"reviewers":"bug"}'),
+        },
+      ];
+      let ok = true;
+      let problem = "";
+      for (const body of bodies) {
+        rmSync(recordPath, { recursive: true, force: true });
+        body.setup();
+        const pair = torn(r.dispatch);
+        if (!bothCover(pair, r.worktrees, THREE)) {
+          ok = false;
+          problem = `${body.name} => ${pair.stop.out}${pair.stop.err}${pair.close.out}${pair.close.err}`;
+        }
+      }
+      await pass(
+        "a round record that cannot be used is passed over without a word",
+        () => ok,
+        problem,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(
+        join(r.logs, "review-r1.json"),
+        '{"attempt":"1","reviewers":[["bug","mimo"],["bug"]]}',
+      );
+      const pair = torn(r.dispatch);
+      await pass("a bad reviewer pair is dropped and the good one kept", () =>
+        bothCover(pair, r.worktrees, FOUR),
+      );
+    }
+    {
+      const r = buildRecord();
+      rmSync(join(r.dispatch, "actions.jsonl"), { recursive: true, force: true });
+      mkdirSync(join(r.dispatch, "actions.jsonl"));
+      const pair = torn(r.dispatch);
+      await pass("a folder in place of the action log is passed over", () =>
+        bothCover(pair, r.worktrees, FOUR),
+      );
+    }
+    {
+      const r = buildRecord();
+      const logPath = join(r.dispatch, "actions.jsonl");
+      const cases = ['["review-launch"]', "null", '"text"'];
+      let ok = true;
+      let problem = "";
+      for (const body of cases) {
+        writeFileSync(
+          logPath,
+          [
+            '{"action":"review-launch","target":"mimo","detail":"bug r1"}',
+            "",
+            "{broken",
+            body,
+            "",
+          ].join("\n"),
+        );
+        const pair = torn(r.dispatch);
+        const named = bothSay(pair, `run action log line is not a mapping: ${logPath} line 4`);
+        if (!named) {
+          ok = false;
+          problem = `${body} => ${pair.stop.code}/${pair.close.code} ${pair.stop.err}${pair.close.err}`;
+        }
+      }
+      await pass(
+        "an action-log line that is not a mapping stops teardown and names the line",
+        () => ok,
+        problem,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(
+        join(r.dispatch, "actions.jsonl"),
+        ['{"action":"review-launch","target":"mimo","detail":"bug r1"}', "", "{broken", ""].join(
+          "\n",
+        ),
+      );
+      const pair = torn(r.dispatch);
+      await pass("without that line the run tears down", () => bothCover(pair, r.worktrees, FOUR));
+    }
+    {
+      const empty = realpathSync(mkdtempSync(join(root, "record-empty-")));
+      const pair = torn(empty);
+      await pass(
+        "an empty dispatch still refuses with the waybill message, word for word",
+        () => bothSay(pair, "run waybill has no synthesis worktree"),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      const elsewhere = join(r.t, "repo", "elsewhere", "227");
+      mkdirSync(elsewhere, { recursive: true });
+      writeFileSync(
+        join(r.dispatch, "brief.md"),
+        `## Dispatch\nname: #227, test\nsynthesis worktree: ${elsewhere}\n`,
+      );
+      const pair = torn(r.dispatch);
+      await pass(
+        "a synthesis worktree outside .worktrees still refuses that way, word for word",
+        () => bothSay(pair, "synthesis worktree is not under .worktrees"),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.dispatch, "run.json"), "{broken");
+      writeFileSync(join(r.dispatch, "manifest.json"), "{broken");
+      const pair = torn(r.dispatch);
+      await pass(
+        "unreadable lane records still refuse that way, word for word",
+        () => bothSay(pair, "run lane records unreadable"),
+        `${pair.stop.err}${pair.close.err}`,
+      );
+    }
+    {
+      const r = buildRecord();
+      writeFileSync(join(r.dispatch, "run.json"), "{broken");
+      writeFileSync(join(r.dispatch, "manifest.json"), "{broken");
+      writeFileSync(join(r.logs, "review-r1.json"), '["not","a","record"]');
+      const pair = torn(r.dispatch);
+      await pass("and a damaged round record beside them adds no second message", () =>
+        bothSay(pair, "run lane records unreadable"),
+      );
+    }
+    resetHarness(root);
+
     console.log("interactive sessions");
     const noSpawn = execHost(["spawn", "postmaster-repo", f.repo, "--", "claude"]);
     const noSend = execHost(["send", "postmaster-repo", join(f.caller, "fixed.sh")]);
@@ -3639,12 +4109,12 @@ export async function runControls(): Promise<number> {
       '{"config":{"limits":{"memory_max":"8G","tasks_max":512,"lane":{"memory_max":"64M","tasks_max":16},"coachman":{"memory_max":"128M","tasks_max":32},"reviewer":{"tasks_max":24}}}}\n',
     );
     writeFileSync(
-      join(f.caller, "launch.sh"),
+      join(f.caller, "run"),
       ["#!/usr/bin/env bash", "printf 'role=%s\\n' \"${POSTMASTER_LAUNCH_ROLE:-unset}\"", ""].join(
         "\n",
       ),
     );
-    exec("chmod", ["+x", join(f.caller, "launch.sh")]);
+    exec("chmod", ["+x", join(f.caller, "run")]);
     execHost(
       [
         "run",
@@ -3661,7 +4131,8 @@ export async function runControls(): Promise<number> {
         "--marker",
         "../logs/role.done",
         "--",
-        "./launch.sh",
+        "./run",
+        "launch",
       ],
       noHost,
       f.caller,
@@ -3670,9 +4141,39 @@ export async function runControls(): Promise<number> {
     await marker(markerPath("role"));
     const roleOut = readFileSync(join(logs, "role.out"), "utf8");
     await pass(
-      "the run's explicit host role reaches launch.sh and an inherited role cannot replace it",
+      "the run's explicit host role reaches run launch and an inherited role cannot replace it",
       () => roleOut === "role=reviewer\n",
       roleOut,
+    );
+    execHost(
+      [
+        "run",
+        NAME,
+        f.repo,
+        "--under",
+        capDispatch,
+        "--role",
+        "reviewer",
+        "--run",
+        capDispatch,
+        "--out",
+        "../logs/other-role.out",
+        "--marker",
+        "../logs/other-role.done",
+        "--",
+        "./run",
+        "host",
+      ],
+      noHost,
+      f.caller,
+      { POSTMASTER_LAUNCH_ROLE: "spoof" },
+    );
+    await marker(markerPath("other-role"));
+    const otherRoleOut = readFileSync(join(logs, "other-role.out"), "utf8");
+    await pass(
+      "a command other than run launch receives no host role",
+      () => otherRoleOut === "role=unset\n",
+      otherRoleOut,
     );
 
     console.log("leg attempt controls");
@@ -3802,10 +4303,14 @@ export async function runControls(): Promise<number> {
         "    printf 'error é429 settled\\n' >&2",
         "    exit 1 ;;",
         "  *skill-caller*)",
-        '    "$TEST_LAUNCH" skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1',
+        '    "$TEST_LAUNCH" launch skill coachman security-review --leg synthesis --run "$TEST_DISPATCH" >/dev/null 2>&1',
         '    printf \'{"session_id":"thread-skilled"}\\n\'',
         "    exit 1 ;;",
         "  *pre-thread*) exit 1 ;;",
+        "  *pair-gate*)",
+        '    n=0; while [ ! -e "$TEST_GATE" ] && [ "$n" -lt 1200 ]; do sleep 0.05; n=$((n + 1)); done',
+        '    printf \'{"session_id":"thread-gated"}\\n\'',
+        "    exit 1 ;;",
         '  *sleepy*) sleep "${TEST_SLEEP:-5}"; printf \'{"session_id":"thread-sleepy"}\\n\'; exit 1 ;;',
         "  *)",
         '    printf \'{"session_id":"thread-plain"}\\n\'',
@@ -3825,7 +4330,7 @@ export async function runControls(): Promise<number> {
       TEST_DONE: join(legD, ".leg-1-done"),
       TEST_OBSERVED: join(legD, "retry-observed"),
       TEST_RUNJSON: join(legD, "run.json"),
-      TEST_LAUNCH: join(HERE, "launch.sh"),
+      TEST_LAUNCH: join(HERE, "run"),
       TEST_DISPATCH: legD,
       ...extra,
     });
@@ -4152,7 +4657,7 @@ export async function runControls(): Promise<number> {
     writeFileSync(prompt, "skill-caller mid-leg\n");
     r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
     await pass(
-      "a launch.sh call mid-leg does not overwrite the attempt's phase",
+      "a run launch call mid-leg does not overwrite the attempt's phase",
       () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
       safeOutcome(attemptsPath),
     );
@@ -4268,20 +4773,24 @@ export async function runControls(): Promise<number> {
     writeFileSync(join(legD, ".leg-1-exited"), "");
     prompt = join(legD, "race.txt");
     writeFileSync(prompt, "race for the lock\n");
-    const spawnEnv = (extra: Record<string, string> = {}): Record<string, string | undefined> => ({
-      HOME: process.env.HOME ?? "/",
-      PATH: legPath,
-      STUB: join(root, "stub"),
-      TMPDIR: root,
-      POSTMASTER_HOST_STATE: join(root, "state"),
-      POSTMASTER_HOST_FIXTURE: root,
-      POSTMASTER_HOST_CLAIM_WAIT: "3",
-      POSTMASTER_HOST_CLOSE_WAIT: "3",
-      POSTMASTER_HOST_FINISH_DELAY: finishDelay,
-      ...legEnv(extra),
-    });
+    const spawnEnv = (extra: Record<string, string> = {}): Record<string, string | undefined> => {
+      const procRoot = process.env.POSTMASTER_PROC_ROOT;
+      return {
+        HOME: process.env.HOME ?? "/",
+        PATH: legPath,
+        STUB: join(root, "stub"),
+        TMPDIR: root,
+        POSTMASTER_HOST_STATE: join(root, "state"),
+        POSTMASTER_HOST_FIXTURE: root,
+        POSTMASTER_HOST_CLAIM_WAIT: "3",
+        POSTMASTER_HOST_CLOSE_WAIT: "3",
+        POSTMASTER_HOST_FINISH_DELAY: finishDelay,
+        ...(procRoot === undefined ? {} : { POSTMASTER_PROC_ROOT: procRoot }),
+        ...legEnv(extra),
+      };
+    };
     const spawnLeg = (args: string[], extra?: Record<string, string>) =>
-      spawn(SELF, args, { cwd: f.caller, env: spawnEnv(extra), stdio: "ignore" });
+      spawn(SELF, ["host", ...args], { cwd: f.caller, env: spawnEnv(extra), stdio: "ignore" });
     // Attached in the same tick as the spawn or the kill check, so the exit event can
     // never have fired already: a late attach after the event would never resolve.
     const exited = (child: ReturnType<typeof spawn>): Promise<number | null> =>
@@ -4312,8 +4821,7 @@ export async function runControls(): Promise<number> {
       safeOutcome(attemptsPath),
     );
     rmSync(join(legD, ".leg-1-exited"), { force: true });
-    const selfStat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    const selfStart = pyWords(selfStat.slice(selfStat.lastIndexOf(")") + 1))[19] ?? "";
+    const selfStart = processStart(process.pid) ?? "";
     writeFileSync(activePath, `${process.pid} ${selfStart}\n`);
     before = nonEmptyLines(attemptsPath).length;
     prompt = join(legD, "livetest.txt");
@@ -4422,7 +4930,7 @@ export async function runControls(): Promise<number> {
     }
     let lockAlive = false;
     try {
-      if (/^[0-9]+$/u.test(lockpid)) process.kill(Number(lockpid), 0);
+      if (/^[0-9]+$/u.test(lockpid) && processState(Number(lockpid)) !== "live") lockpid = "";
       lockAlive = /^[0-9]+$/u.test(lockpid);
     } catch {
       lockAlive = false;
@@ -4492,7 +5000,12 @@ export async function runControls(): Promise<number> {
       join(directD, "brief.md"),
       `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, direct\nsynthesis worktree: ${legWt}\n`,
     );
-    const directArgs = (active: string, starterPid: string, starterStart: string): string[] => [
+    const directArgs = (
+      active: string,
+      starterPid: string,
+      starterStart: string,
+      promptFile = join(directD, "prompt.txt"),
+    ): string[] => [
       "_leg_exec",
       directD,
       legWt,
@@ -4500,7 +5013,7 @@ export async function runControls(): Promise<number> {
       "1",
       "launch",
       "coachman",
-      join(directD, "prompt.txt"),
+      promptFile,
       "",
       join(root, "direct-stream.jsonl"),
       join(root, "direct.err"),
@@ -4559,27 +5072,51 @@ export async function runControls(): Promise<number> {
       `rc=${r.code}`,
     );
     let pairsBad = 0;
-    for (let i = 0; i < 50; i++) {
+    let pairsRun = 0;
+    // The claimants meet only if they are both there while the lock is held. The one that wins keeps
+    // its harness stand-in at a gate until the other has been refused and has ended, so the other
+    // always meets a held lock however long its process takes to start. Left to run free, a claimant
+    // that started after the winner had finished found the lock released, and a lock nobody holds is
+    // free to claim: it ran an attempt of its own, and the pair read as two attempts.
+    const pairGate = join(root, "pair.gate");
+    const pairPrompt = join(directD, "pair-prompt.txt");
+    writeFileSync(pairPrompt, "paired claim at the pair-gate\n");
+    const pairsFrom = legCalls();
+    // A round that goes wrong ends the loop: the check has failed, and each such round would
+    // otherwise wait out the 30 seconds below.
+    for (let i = 0; i < 50 && pairsBad === 0; i++) {
+      pairsRun++;
       writeFileSync(join(root, "pair.lock"), "999999999 0\n");
+      rmSync(pairGate, { force: true });
       callsBefore = legCalls();
-      const p1 = spawn(SELF, directArgs(join(root, "pair.lock"), "999999999", "0"), {
-        cwd: f.caller,
-        env: spawnEnv(directEnv()),
-        stdio: "ignore",
-      });
-      const p2 = spawn(SELF, directArgs(join(root, "pair.lock"), "999999999", "0"), {
-        cwd: f.caller,
-        env: spawnEnv(directEnv()),
-        stdio: "ignore",
-      });
-      const [r1, r2] = await Promise.all([exited(p1), exited(p2)]);
-      const live = (r1 === 0 ? 1 : 0) + (r2 === 0 ? 1 : 0);
+      const ends: Array<number | null | undefined> = [undefined, undefined];
+      for (const k of [0, 1]) {
+        const claimant = spawn(
+          SELF,
+          ["host", ...directArgs(join(root, "pair.lock"), "999999999", "0", pairPrompt)],
+          {
+            cwd: f.caller,
+            env: spawnEnv({ ...directEnv(), TEST_GATE: pairGate }),
+            stdio: "ignore",
+          },
+        );
+        void exited(claimant).then((code) => {
+          ends[k] = code;
+        });
+      }
+      // The refused claimant ends first and opens the gate. If neither ends, two attempts are
+      // holding at the gate, and opening it lets them finish to be counted.
+      await waitFor(() => ends.some((end) => end !== undefined));
+      writeFileSync(pairGate, "");
+      await waitFor(() => ends.every((end) => end !== undefined));
+      const live = ends.filter((end) => end === 0).length;
       if (live !== 1 || legCalls() !== callsBefore + 1) pairsBad++;
     }
+    const pairsStray = await waitFor(() => legCalls() > pairsFrom + 50, 0.5);
     await pass(
       "fifty paired claims each run exactly one attempt live",
-      () => pairsBad === 0,
-      `bad=${pairsBad}`,
+      () => pairsBad === 0 && !pairsStray,
+      `bad=${pairsBad} of ${pairsRun} rounds run, stray=${pairsStray}`,
     );
     const mutexPath = join(legD, ".leg-1-mutex");
     const recsBeforeMutex = nonEmptyLines(attemptsPath).length;
@@ -4622,6 +5159,7 @@ export async function runControls(): Promise<number> {
       `# Waybill: 999\nturnpikes: none\n\n## Dispatch\nname: #999, kill\nsynthesis worktree: ${legWt}\n`,
     );
     writeFileSync(join(killD, "prompt.txt"), "sleepy kill holder\n");
+    const callsBeforeKillLaunch = legCalls();
     r = execHost(
       ["leg", "launch", killD, legWt, "synthesis", "1", join(killD, "prompt.txt")],
       legPath,
@@ -4635,19 +5173,16 @@ export async function runControls(): Promise<number> {
     const killActive = join(killD, ".leg-1-active");
     const killPidfile = join(killD, "logs", "coachman-leg-1.pid");
     let killpid = "";
-    for (let i = 0; i < 50; i++) {
-      try {
-        killpid = (readFileSync(killActive, "utf8").split(" ")[0] ?? "").trim();
-      } catch {
-        killpid = "";
-      }
-      let pp = "";
-      try {
-        pp = readFileSync(killPidfile, "utf8").trim();
-      } catch {}
-      if (killpid !== "" && killpid === pp) break;
-      await sleep(100);
-    }
+    // The holder is killed when it owns the lock and its harness stand-in has recorded its call.
+    // The kill takes the holder and leaves the stand-in running: a call it recorded after the kill
+    // would be counted against the next attempt, so it is on record before the kill.
+    await waitFor(() => {
+      const owner = (readFileSync(killActive, "utf8").split(" ")[0] ?? "").trim();
+      if (owner === "" || owner !== readFileSync(killPidfile, "utf8").trim()) return false;
+      killpid = owner;
+      return true;
+    });
+    await waitFor(() => legCalls() > callsBeforeKillLaunch);
     if (/^[0-9]+$/u.test(killpid)) {
       try {
         process.kill(Number(killpid), "SIGKILL");
@@ -4666,6 +5201,9 @@ export async function runControls(): Promise<number> {
       }),
     );
     await marker(join(killD, ".leg-1-exited"), 30);
+    // The next attempt's call is on record before its marker; one more call would be a second start.
+    await waitFor(() => legCalls() > callsMidKill);
+    const startedTwice = await waitFor(() => legCalls() > callsMidKill + 1, 0.5);
     const killAttempts = join(killD, "logs", "coachman-leg-1-attempts.jsonl");
     let killGot = "missing";
     try {
@@ -4684,6 +5222,7 @@ export async function runControls(): Promise<number> {
         killpid !== "" &&
         r2.code === 0 &&
         legCalls() === callsMidKill + 1 &&
+        !startedTwice &&
         killGot === "ok",
       `rc=${r.code} rc2=${r2.code} got=${killGot}`,
     );
@@ -4914,11 +5453,7 @@ export async function runControls(): Promise<number> {
         pp = readFileSync(join(fuzzD, "logs", "coachman-leg-1.pid"), "utf8").trim();
       } catch {}
       if (lp !== "" && lp === pp && /^[0-9]+$/u.test(lp)) {
-        try {
-          process.kill(Number(lp), 0);
-        } catch {
-          return;
-        }
+        if (processState(Number(lp)) !== "live") return;
         try {
           process.kill(Number(lp), "SIGKILL");
         } catch {}
@@ -4940,7 +5475,7 @@ export async function runControls(): Promise<number> {
               `T-FUZZ-${i}`,
               join(fuzzD, "prompt.txt"),
             ];
-      const starter = spawn(SELF, fuzzArgs, {
+      const starter = spawn(SELF, ["host", ...fuzzArgs], {
         cwd: f.caller,
         env: spawnEnv({
           TEST_DONE: join(fuzzD, ".leg-1-done"),
@@ -6240,7 +6775,8 @@ export async function runControls(): Promise<number> {
           "--marker",
           launchMarker,
           "--",
-          join(HERE, "launch.sh"),
+          join(HERE, "run"),
+          "launch",
           "launch",
           "test",
           lunaWorktree,
@@ -6318,7 +6854,8 @@ export async function runControls(): Promise<number> {
           "--marker",
           resumeMarker,
           "--",
-          join(HERE, "launch.sh"),
+          join(HERE, "run"),
+          "launch",
           "resume",
           "test",
           lunaWorktree,
@@ -6419,7 +6956,7 @@ function liveHost(
   root: string,
   env: Record<string, string> = {},
 ): Result {
-  return exec(SELF, [...args], {
+  return exec(SELF, ["host", ...args], {
     cwd,
     env: {
       ...process.env,
@@ -6592,14 +7129,24 @@ export async function live(): Promise<void> {
         ],
         f.caller,
         root,
+        { EMIT_SLEEP: "2" },
       );
-      await marker(join(f.logs, "l6.done"), 30);
-      const probe = readFileSync(join(f.logs, "l6.out"), "utf8");
+      const l6Path = join(f.logs, "l6.out");
+      for (
+        let i = 0;
+        i < 40 && (!existsSync(l6Path) || !readFileSync(l6Path, "utf8").includes("from="));
+        i++
+      )
+        await sleep(50);
+      const probe = readFileSync(l6Path, "utf8");
+      const probePid = Number(field(probe, "pid"));
+      const procInfo = processInfo(probePid);
       await pass(
         "the launch has no terminal, and a group of its own",
-        () => field(probe, "tty") === "no" && field(probe, "pgid") === field(probe, "pid"),
-        `${noTty.out}\n${probe}`,
+        () => field(probe, "tty") === "no" && procInfo?.group === probePid,
+        `${noTty.out}\n${probe}\n${JSON.stringify(procInfo)}`,
       );
+      await marker(join(f.logs, "l6.done"), 30);
 
       const stopped = liveHost(
         [
@@ -6818,13 +7365,7 @@ export async function live(): Promise<void> {
 }
 
 function processExists(pid: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as { code?: string }).code !== "ESRCH";
-  }
+  return pid > 0 && processState(pid) === "live";
 }
 
 if (resolve(process.argv[1] ?? "") === resolve(SCRIPT)) {

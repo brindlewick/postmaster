@@ -4,10 +4,10 @@
 // The postmaster writes the result into the waybill's Team section, and the coachman reads it
 // back from there, so a run keeps the reviewers it was dispatched with.
 //
-//   reviewers.sh lines [--config <path>] [--project <repo>]   the waybill's reviewer lines, from the config (or the project's effective config)
-//   reviewers.sh eligible <lens> [--config <path>] [--project <repo>]  configured lanes for a lens, checked for eligibility
-//   reviewers.sh lanes <waybill> <lens>    the lanes for one lens, one per line, from a waybill
-//   reviewers.sh lenses                    the lenses, in the order the review stage runs them
+//   run reviewers lines [--config <path>] [--project <repo>]   the waybill's reviewer lines, from the config (or the project's effective config)
+//   run reviewers eligible <lens> [--config <path>] [--project <repo>]  configured lanes for a lens, checked for eligibility
+//   run reviewers lanes <waybill> <lens>    the lanes for one lens, one per line, from a waybill
+//   run reviewers lenses                    the lenses, in the order the review stage runs them
 //
 // `lines` prints `reviewers: <lane>, <lane>`, a `bug reviewers:` line containing only eligible
 // lanes, then each other lens the config gives its own lanes. `eligible` resolves a configured
@@ -25,6 +25,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readTomlFile } from "./lib/data.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 import { PY_DOT, PY_S_CLASS, pySplitLines, pyTrim } from "./lib/text.ts";
@@ -40,7 +41,7 @@ interface CmdResult {
 
 function usage(): never {
   console.error(
-    "usage: reviewers.sh lines [--config <path>] [--project <repo>] | eligible <lens> [--config <path>] [--project <repo>] | lanes <waybill> <lens> | lenses",
+    "usage: run reviewers lines [--config <path>] [--project <repo>] | eligible <lens> [--config <path>] [--project <repo>] | lanes <waybill> <lens> | lenses",
   );
   process.exit(1);
 }
@@ -50,7 +51,7 @@ function isLens(s: string): s is Lens {
 }
 
 function hasForm(harness: string): boolean {
-  return run("bash", [join(scriptsDir(import.meta), "review-forms.sh"), "has", harness]).code === 0;
+  return run(join(scriptsDir(import.meta), "run"), ["review-forms", "has", harness]).code === 0;
 }
 
 /** resolved <lines|eligible> <config> [lens] [project]: the reviewer lines or one lens's lanes. */
@@ -70,24 +71,20 @@ function resolved(
     err.push(msg);
     return { code: 2, out: "", err: `${err.join("\n")}\n` };
   };
-  if (!existsSync(configPath)) {
-    return fail1(`reviewers: no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
-  }
   let cfg: Record<string, unknown>;
   if (project !== "") {
-    const r = run("bash", [
-      join(scriptsDir(import.meta), "project-settings.sh"),
-      "effective",
-      project,
-      configPath,
-    ]);
-    if (r.code !== 0) return { code: 1, out: "", err: r.err };
-    try {
-      cfg = JSON.parse(r.out);
-    } catch (e) {
-      return fail1(`reviewers: ${configPath} does not parse: ${String(e)}`);
+    // With --project the loader decides: a complete project file needs no global config.
+    const resolved = effectiveConfigForProject(project, configPath);
+    if (resolved.notice !== null) err.push(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      err.push(`reviewers: ${resolved.error ?? "cannot resolve project settings"}`);
+      return { code: 1, out: "", err: `${err.join("\n")}\n` };
     }
+    cfg = resolved.config;
   } else {
+    if (!existsSync(configPath)) {
+      return fail1(`reviewers: no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
+    }
     try {
       cfg = readTomlFile(configPath);
     } catch (e) {
@@ -158,7 +155,11 @@ function resolved(
         out.push(`${lens} reviewers: ${eligibleFor(lens).join(", ")}`);
       }
     }
-    return { code: 0, out: `${out.join("\n")}\n`, err: "" };
+    return {
+      code: 0,
+      out: `${out.join("\n")}\n`,
+      err: err.join("\n") === "" ? "" : `${err.join("\n")}\n`,
+    };
   }
   if (!isLens(selected)) {
     return fail2(`reviewers: ${selected} is not a lens (one of: ${LENSES.join(", ")})`);
@@ -172,7 +173,11 @@ function resolved(
     }
     return fail2(`reviewers: ${selected} has no configured reviewers`);
   }
-  return { code: 0, out: `${names.join("\n")}\n`, err: "" };
+  return {
+    code: 0,
+    out: `${names.join("\n")}\n`,
+    err: err.join("\n") === "" ? "" : `${err.join("\n")}\n`,
+  };
 }
 
 export function lines(configPath: string, project = ""): CmdResult {
@@ -252,8 +257,7 @@ function printResult(r: CmdResult): never {
 }
 
 // --- entry ------------------------------------------------------------------------------
-const CONFIG =
-  process.env.POSTMASTER_CONFIG ?? join(process.env.HOME ?? "", ".postmaster/config.toml");
+const CONFIG = globalConfigPath();
 
 function configFlags(args: string[]): [string, string] {
   let configPath = CONFIG;

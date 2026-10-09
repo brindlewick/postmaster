@@ -1,3 +1,6 @@
-# Tool-owned and deliberately empty: every scripts/*.sh wrapper runs bun with
-# --config pointing here and --no-env-file, so no bunfig.toml and no .env is
-# ever discovered from a working directory the tool does not own.
+# Tool-owned: scripts/run runs bun with --config pointing here and --no-env-file, so no
+# bunfig.toml and no .env is ever discovered from a working directory the tool does not own.
+# Only `bun test` reads the table below.
+
+[test]
+preload = ["./scripts/lib/test-defaults.ts"]

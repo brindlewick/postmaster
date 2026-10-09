@@ -59,25 +59,16 @@ function executable(name: string): string {
   throw new Error("required executable was not found");
 }
 
-test("C1 wrappers match host.sh and a direct Bun range scan needs only Bun, git and a shell", () => {
+test("C1 entries run through scripts/run with no python, and a direct Bun range scan needs only Bun, git and a shell", () => {
   const scripts = ["scrub-check", "tree-check", "raw-promote", "scrub-rewrite", "verify-merge"];
-  const host = readFileSync(join(ROOT, "scripts", "host.sh"), "utf8");
   for (const name of scripts) {
-    expect(readFileSync(join(ROOT, "scripts", `${name}.sh`), "utf8")).toBe(
-      host.replaceAll("host.ts", `${name}.ts`),
-    );
+    expect(existsSync(join(ROOT, "scripts", `${name}.sh`))).toBe(false);
+    const help = spawnSync(join(ROOT, "scripts", "run"), [name, "--help"], { encoding: "utf8" });
+    expect(help.status).toBe(0);
   }
   const grep = spawnSync(
     "grep",
-    [
-      "-i",
-      "-l",
-      "python",
-      ...scripts.flatMap((name) => [
-        join(ROOT, "scripts", `${name}.ts`),
-        join(ROOT, "scripts", `${name}.sh`),
-      ]),
-    ],
+    ["-i", "-l", "python", ...scripts.map((name) => join(ROOT, "scripts", `${name}.ts`))],
     { encoding: "utf8" },
   );
   expect(grep.status).toBe(1);
@@ -796,12 +787,12 @@ test("C27 --files and raw promotion stream a 175 MB file below 512 MB", () => {
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
     });
-  const scan = withinLimit(join(ROOT, "scripts/scrub-check.sh"), ["--files", file]);
+  const scan = withinLimit(join(ROOT, "scripts/run"), ["scrub-check", "--files", file]);
   expect(scan.status).toBe(0);
   expect(scan.stdout).toBe("");
   expect(scan.stderr).toBe("");
 
-  const promoted = withinLimit(join(ROOT, "scripts/raw-promote.sh"), [source, "raw/large"]);
+  const promoted = withinLimit(join(ROOT, "scripts/run"), ["raw-promote", source, "raw/large"]);
   expect(promoted.status).toBe(0);
   expect(promoted.stdout).toBe("");
   expect(promoted.stderr).toBe("");

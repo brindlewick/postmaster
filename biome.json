@@ -14,6 +14,18 @@
   },
   "overrides": [
     {
+      "includes": ["scripts/lib/vendor/**"],
+      "formatter": {
+        "enabled": false
+      },
+      "linter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["scripts/fixtures/**"],
       "formatter": {
         "enabled": false

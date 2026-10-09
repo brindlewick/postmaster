@@ -1,0 +1,56 @@
+## control: a wrong expectation must be reported as FAIL
+control ok: FAIL  control, wrong exit code
+## add
+PASS  add: one task
+PASS  add: words are joined
+PASS  add: the joined text is stored
+PASS  add: file ends in a newline
+PASS  add: file is indented by two spaces
+PASS  add: text is trimmed, id follows the highest
+PASS  add: trimmed text stored
+PASS  add: proof file holds a block per command
+## list
+PASS  list: lines
+PASS  list: read-only
+PASS  list: done marker
+PASS  list: empty
+PASS  list: an argument is a usage error
+PASS  list: --json is a usage error
+## done
+PASS  done: mark
+PASS  done: again
+PASS  done: missing id
+PASS  done: missing id leaves the list as it was
+PASS  done: id form 01
+PASS  done: id form 1.5
+PASS  done: id form -1
+PASS  done: id form 1e3
+PASS  done: id form one
+PASS  done: two ids
+## usage
+PASS  usage: no arguments
+PASS  usage: help
+PASS  usage: blank add
+PASS  usage: --help
+PASS  usage: --version
+## store
+PASS  store: the file TODO_FILE names holds the task
+PASS  store: not JSON
+PASS  store: not JSON, file left as it was
+PASS  store: JSON that is not a list
+PASS  store: no leftover tmp file
+PASS  store: default is todo.json in the working directory
+PASS  store: an empty TODO_FILE also means todo.json
+PASS  store: todo.json is git-ignored
+
+claims checked: 37, held: 37, failed: 0
+
+## race: 30 parallel adds on one list file, three rounds (the map says a task can be lost)
+round 1: 30 adds ran, 11 tasks stored, 0 repeated ids
+round 2: 30 adds ran, 6 tasks stored, 0 repeated ids
+round 3: 30 adds ran, 8 tasks stored, 0 repeated ids
+
+## cleanup, then confirm the proof survives
+removed 7 list file(s); proof kept in <scratch>/todo-verify-proof
+lists folder: gone
+proof files: add1.txt ctl.txt done1.txt list1.txt list2.txt store1.txt u1.txt 

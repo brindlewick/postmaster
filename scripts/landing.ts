@@ -2,7 +2,7 @@
 // predicates in prose; what it prints is the answer, and prose carries only what an agent must
 // judge, such as putting a non-pass to the user.
 //
-//   landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha>
+//   run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha>
 //       --card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>]
 //       whether the ticket branch already landed. `landed` when the default branch contains
 //       the ticket's HEAD and that HEAD is not the run's BASE, or when the provider reports
@@ -17,23 +17,23 @@
 //       otherwise differ, or when a reported merge names another head: a reported
 //       head that does not resolve locally names another head too, since the card's
 //       HEAD resolved. Otherwise `not-landed`.
-//   landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
+//   run landing anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>
 //       whether the branch holds anything to land. `nothing-to-land` when the ticket's diff
 //       against BASE is empty (its HEAD is BASE, whatever the default branch holds), or when
 //       the default branch contains its HEAD. Otherwise `land`: a squash merge the provider
 //       did not report is out of scope, and the pull request shows a person what landed.
-//   landing.sh fresh --repo <repo> --default <branch> --ticket <ref>
+//   run landing fresh --repo <repo> --default <branch> --ticket <ref>
 //       --dispatch <dispatch> --wt <synthesis-wt>
 //       whether the ticket is fresh to land. Prints `fresh` when the ticket branch contains
-//       the current default branch, the worktree is at the ticket's head, and `verify.sh
+//       the current default branch, the worktree is at the ticket's head, and `run verify
 //       results` shows the gate passing at that head. Otherwise one fault line each for the
 //       head the worktree is not at, the default branch the ticket lacks, and the gate
 //       that is not passing.
-//   landing.sh results <dispatch> <synthesis-wt>
+//   run landing results <dispatch> <synthesis-wt>
 //       every recorded check's result at the worktree's HEAD, one `name: result` line each,
 //       as the cards carry them. This is the one place the vocabulary mapping lives:
 //       `no result logged` reads as `not run`, and the `at ...` suffix is dropped.
-//   landing.sh card-block <dispatch> <synthesis-wt> <checkpoint>
+//   run landing card-block <dispatch> <synthesis-wt> <checkpoint>
 //       the card's checked sections rendered from their sources as one exact block of
 //       text: `## Checks` with one `- <name>: <result>` bullet per recorded check in
 //       recorded order, then `## Open findings` with one `- [<severity>] <id>` bullet
@@ -46,44 +46,63 @@
 //       (`[` plus severity digit, an id, then a colon or end of line), that is not
 //       such a finding is an input fault. A fence marker line is an input fault too.
 //       The review leg writes this block into the card verbatim. Prints the block.
-//   landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>
-//   landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>
+//   run landing card-results <dispatch> <synthesis-wt> <checkpoint> <card>
+//   run landing card-findings <dispatch> <synthesis-wt> <checkpoint> <card>
 //       whether the card holds the block `card-block` renders, as an exact, contiguous
 //       byte string, found once. Nothing is parsed: a card holding `<!--` anywhere is an
 //       input fault, and otherwise a card whose block differs in any way, or that holds
 //       it never or more than once, is an input fault, never `match`. A card quoting
 //       `<!--` escapes it, for example as `&lt;!--`. A copy inside a
 //       code fence is text a reader sees, so it counts like any other copy.
-//   landing.sh card-open <checkpoint>
+//   run landing card-open <checkpoint>
 //       the checkpoint's open P1 and P2 findings, one `- [<severity>] <id>` bullet
 //       each, or `none`. Open P3 residue prints `none`: it lands.
-//   landing.sh journey <dispatch> <synthesis-wt> <waybill>
+//   run landing journey <dispatch> <synthesis-wt> <waybill>
 //       whether the journey holds landing. Whether the waybill mentions a user journey
-//       is asked of `ticket-check.sh --has-journey`, the flow's one reading of a ticket.
+//       is asked of `run ticket-check --has-journey`, the flow's one reading of a ticket.
 //       `clear` when no check's source names `web-journey`, or when the report exists and
 //       the journey check passed. `blocked` when the waybill mentions one, a check uses
 //       `web-journey`, and the report is missing or the check did not run: missing
 //       evidence, not a result to weigh. `judge` when the waybill mentions none, or the
 //       journey check failed with its report written: the postmaster weighs it like any
 //       other non-pass.
+//   run landing switch-offs --repo <repo> --default <branch> --ticket <ref>
+//       [--dispatch <dispatch>]
+//       every switch-off comment the run adds, and every change to the settings of
+//       the project's checks, compared between the ticket head and its merge base
+//       with the default branch. The first line is `clear` when the branch adds
+//       nothing or every entry carries the user's recorded approval, `held` when
+//       entries wait on the user's word, `no reason` when any lacks its reason,
+//       and `refused` when the user refused any. The rest is the `## Switch-offs`
+//       section: one line per comment with its file, line, form, rules, reason
+//       and identity, and one per settings change with its diff; approved entries
+//       are marked. Without --dispatch no approval can match, so any entry holds.
+//       An approval names the run, the identity and the user's words, written
+//       through `run log-action` so it sits in the run's actions and the
+//       project's ledger alike.
 //
 //   exit 0  already-landed, anything-to-land, results, card-block, card-open: the answer,
 //           printed; card-results, card-findings: `match`; journey: `clear` or `judge`;
-//           fresh: `fresh`
+//           fresh: `fresh`; switch-offs: `clear`
 //   exit 1  usage; a resolving input that does not resolve (--default, --base,
 //           --card-head, --local-ticket, --pr-merge, and --ticket without a
 //           report: --pr-head answers `re-verify` instead); a file that cannot
 //           be read; checks
-//           that cannot be recorded-read; `verify.sh results`, `journey-path` or
-//           `ticket-check.sh --has-journey` failing; a checkpoint whose structure cannot
+//           that cannot be recorded-read; `run verify results`, `journey-path` or
+//           `run ticket-check --has-journey` failing; a checkpoint whose structure cannot
 //           be read (a duplicate id, a finding-shaped line that is not a finding, an
 //           unreadable state, a fence marker line, or a quoted line); a card holding an
 //           HTML comment or not holding the rendered block exactly once
-//   exit 2  fresh: the faults, one line each; journey: `blocked`
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+//   exit 2  fresh: the faults, one line each; journey: `blocked`; switch-offs: `held`
+//   exit 3  switch-offs: `no reason`
+//   exit 4  switch-offs: `refused`
+import { readFileSync, readdirSync } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { inspectSwitchOffs } from "./lib/switch-offs.ts";
 import { run } from "./lib/proc.ts";
+import { runMode } from "./lib/run-mode.ts";
+import { physical, reachActions } from "./reach.ts";
 import { errorText, isDraftRecord, safePath } from "./scrub-report.ts";
 import {
   D_CLASS,
@@ -96,8 +115,8 @@ import {
 } from "./lib/text.ts";
 
 const SCRIPTS = scriptsDir(import.meta);
-const VERIFY = join(SCRIPTS, "verify.sh");
-const TICKET_CHECK = join(SCRIPTS, "ticket-check.sh");
+const VERIFY = join(SCRIPTS, "run");
+const TICKET_CHECK = join(SCRIPTS, "run");
 
 // The bash revision unsets these for the whole script; the port drops them on every git,
 // verify and ticket-check call instead.
@@ -269,12 +288,12 @@ function load(path: string): string {
 // --- results and checkpoints -------------------------------------------------------------
 type CheckResult = [string, string];
 
-/** [(name, result)]: verify.sh results with the mapping read. Only exit 1 fails the
+/** [(name, result)]: run verify results with the mapping read. Only exit 1 fails the
  * read; any other exit still parses the lines, as BASE does. */
 function recordedResults(dispatch: string, wt: string): CheckResult[] {
-  const r = run(VERIFY, ["results", dispatch, wt], { env: UNSET_GIT });
+  const r = run(VERIFY, ["verify", "results", dispatch, wt], { env: UNSET_GIT });
   if (r.code === 1)
-    die(`verify.sh results failed: ${pyTrim(r.err) || pyTrim(r.out) || "no output"}`);
+    die(`run verify results failed: ${pyTrim(r.err) || pyTrim(r.out) || "no output"}`);
   const out: CheckResult[] = [];
   for (const line of pySplitLines(r.out)) {
     const m = RESULT_LINE.exec(line);
@@ -287,7 +306,7 @@ function recordedResults(dispatch: string, wt: string): CheckResult[] {
       out.push([m[1] ?? "", w[1] ?? ""]);
     }
   }
-  if (out.length === 0) die("verify.sh results reported no checks");
+  if (out.length === 0) die("run verify results reported no checks");
   return out;
 }
 
@@ -342,6 +361,119 @@ function checkpointStates(path: string): CheckpointFinding[] {
   return out;
 }
 
+/** Card-safe path text: no comment opener, no code-span break, one line. */
+function escapeCardPath(shown: string): string {
+  return shown
+    .replace(/<!--/gu, "&lt;!--")
+    .replace(/`/gu, "'")
+    .replace(/\r\n|\r|\n/gu, "\\n");
+}
+
+function reachPath(dispatch: string, path: unknown): string {
+  if (typeof path !== "string" || path === "") return "unknown path";
+  if (path.startsWith("refs/")) {
+    // Only a clean ref prints verbatim: a refs/-shaped unresolved token can
+    // smuggle machine paths past the non-absolute redaction below (bug-64).
+    // None of these characters occur in the run refs the check records.
+    if (path.includes("..") || /[~$*?[\]`'"\\]/u.test(path)) return "outside the project";
+    return escapeCardPath(path);
+  }
+  // Only an unresolved token reaches the card non-absolute; its raw text can
+  // name a home folder or another project, so it never prints raw (D18, C14).
+  if (!isAbsolute(path)) return "outside the project";
+  const repo = physical(join(dispatch, "..", "..", ".."));
+  const rel = relative(repo, path);
+  const shown =
+    rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)
+      ? "outside the project"
+      : rel.split(sep).join("/");
+  return escapeCardPath(shown);
+}
+
+/**
+ * Card-safe not-checked text: the lane and the kind of problem, never the
+ * raw path or text. Detail stays in the run's log. A reason is `<kind>:
+ * <detail>`; colon-free reasons are fixed diagnostics shown whole.
+ */
+function notCheckedShown(reason: string): string {
+  const detail = reason.startsWith("not checked:")
+    ? reason.slice("not checked:".length).trim()
+    : reason;
+  const head = detail.split(":", 1)[0]?.trim() ?? "";
+  return escapeCardPath(head || "not checked");
+}
+
+function reachBlock(dispatch: string): string {
+  const actions = reachActions(dispatch);
+  if (actions.length === 0) return "";
+  const pointRows = actions.filter(({ event }) => event.kind === "point");
+  const lastPoint = new Map<string, (typeof pointRows)[number]["event"]>();
+  for (const row of pointRows) lastPoint.set(row.event.point, row.event);
+  const roundNumbers = new Set<number>();
+  try {
+    for (const name of readdirSync(join(dispatch, "logs"))) {
+      const m = /^review-r([1-9][0-9]*)\.json$/u.exec(name);
+      if (m) roundNumbers.add(Number(m[1]));
+    }
+  } catch {
+    die(`cannot list review round records in ${dispatch}/logs`);
+  }
+  for (const { event } of actions) {
+    const m = /^r([1-9][0-9]*)$/u.exec(event.point);
+    if (m) roundNumbers.add(Number(m[1]));
+  }
+  // A single-thread run has no workhorses point to show: it never runs "Check lane
+  // reach before synthesis", and the fixture reach item does not expect one of it.
+  const points = [
+    ...(runMode(dispatch) === "single-thread" ? [] : ["workhorses"]),
+    ...[...roundNumbers].sort((a, b) => a - b).map((n) => `r${n}`),
+    "card",
+  ];
+  const lines = ["## Reach", ""];
+  lines.push("- Writes outside the repository are not detected here; preventing them is #221.");
+  const card = lastPoint.get("card");
+  const main = card?.main;
+  if (main !== null && typeof main === "object" && !Array.isArray(main)) {
+    const state = main as Record<string, unknown>;
+    lines.push(
+      `- Main checkout: branch ${String(state.branch ?? "unknown")} (default ${String(state.defaultBranch ?? "unknown")})`,
+    );
+    const changed = Array.isArray(state.changed) ? state.changed : [];
+    if (changed.length === 0) lines.push("  - clean at the card check");
+    else for (const path of changed) lines.push(`  - changed: \`${reachPath(dispatch, path)}\``);
+  }
+  for (const point of points) {
+    const record = lastPoint.get(point);
+    const result = record?.result ?? "not checked";
+    const title =
+      point === "workhorses" ? point : point === "card" ? point : `round ${point.slice(1)}`;
+    lines.push(`- ${title}: ${result}`);
+    const incidents = actions.filter(
+      ({ event }) => event.point === point && ["finding", "note", "void"].includes(event.kind),
+    );
+    for (const { event } of incidents) {
+      if (event.kind === "void") {
+        lines.push(
+          `  - voided verdict: ${event.lens ?? "review"} reviewer ${event.lane ?? "unknown"} (${event.reason ?? "reach"})`,
+        );
+        continue;
+      }
+      if (typeof event.reason === "string" && event.reason.startsWith("not checked:")) {
+        lines.push(`  - ${event.lane ?? "lane"}: not checked: ${notCheckedShown(event.reason)}`);
+        continue;
+      }
+      const lane = event.lane ? `${event.lane}: ` : "";
+      const access =
+        event.access === "write" ? "write" : event.access === "names" ? "names" : "read";
+      const place = event.place ? ` (${event.place})` : "";
+      const path = reachPath(dispatch, event.path);
+      const reason = event.reason ? ` — ${escapeCardPath(event.reason)}` : "";
+      lines.push(`  - ${event.kind}: ${lane}${access} \`${path}\`${place}${reason}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 /** The card's checked sections, byte-exact. */
 function renderBlock(dispatch: string, wt: string, checkpoint: string): string {
   const checks = recordedResults(dispatch, wt);
@@ -357,7 +489,9 @@ function renderBlock(dispatch: string, wt: string, checkpoint: string): string {
       .filter((f) => f.state === "user-applied")
       .map((f) => `- [${f.sev}] ${f.fid}`)
       .join("\n") || "none";
-  return `## Checks\n\n${b1}\n\n## Open findings\n\n${b2}\n\n## Not re-reviewed\n\n${b3}\n`;
+  const base = `## Checks\n\n${b1}\n\n## Open findings\n\n${b2}\n\n## Not re-reviewed\n\n${b3}\n`;
+  const reach = reachBlock(dispatch);
+  return reach ? `${base}\n${reach}` : base;
 }
 
 /** match iff the card holds the block once. */
@@ -499,7 +633,7 @@ function checkPrivateDataCard(dispatch: string, card: string): number {
   const expected = privateDataBlock(dispatch);
   const count = text.split(expected).length - 1;
   if (count !== 1) die("card: private-data findings do not match the run record");
-  const scanned = run(join(SCRIPTS, "scrub-check.sh"), ["--pr-description", card], {
+  const scanned = run(join(SCRIPTS, "run"), ["scrub-check", "--pr-description", card], {
     env: {
       POSTMASTER_DETECTIONS_LOG: join(dispatch, "detections.jsonl"),
       SCRUB_CHECK_DISABLE: undefined,
@@ -512,30 +646,35 @@ function checkPrivateDataCard(dispatch: string, card: string): number {
 
 // --- modes --------------------------------------------------------------------------------
 const TOP_USAGE =
-  "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
+  "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>] | anything-to-land " +
   "--repo <repo> --default <branch> --ticket <ref> --base <sha> | fresh --repo <repo> --default <branch> " +
   "--ticket <ref> --dispatch <dispatch> --wt <synthesis-wt> | results <dispatch> <synthesis-wt> | " +
   "private-data-block <dispatch> | private-data-card <dispatch> <card> | " +
   "card-block <dispatch> <synthesis-wt> <checkpoint> | card-results <dispatch> <synthesis-wt> " +
   "<checkpoint> <card> | card-findings <dispatch> <synthesis-wt> <checkpoint> <card> | " +
-  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill>";
+  "card-open <checkpoint> | journey <dispatch> <synthesis-wt> <waybill> | switch-offs " +
+  "--repo <repo> --default <branch> --ticket <ref> [--dispatch <dispatch>]";
 const ALREADY_USAGE =
-  "usage: landing.sh already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
+  "usage: run landing already-landed --repo <repo> --default <branch> --ticket <ref> --base <sha> " +
   "--card-head <sha> [--local-ticket <branch>] [--pr-merge <sha> --pr-head <sha>]";
 const ANYTHING_USAGE =
-  "usage: landing.sh anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>";
+  "usage: run landing anything-to-land --repo <repo> --default <branch> --ticket <ref> --base <sha>";
 const FRESH_USAGE =
-  "usage: landing.sh fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> " +
+  "usage: run landing fresh --repo <repo> --default <branch> --ticket <ref> --dispatch <dispatch> " +
   "--wt <synthesis-wt>";
-const RESULTS_USAGE = "usage: landing.sh results <dispatch> <synthesis-wt>";
-const BLOCK_USAGE = "usage: landing.sh card-block <dispatch> <synthesis-wt> <checkpoint>";
+const RESULTS_USAGE = "usage: run landing results <dispatch> <synthesis-wt>";
+const BLOCK_USAGE = "usage: run landing card-block <dispatch> <synthesis-wt> <checkpoint>";
 const CRESULTS_USAGE =
-  "usage: landing.sh card-results <dispatch> <synthesis-wt> <checkpoint> <card>";
+  "usage: run landing card-results <dispatch> <synthesis-wt> <checkpoint> <card>";
 const CFINDINGS_USAGE =
-  "usage: landing.sh card-findings <dispatch> <synthesis-wt> <checkpoint> <card>";
-const OPEN_USAGE = "usage: landing.sh card-open <checkpoint>";
-const JOURNEY_USAGE = "usage: landing.sh journey <dispatch> <synthesis-wt> <waybill>";
+  "usage: run landing card-findings <dispatch> <synthesis-wt> <checkpoint> <card>";
+const PDATA_BLOCK_USAGE = "usage: run landing private-data-block <dispatch>";
+const PDATA_CARD_USAGE = "usage: run landing private-data-card <dispatch> <card>";
+const OPEN_USAGE = "usage: run landing card-open <checkpoint>";
+const JOURNEY_USAGE = "usage: run landing journey <dispatch> <synthesis-wt> <waybill>";
+const SWITCH_OFFS_USAGE =
+  "usage: run landing switch-offs --repo <repo> --default <branch> --ticket <ref> [--dispatch <dispatch>]";
 
 function alreadyLanded(o: string[]): number {
   if (
@@ -711,7 +850,7 @@ function journey(dispatch: string, wt: string, waybill: string): number {
     console.log("clear: no check uses web-journey");
     return 0;
   }
-  const t = run(TICKET_CHECK, ["--has-journey", waybill], { env: UNSET_GIT });
+  const t = run(TICKET_CHECK, ["ticket-check", "--has-journey", waybill], { env: UNSET_GIT });
   const said = pyTrim(t.out);
   if (t.code !== 0 || (said !== "journey" && said !== "no journey")) {
     if (t.code !== 0) {
@@ -727,9 +866,9 @@ function journey(dispatch: string, wt: string, waybill: string): number {
     );
     return 0;
   }
-  const v = run(VERIFY, ["journey-path", wt, dispatch], { env: UNSET_GIT });
+  const v = run(VERIFY, ["verify", "journey-path", wt, dispatch], { env: UNSET_GIT });
   if (v.code !== 0 || pyTrim(v.out) === "") {
-    die(`verify.sh journey-path failed: ${pyTrim(v.err) || "no output"}`);
+    die(`run verify journey-path failed: ${pyTrim(v.err) || "no output"}`);
   }
   const report = pySplitLines(pyTrim(v.out))[0] ?? "";
   let missing: boolean;
@@ -760,6 +899,36 @@ function journey(dispatch: string, wt: string, waybill: string): number {
   return 0;
 }
 
+function switchOffs(o: string[]): number {
+  if (
+    (o.length !== 6 && o.length !== 8) ||
+    o[0] !== "--repo" ||
+    o[2] !== "--default" ||
+    o[4] !== "--ticket" ||
+    (o.length === 8 && o[6] !== "--dispatch")
+  ) {
+    usage(SWITCH_OFFS_USAGE);
+  }
+  try {
+    const report = inspectSwitchOffs({
+      repo: o[1]!,
+      defaultRef: o[3]!,
+      ticketRef: o[5]!,
+      ...(o.length === 8 ? { dispatch: o[7]! } : {}),
+    });
+    process.stdout.write(`${report.status}\n${report.output}`);
+    return report.status === "clear"
+      ? 0
+      : report.status === "held"
+        ? 2
+        : report.status === "no reason"
+          ? 3
+          : 4;
+  } catch (e) {
+    throw new LandingFailure(`switch-offs: ${e instanceof Error ? e.message : String(e)}`, 1);
+  }
+}
+
 function main(argv: string[]): number {
   // A production entrypoint: shed the test hook before the first scan.
   delete process.env.SCRUB_CHECK_DISABLE;
@@ -785,12 +954,12 @@ function main(argv: string[]): number {
       return checkBlock(argv[1]!, argv[2]!, argv[3]!, argv[4]!);
     }
     if (mode === "private-data-block") {
-      if (argv.length !== 2) usage("usage: landing.sh private-data-block <dispatch>");
+      if (argv.length !== 2) usage(PDATA_BLOCK_USAGE);
       process.stdout.write(privateDataBlock(argv[1]!));
       return 0;
     }
     if (mode === "private-data-card") {
-      if (argv.length !== 3) usage("usage: landing.sh private-data-card <dispatch> <card>");
+      if (argv.length !== 3) usage(PDATA_CARD_USAGE);
       return checkPrivateDataCard(argv[1]!, argv[2]!);
     }
     if (mode === "card-open") {
@@ -805,6 +974,7 @@ function main(argv: string[]): number {
       if (argv.length !== 4) usage(JOURNEY_USAGE);
       return journey(argv[1]!, argv[2]!, argv[3]!);
     }
+    if (mode === "switch-offs") return switchOffs(argv.slice(1));
     usage(TOP_USAGE);
   } catch (e) {
     if (e instanceof LandingFailure) {

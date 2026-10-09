@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "./lib/proc";
+import { processStart } from "./lib/processes";
 import { pyWords } from "./lib/text";
 import { status, walkFiles } from "./runs-status";
 
@@ -68,14 +68,8 @@ function intent(name: string, n: number, request = "launch"): void {
 
 function liveowner(name: string): void {
   // The lock's owner is this test run, alive throughout it.
-  let start: string;
-  try {
-    const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-    start = pyWords(stat.slice(stat.lastIndexOf(")") + 1))[19]!;
-  } catch {
-    const r = run("ps", ["-o", "lstart=", "-p", String(process.pid)], {});
-    start = pyWords(r.out).slice(0, 5).join(" ");
-  }
+  const start = processStart(process.pid);
+  if (!start) throw new Error("could not read this process's start time");
   writeFileSync(join(root, name, ".leg-2-active"), `${process.pid} ${start}\n`);
 }
 
@@ -139,8 +133,8 @@ beforeAll(() => {
   root = join(tmp, "root");
   mkRun("rule", "review", 2, ".escalation-ready");
   mkRun("gate", "shipping", 3, ".card-ready");
-  mkRun("spec", "planning", 1, ".spec-review-ready", ".leg-1-exited");
-  mkRun("specpause", "planning", 1, ".spec-review-ready", ".leg-1-exited");
+  mkRun("spec", "planning", 1, ".spec-" + "review-ready", ".leg-1-exited");
+  mkRun("specpause", "planning", 1, ".spec-" + "review-ready", ".leg-1-exited");
   // The pause's realistic shape: started, thread id, no hand-off, so incomplete.
   writeFileSync(
     join(root, "specpause", "logs", "coachman-leg-1-attempts.jsonl"),
@@ -167,7 +161,7 @@ beforeAll(() => {
   mkRun("closed", "done", 3, ".leg-3-done", ".leg-3-exited");
   mkRun("earlier", "review", 2, ".leg-1-done");
   mkRun("usergate", "shipping", 3, ".card-ready", ".waiting-on-user");
-  mkRun("userspec", "planning", 1, ".spec-review-ready", ".waiting-on-user");
+  mkRun("userspec", "planning", 1, ".spec-" + "review-ready", ".waiting-on-user");
   mkRun("userclosed", "done", 3, ".waiting-on-user");
   mkRun("refusedanswer", "review", 2, ".waiting-on-user", ".leg-2-exited");
   record("refusedanswer", "refused", "coachman");
@@ -283,195 +277,274 @@ describe("positive controls", () => {
 
   test("an escalation waiting is RULE", () => {
     expect(nextOf("rule")).toBe("RULE");
-  }, 10000);
+  });
 
   test("a complete ship card is GATE", () => {
     expect(nextOf("gate")).toBe("GATE");
-  }, 10000);
+  });
 
   test("a spec review package waiting is SPEC", () => {
     expect(nextOf("spec")).toBe("SPEC");
-  }, 10000);
+  });
 
   test("a spec package with its pause record is SPEC", () => {
     expect(nextOf("specpause")).toBe("SPEC");
-  }, 10000);
+  });
 
   test("the current leg done is DISPATCH", () => {
     expect(nextOf("dispatch")).toBe("DISPATCH");
-  }, 10000);
+  });
 
   test("a refused launch is ASK", () => {
     expect(nextOf("refused")).toBe("ASK");
-  }, 10000);
+  });
 
   test("an exit before a thread id is ASK", () => {
     expect(nextOf("prethread")).toBe("ASK");
-  }, 10000);
+  });
 
   test("a wall on the primary coachman is TAKEOVER", () => {
     expect(nextOf("wall")).toBe("TAKEOVER");
-  }, 10000);
+  });
 
   test("a wall on the fallback coachman is ASK", () => {
     expect(nextOf("fallbackwall")).toBe("ASK");
-  }, 10000);
+  });
 
   test("an incomplete thread is RESUME", () => {
     expect(nextOf("remount")).toBe("RESUME");
-  }, 10000);
+  });
 
   test("a checkpoint card waiting is READ", () => {
     expect(nextOf("read")).toBe("READ");
-  }, 10000);
+  });
 
   test("nothing changed for an hour is INSPECT", () => {
     expect(nextOf("inspect")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("a leg at work is WAIT", () => {
     expect(nextOf("wait")).toBe("WAIT");
-  }, 10000);
+  });
 
   test("a run waiting on the user is USER, whatever else it holds", () => {
     expect(nextOf("user")).toBe("USER");
-  }, 10000);
+  });
 
   test("a closed run is -", () => {
     expect(nextOf("closed")).toBe("-");
-  }, 10000);
+  });
 
   test("a refusal stays USER while the user question is open", () => {
     expect(nextOf("refusedanswer")).toBe("USER");
-  }, 10000);
+  });
 
   test("a fallback wall stays USER while the user question is open", () => {
     expect(nextOf("wallanswer")).toBe("USER");
-  }, 10000);
+  });
 
   test("an incomplete thread waits on the user ahead of its outcome", () => {
     expect(nextOf("incompleteanswer")).toBe("USER");
-  }, 10000);
+  });
 
   test("a closed run ignores a stale finished attempt", () => {
     expect(nextOf("finishedclosed")).toBe("-");
-  }, 10000);
+  });
 
   test("a live attempt waits even when its previous outcome asked the user", () => {
     expect(nextOf("active")).toBe("WAIT");
-  }, 10000);
+  });
 
   test("an active lock that survives its exited marker reads its outcome", () => {
     expect(nextOf("staleactive")).toBe("RESUME");
-  }, 10000);
+  });
 
   test("a lock whose owner is gone reads its outcome, not a wedged WAIT", () => {
     expect(nextOf("ownergone")).toBe("ASK");
-  }, 10000);
+  });
 
   test("a lock with no owner file is stale too", () => {
     expect(nextOf("noowner")).toBe("ASK");
-  }, 10000);
+  });
 
   test("a phase file beyond the last record is inspected, not the stale outcome", () => {
     expect(nextOf("gap")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("an intent file beyond the last record is inspected too", () => {
     expect(nextOf("gapintent")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("an intent-only resume is inspected, not a stale resume", () => {
     expect(nextOf("intentresume")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("an intent at the last record hides nothing", () => {
     expect(nextOf("intentcovered")).toBe("RESUME");
-  }, 10000);
+  });
 
   test("a corrupt middle line does not hide the last good record", () => {
     expect(nextOf("corruptmid")).toBe("RESUME");
-  }, 10000);
+  });
 });
 
 describe("negative controls", () => {
   test("an earlier leg's done marker dispatches nothing", () => {
     expect(nextOf("earlier")).toBe("WAIT");
-  }, 10000);
+  });
 
   test("a ship card put to the user waits on the user, not the gate", () => {
     expect(nextOf("usergate")).toBe("USER");
-  }, 10000);
+  });
 
   test("a spec package put to the user waits on the user, not the package", () => {
     expect(nextOf("userspec")).toBe("USER");
-  }, 10000);
+  });
 
   test("a closed run stays closed with a stale marker", () => {
     expect(nextOf("userclosed")).toBe("-");
-  }, 10000);
+  });
 
   test("an unknown outcome is inspected instead of resumed", () => {
     expect(nextOf("unknown")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("a wall without a known role is inspected", () => {
     expect(nextOf("wallunknown")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("a running attempt's missing record is normal while it holds the lock", () => {
     expect(nextOf("gapactive")).toBe("WAIT");
-  }, 10000);
+  });
 
   test("a last line that is not a record is inspected", () => {
     expect(nextOf("corruptlast")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("touching a marker does not hide a stall", () => {
     expect(nextOf("stall")).toBe("INSPECT");
-  }, 10000);
+  });
 
   test("the postmaster's own directory is not a run", () => {
     expect(nextOf("postmaster")).toBe("");
-  }, 10000);
+  });
 });
 
 describe("non-string legs print in Python's spelling", () => {
   test("a boolean leg matches its Python-spelled markers", () => {
     expect(nextOf("boolleg")).toBe("DISPATCH");
-  }, 10000);
+  });
 
   test("a null leg matches its Python-spelled markers", () => {
     expect(nextOf("nullleg")).toBe("DISPATCH");
-  }, 10000);
+  });
 
   test("a run with no markers shows a dash, not blanks", () => {
     expect(pyWords(rowOf("wait"))[3]).toBe("-");
-  }, 10000);
+  });
 });
 
 describe("two-leg and legacy runs", () => {
   test("a one-leg synthesis card is GATE", () => {
     expect(nextOf("one-final")).toBe("GATE");
-  }, 10000);
+  });
 
   test("a two-leg review card is GATE", () => {
     expect(nextOf("two-final")).toBe("GATE");
-  }, 10000);
+  });
 
   test("a current two-leg review completion is DISPATCH", () => {
     expect(nextOf("two-dispatch")).toBe("DISPATCH");
-  }, 10000);
+  });
 
   test("a pre-change ship card remains GATE", () => {
     expect(nextOf("legacy-gate")).toBe("GATE");
-  }, 10000);
+  });
 
   test("a pre-change review completion still dispatches ship", () => {
     expect(nextOf("legacy-dispatch")).toBe("DISPATCH");
-  }, 10000);
+  });
 
   test("a pre-change ship completion is DISPATCH", () => {
     expect(nextOf("legacy-last")).toBe("DISPATCH");
-  }, 10000);
+  });
+});
+
+describe("provider walls: WALL before everything but a closed run", () => {
+  const wallTs = new Date(Date.now() - 60000).toISOString();
+  const wallLine = (lane = "stub"): string =>
+    `${JSON.stringify({
+      ts: wallTs,
+      project: "p",
+      run: "T",
+      actor: `lane:${lane}`,
+      action: "wall",
+      target: lane,
+      detail: "workhorse - - none stuck on the limit",
+    })}\n`;
+
+  beforeAll(() => {
+    // An untold wall on a busy run: the lock is held, files are moving, WALL still wins.
+    mkRun("wallbusy", "review", 2);
+    writeFileSync(join(root, "wallbusy", "actions.jsonl"), wallLine());
+    liveowner("wallbusy");
+    // An untold wall with `.waiting-on-user` older than it: not told yet, so WALL.
+    mkRun("walloldq", "review", 2, ".waiting-on-user");
+    writeFileSync(join(root, "walloldq", "actions.jsonl"), wallLine());
+    const older = (Date.now() - 120000) / 1000;
+    utimesSync(join(root, "walloldq", ".waiting-on-user"), older, older);
+    // An untold wall with `.waiting-on-user` newer than it: the user has this run's question.
+    mkRun("wallnewq", "review", 2, ".waiting-on-user");
+    writeFileSync(join(root, "wallnewq", "actions.jsonl"), wallLine());
+    // Told, unruled, nothing else: paused on the ruling, not stalled (C10).
+    mkRun("wallpause", "review", 2);
+    writeFileSync(
+      join(root, "wallpause", "actions.jsonl"),
+      wallLine() +
+        `${JSON.stringify({
+          ts: new Date().toISOString(),
+          actor: "postmaster",
+          action: "told",
+          target: "stub",
+          detail: "workhorse - -",
+        })}\n`,
+    );
+    age("wallpause");
+    // Told and ruled: the pause is over; idle reads INSPECT as it does without walls.
+    mkRun("wallruled", "review", 2);
+    writeFileSync(
+      join(root, "wallruled", "actions.jsonl"),
+      wallLine() +
+        `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "told", target: "stub", detail: "workhorse - -" })}\n` +
+        `${JSON.stringify({ ts: new Date().toISOString(), actor: "postmaster", action: "rule", target: "stub", detail: "wall go-on" })}\n`,
+    );
+    age("wallruled");
+    // A closed run's wall never wakes: the manifest's dash wins.
+    mkRun("wallclosed", "done", 2, ".leg-2-done");
+    writeFileSync(join(root, "wallclosed", "actions.jsonl"), wallLine());
+  });
+
+  test("an untold wall on a busy run is WALL, not WAIT (C8)", () => {
+    expect(nextOf("wallbusy")).toBe("WALL");
+  });
+
+  test("a waiting question older than the untold wall does not hide it (C8)", () => {
+    expect(nextOf("walloldq")).toBe("WALL");
+  });
+
+  test("a waiting question newer than the untold wall reads USER (C8)", () => {
+    expect(nextOf("wallnewq")).toBe("USER");
+  });
+
+  test("a run paused for walls, idle an hour, is USER and never INSPECT (C10)", () => {
+    expect(nextOf("wallpause")).toBe("USER");
+  });
+
+  test("with every wall ruled the idle run inspects as it did before", () => {
+    expect(nextOf("wallruled")).toBe("INSPECT");
+  });
+
+  test("a closed run with a wall stays closed", () => {
+    expect(nextOf("wallclosed")).toBe("-");
+  });
 });

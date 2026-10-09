@@ -21,7 +21,7 @@ import { run } from "./lib/proc.ts";
 import { findingState, isFindingShaped, privateDataBlock, pyRepr } from "./landing.ts";
 import { email } from "./scrub-test-kit.ts";
 
-const SELF = join(import.meta.dir, "landing.sh");
+const SELF = join(import.meta.dir, "run");
 const HERE = import.meta.dir;
 
 delete process.env.GIT_DIR;
@@ -38,7 +38,7 @@ const S: Record<string, string> = {};
 const strip = (s: string): string => s.replace(/\n+$/u, "");
 
 function sh(args: string[]): { code: number; out: string } {
-  const r = run("bash", [SELF, ...args]);
+  const r = run(SELF, ["landing", ...args]);
   return { code: r.code, out: strip(`${r.out}${r.err}`) };
 }
 
@@ -1376,6 +1376,38 @@ describe("card-block", () => {
         "## Not re-reviewed\n\nnone",
     );
   });
+
+  test("the Reach section omits the workhorses line for a single-thread run", () => {
+    const reachPoint = (point: string): string =>
+      `${JSON.stringify({
+        ts: "2026-01-01T00:00:00Z",
+        actor: "coachman",
+        action: "reach",
+        target: point,
+        detail: JSON.stringify({ kind: "point", point, result: "clean", lanes: [] }),
+      })}\n`;
+    for (const [name, mode, want] of [
+      ["st", "single-thread", false],
+      ["syn", "synthesis", true],
+    ] as const) {
+      const d = join(tmp, `d-reach-${name}`);
+      mkdirSync(join(d, "logs"), { recursive: true });
+      writeFileSync(join(d, "checks.json"), GATE_UNIT_CHECKS);
+      writeFileSync(
+        join(d, "actions.jsonl"),
+        action("gate", `main@${S.sha12}`, "pass", 0) + reachPoint("card"),
+      );
+      writeFileSync(join(d, "run.json"), JSON.stringify({ mode }));
+      writeFileSync(
+        join(d, "checkpoint.md"),
+        checkpoint("## Findings (bug)", "", "- [P1] bug-1: open"),
+      );
+      const r = sh(["card-block", d, S.w!, join(d, "checkpoint.md")]);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("## Reach");
+      expect(r.out.includes("- workhorses:")).toBe(want);
+    }
+  });
 });
 
 describe("card-results", () => {
@@ -1394,6 +1426,27 @@ describe("card-results", () => {
   test("card-findings agrees on the faithful card", () => {
     check(
       ["card-findings", S.d!, S.w!, join(S.d!, "checkpoint.md"), join(S.d!, "card.md")],
+      0,
+      "match",
+    );
+  });
+
+  test("a Switch-offs section after the block still matches", () => {
+    // A card written by a run that carries this ticket's list, and a card
+    // written before it (the faithful card above): the rendered block is the
+    // same either way, so both answer match.
+    writeFileSync(
+      join(S.d!, "card-switch.md"),
+      `${S.card!}\n## Switch-offs\n\n- comment scripts/x.ts:1 ts-ignore every rule -- ` +
+        `reason: r (id comment:0123456789abcdef)\n`,
+    );
+    check(
+      ["card-results", S.d!, S.w!, join(S.d!, "checkpoint.md"), join(S.d!, "card-switch.md")],
+      0,
+      "match",
+    );
+    check(
+      ["card-findings", S.d!, S.w!, join(S.d!, "checkpoint.md"), join(S.d!, "card-switch.md")],
       0,
       "match",
     );
@@ -1961,7 +2014,7 @@ describe("journey", () => {
     mkrepo(S.jw);
     commitFile(S.jw, "f", "X", "X");
     S.jsha12 = short(sha(S.jw));
-    const jr = run("bash", [join(HERE, "verify.sh"), "journey-path", S.jw, S.j]);
+    const jr = run(join(HERE, "run"), ["verify", "journey-path", S.jw, S.j]);
     if (jr.code !== 0) throw new Error(`journey-path failed: ${jr.err}`);
     S.jrep = strip(jr.out);
     writeFileSync(join(S.j, "plain.md"), "# T\n\n## Problem / feature\nA change.\n");

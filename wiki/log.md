@@ -1,12 +1,153 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-03
+updated: 2026-10-09
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-09] query | would banning mutation make code easier to follow, for a reader and for a model
+
+Issue #300. The user asked whether code without mutation is easier for a model to follow and proposed starting with a ban
+and some exceptions. Answered from the reading already captured: the benefit is argued and not measured (no study found
+compares mutable and immutable versions of the same code, and the 84 findings were not classified by mutation), and local
+mutation does not change whether a function can be tested without the outside. What can be measured is how much a rule
+would flag. Filed back into [the functional-core page](concepts/functional-core-and-verification.md): proposal 1 has a
+possible second part against mutating what escapes a function, and trial 4 counts escaping mutation and every mutation,
+with controls, on `main` and at the review snapshots. The research session alone read this addition. Nothing was run or
+installed. No standing changed.
+
+## [2026-10-09] query | does passing git in, or Effect, make the cleanup checks more effective
+
+Issue #300. Two questions on [the functional-core page](concepts/functional-core-and-verification.md): would wrapping
+side effects in Effect help, and are tests more effective when the live run and the test run differ only in a mock git
+swapped for real git. Answered from the reading already captured and from #252's code at its round-1 snapshot, and
+filed back into the page. Trial 5 is now one program with its git swapped, a mock checked against real git on a scratch
+repository, and a plain version compared with an Effect version, in three steps, each later step run only if the one
+before did not fail. Proposal 2, the Effect sentences and the answer say the same. The old trial 5 listed, in its
+generator, two states that only the findings had named (a submodule and an unbranched merge); a model that has not seen
+the findings now writes the list. A third independent check of the rewrite found 16 problems (3 overstated, 1
+unsupported, 5 missing a limit, 3 stale, 4 minor), all corrected. Nothing was run or installed. No standing changed.
+
+## [2026-10-05] ingest | whether the lanes saw each other's work
+
+Issue #277. Read the events streams of 60 workhorse lanes in 30 real runs, and recorded the scan in
+`raw/trials/2026-10-05-lane-isolation-scan/`: the script with its self-test, its output, the controls and the
+readings. No stream named the other lane's worktree or showed its code. One lane read the other's plan, two
+reached the run's blind tests, and only one of those two runs recorded it. The sandbox that the `confine`
+setting turns on isolates processes and not files. Added "Whether its lanes were kept apart" to
+[Mixing models for coding](concepts/mixing-models-for-coding.md) and a line to
+[Lane confinement](concepts/lane-confinement.md). No standing changed: the scan reads the runs' own records
+and promotes no run.
+
+## [2026-10-05] query | how the dashboard looks
+
+The user chose the look in #238's design session: "let's go with engraved navy and coral from
+astra", because "it felt the easiest to read". Recorded in [the dashboard](concepts/dashboard.md) under "How it looks": the choice, how it
+was reached in the user's words, what the chosen prototype carries, and where it does not follow its
+data. On the user's word, the chosen prototype is kept in `docs/design/dashboard` with full-page
+pictures and a spec, so the look can be reproduced exactly. No standing changed.
+
+## [2026-10-05] ingest | pstack read again at e43c7ee, and its nine ranked changes judged again
+
+Issue #309. The link the user gave (`c47b128`) is four commits before the first report's `23e4138`. The head
+at `e43c7ee` adds `/correct` and changes `/architect` and the perf-issue playbook, and moves no verdict.
+Captured its passages and the comparison in `raw/articles/pstack-plugin-e43c7ee/`. Recorded six trials: which
+test cases pass when their script is replaced by a stub (`2026-10-05-total-mutant`), who writes on the tickets and what
+the comment log shows (`2026-10-05-ticket-text-authors`), the decisions of eight tickets marked by what could settle
+them (`2026-10-05-decisions-sample`), the versions the runs were dispatched with
+(`2026-10-05-harness-versions-in-runs`), what a fixture run takes (`2026-10-05-fixture-run-times`), and which
+scripts remove or rewrite something and which have a dry run (`2026-10-05-state-changing-scripts`). Added "Read again on
+2026-10-05" to [pstack](sources/pstack.md), which judges the nine changes again with the user's word on each and weighs
+two more, one from `/correct` and one the first report had left out. Fixed a link in the page: the ticket template moved with
+#251. No standing changed.
+
+## [2026-10-05] ingest | functional programming, formal verification and AI coding
+
+Issue #300. Recorded `raw/trials/2026-10-04-review-findings-classified/`: the 84 serious review findings of runs
+#202, #216, #252 and #268, read against a rubric written first, with six anchors labelled before the rest, a
+second reader on 26 of them and the controls for the count. A stated property or a small model would have caught
+79; a pure core made the check possible for 24, none without a property; 5 were prose or inference. Added
+[What a functional core opens up for checking code, and what it does for coding with AI](concepts/functional-core-and-verification.md),
+**claimed**, with a map of 125 sources in five groups, captured under `raw/papers/` and
+`raw/articles/`, four claims weighed in both directions, four proposed changes to the design rules and the
+ticket template, and five small trials, none run. Two independent checks of the built page against its captures
+and sources, one of the record and one of the literature, found 28 and 43 problems (wrong, overstated,
+unsupported, missing a limit, minor); all were corrected before publication. No standing changed.
+
+## [2026-10-04] ingest | what exists for coding with several models, whether mixing models is proven, and what postmaster adds
+
+Issue #277. Captured 107 papers and 139 pages into `raw/papers/` and `raw/articles/`, each with its
+address, the day it was read and the passages relied on, and recorded the search in
+`raw/trials/2026-10-04-landscape-search/`: every query, the rule for choosing in each group, the controls,
+what was not read, and the marks of the count that ranks the closest tools. Added
+[Mixing models for coding](concepts/mixing-models-for-coding.md), **claimed**, with a map in six groups, the
+evidence on four claims about mixing models in code and in general work, the closest tools beside
+postmaster, what postmaster shares and adds, the README checked line by line against
+[the lane audit](concepts/several-lanes.md), and what can and cannot be said in public. The README's
+claim that the synthesis took contributions from both lanes every time is not supported by the audit.
+Linked it from [Combining models](concepts/combining-models.md). No standing changed: outside work moves
+none, and the page rests on the audits, which promote no run.
+
+## [2026-10-04] query | should setup create a project's verifiers with pstack's skill
+
+The user's word: yes, as part of setup on a new project, using pstack's `/create-verification-skill`.
+Filed as #273, on the board in Todo, for a ticket session to settle where setup runs it, what it
+produces and where that lives, and what counts as done. Candidate 7 in
+[pstack](sources/pstack.md) now belongs in #273, with the QA turnpike (#97) taking the record as
+input. The trial of whether lanes do better with the record stays the way to measure it, on a
+project with a user interface. No standing changed.
+
+## [2026-10-04] ingest | how often a lane's evidence is `not shown`, and whether the check bounds it
+
+Recorded `raw/trials/not-shown-evidence/`. A read-only count of the Evidence entries in lane
+summaries, in this repository's runs and in the fixture repositories: 249 entries in this
+repository's 21 summaries with the section, 35 of them `not shown` and 29 of those in one summary,
+and 152 of 152 shown in the fixture repositories. Four made-up summaries for one ticket run through
+`summary-evidence`: it passes eight `not shown` entries and refuses a missing entry and a missing
+file. Cited from [pstack](sources/pstack.md), where it is the baseline for candidate 7. No
+standing changed.
+
+## [2026-10-04] ingest | a first look at pstack's verification skill
+
+Recorded `raw/trials/pstack-verification-skill/`. The skill followed by hand, once, on a scratch
+copy of the `todo` fixture app. The 37-claim walk of the feature map it made held all 37, and after
+the reference solution of the fixture ticket `remove` it held 22. The first walk's output, the
+files as first generated and the failing gate run were not kept, and the record says so. Cited from
+[pstack](sources/pstack.md). No standing changed.
+
+## [2026-10-04] lint | the pstack page follows main
+
+[pstack](sources/pstack.md) was written against `40d50ce`. Main has since ended the `.sh` wrappers
+(#218), so script names are now in the `scripts/run <name>` form and link to the `.ts` files. Read
+as a diff with the script names made alike, the rules and sections the page cites did not change.
+Candidate 2's search was repeated on main with the same result. The autonomous-run row and
+candidate 5 now cite #264 and #265.
+
+## [2026-10-03] ingest | audit of three days of runs, for what several lanes earn
+
+Issue #257. A trial recorded in `raw/trials/2026-10-03-lane-audit/` over 31 of this repository's
+runs and 25 fixture runs with activity from 2026-09-30 15:40 to 2026-10-03 15:40 UTC. It reads
+the runs' own action logs, cards, usage files and event streams, and scores each fixture lane's
+branch on the hidden tests, which the earlier audit could not. Across 18 real runs that reached
+synthesis, a codex lane or mimo alone would have found 52% or 58% of 264 verified severe findings
+and the two together 91%. The second workhorse's part was a fix or a missing part in 12 of 18 by the
+coachman's cards, and each lane alone passed every hidden test in all 22 scorable fixture runs.
+Added [A second reviewer earns its keep; a second workhorse is cheap and not shown to](concepts/several-lanes.md),
+**claimed**, and linked it from [Combining models](concepts/combining-models.md), whose standings do
+not move: the trial promotes no run.
+
+## [2026-10-03] ingest | pstack, a plugin and guide of skills for verified agent work
+
+Captured the plugin at commit 23e4138 and Part 1 of its guide into `raw/articles/`, as passages
+only, and wrote [pstack](sources/pstack.md). It sets each of the plugin's 52 skills, 23 playbooks
+and 24 principles beside what postmaster holds, gives each a verdict, and ranks nine candidate
+changes. None is filed. Linked from
+[each project defines how a change to it is verified](concepts/verification.md) and from
+[a fixture run tests the flow end to end](concepts/fixture-runs.md), under what would change or
+settle them. No standing changed, since outside work does not move one.
 
 ## [2026-10-03] query | should #216 build the check as a library module
 

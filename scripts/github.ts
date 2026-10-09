@@ -4,28 +4,37 @@
 // and closing an issue is done. GitHub has no blocked column by default, so blocked is a label
 // named `blocked`, added without moving the card and removed by the next state change.
 //
-//   github.sh <repo> board                         the linked board; exit 3 when there is none
-//   github.sh <repo> board init [title]            create a board named after the repo and
+//   run github <repo> board                         the linked board; exit 3 when there is none
+//   run github <repo> board init [title]            create a board named after the repo and
 //                                                  link it; idempotent
-//   github.sh <repo> create <title> <body-file>    new issue on the board in Todo; prints its number
+//   run github <repo> create <title> <body-file>    new issue on the board in Todo; prints its number
 //                                                  (exit 5: created, but not put on the board)
-//   github.sh <repo> read <n> [--body]             title, state, labels, body, comments; with
-//                                                  --body, only the body, exactly as stored
-//   github.sh <repo> edit <n> <body-file> <base-file>
+//   run github <repo> read <n> [--body]             title, state, labels, body, comments; with
+//                                                  read --body prints the stored body followed by one newline
+//   run github <repo> edit <n> <body-file> <base-file>
 //                                                  replace the issue's body; never its title
-//   github.sh <repo> state <n> <state>             todo | in-progress | blocked | done | cancelled
-//   github.sh <repo> comment <n> <actor> <text>    one comment, dated to the minute, actor first
-//   github.sh <repo> list [state]                  one line per issue: number, state, title
-//   github.sh <repo> access                        the user's permission on the repository:
+//   run github <repo> title <n> <title>             change the issue's title
+//   run github <repo> state <n> <state>             todo | in-progress | blocked | done | cancelled
+//   run github <repo> label <n> add|remove <label>   add or remove a label, creating it when
+//                                                  missing; a state change leaves `ready` alone
+//   run github <repo> comment <n> <actor> <text>    one comment, dated to the minute, actor first
+//   run github <repo> list [state]                  one line per issue: number, state, title
+//   run github <repo> access                        the user's permission on the repository:
 //                                                  ADMIN, MAINTAIN, WRITE, TRIAGE or READ
-//   github.sh <repo> search <text>                 one line per issue holding the text in its
+//   run github <repo> search <text>                 one line per issue holding the text in its
 //                                                  title, body or comments: number, open or
 //                                                  closed, title (GitHub's index, not exact; a
 //                                                  colon or a quote in the text counts as a space)
 //
 // <repo> is a local checkout; the GitHub repository is read from its origin remote. Everything
 // goes through the gh CLI, which must be logged in with the `project` scope
-// (`gh auth refresh -s project`); scripts/probe-trackers.sh says whether it is.
+// (`gh auth refresh -s project`); scripts/run probe-trackers says whether it is.
+//
+// Cost: GitHub gives all tools and agents together 5,000 GraphQL points an hour, and listing a
+// board of about 200 items costs about 300 of them. So a ticket's column is read from the issue's
+// own project items in the one query that reads the issue, an item is found the same way, `list`
+// asks for each issue's column in the query that lists the issues, and a label is added or
+// removed over REST, which has a budget of its own. Nothing here lists the board.
 //
 // edit takes the body as it was read when the change was drafted (read --body) and refuses when
 // the issue no longer matches it, so a change made in the tracker meanwhile is not lost.
@@ -34,7 +43,7 @@
 //   exit 1  usage, gh missing or not logged in, no origin remote, unknown issue (a pull request
 //           is not one), a body file that cannot be read or is empty, or gh failed
 //   exit 2  invalid state
-//   exit 3  the repo has no linked board (run: github.sh <repo> board init)
+//   exit 3  the repo has no linked board (run: run github <repo> board init)
 //   exit 4  the issue changed since the base was read
 //   exit 5  create made the issue, and printed its number, but could not put it on the board
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -51,6 +60,7 @@ const COLUMN: Record<string, string> = {
   cancelled: "done",
 };
 const BLOCKED = "blocked";
+const READY = "ready";
 
 class DieError extends Error {
   constructor(
@@ -82,6 +92,11 @@ interface IssueComment {
   createdAt?: string;
   author?: { login?: string } | null;
 }
+interface ProjectItemNode {
+  id: string;
+  project?: { id?: string } | null;
+  fieldValueByName?: { name?: string } | null;
+}
 interface Issue {
   number: number;
   title: string;
@@ -92,6 +107,7 @@ interface Issue {
   createdAt: string;
   labels: IssueLabel[];
   comments: IssueComment[];
+  items: ProjectItemNode[];
 }
 interface ListItem {
   number: number;
@@ -99,6 +115,7 @@ interface ListItem {
   state: string;
   stateReason: string | null;
   labels: IssueLabel[];
+  items: ProjectItemNode[];
 }
 
 // --- remote parsing ---------------------------------------------------------------------------
@@ -145,7 +162,7 @@ function linkedBoards(owner: string, name: string): Board[] {
 let REPO_DIR = "";
 
 function trackerBinding(): string | null {
-  const r = run(join(scriptsDir(import.meta), "project-settings.sh"), ["inspect", REPO_DIR]);
+  const r = run(join(scriptsDir(import.meta), "run"), ["project-settings", "inspect", REPO_DIR]);
   if (r.code !== 0) dieGh(r.err.trim() || "cannot read the project's tracker binding");
   try {
     return JSON.parse(r.out).tracker?.binding ?? null;
@@ -157,7 +174,7 @@ function trackerBinding(): string | null {
 function boardOf(nwo: string, owner: string, name: string): Board {
   const boards = linkedBoards(owner, name);
   if (boards.length === 0) {
-    dieGh(`${nwo} has no linked board; run: github.sh <repo> board init`, 3);
+    dieGh(`${nwo} has no linked board; run: run github <repo> board init`, 3);
   }
   const binding = trackerBinding();
   const named = boards.filter((b) => b.title === (binding || name));
@@ -168,7 +185,7 @@ function boardOf(nwo: string, owner: string, name: string): Board {
       dieGh(`the project's tracker binding '${binding}' matches more than one linked board`);
   }
   const b = boards.length > 1 && named.length > 0 ? named[0] : boards[0];
-  if (!b) dieGh(`${nwo} has no linked board; run: github.sh <repo> board init`, 3);
+  if (!b) dieGh(`${nwo} has no linked board; run: run github <repo> board init`, 3);
   b.ownerLogin = b.owner?.login || owner;
   return b;
 }
@@ -195,46 +212,42 @@ function boardInit(owner: string, name: string, nwo: string, title: string): voi
   console.log(`board created: #${made.number} ${title} ${made.url ?? ""}`);
 }
 
+// The board's Status field and its options by one direct query on the board's node id: gh's
+// own `project field-list` reads every field with its options and costs about 100 points.
 function statusField(b: Board): [string, Record<string, string>] {
-  const fields = ghj<any>([
-    "project",
-    "field-list",
-    String(b.number),
-    "--owner",
-    b.ownerLogin ?? "",
-    "--format",
-    "json",
-  ]);
-  for (const f of fields.fields ?? []) {
-    if (pyLower(f.name ?? "") === "status" && f.options != null) {
-      const opts: Record<string, string> = {};
-      for (const o of f.options) {
-        opts[pyLower((o.name as string).replace(NONWORD_RE, ""))] = o.id;
-      }
-      return [f.id, opts];
-    }
+  const q =
+    "query($id:ID!){node(id:$id){... on ProjectV2{" +
+    'field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}}}}}';
+  const data = ghj<any>(["api", "graphql", "-f", `query=${q}`, "-F", `id=${b.id}`]);
+  const f = data?.data?.node?.field;
+  if (!f?.id || !Array.isArray(f.options)) dieGh(`board #${b.number} has no Status field`);
+  const opts: Record<string, string> = {};
+  for (const o of f.options) {
+    opts[pyLower((o.name as string).replace(NONWORD_RE, ""))] = o.id;
   }
-  dieGh(`board #${b.number} has no Status field`);
+  return [f.id as string, opts];
 }
 
-function itemId(b: Board, nwo: string, number: number, url: string): [string, string | null] {
-  const items = ghj<any>([
-    "project",
-    "item-list",
-    String(b.number),
-    "--owner",
-    b.ownerLogin ?? "",
-    "--format",
-    "json",
-    "--limit",
-    "1000",
-  ]);
-  for (const it of items.items ?? []) {
-    const c = it.content ?? {};
-    if (c.type === "Issue" && c.number === number && c.repository === nwo) {
-      return [it.id, it.status ?? null];
-    }
+// The issue's own project items, asked for in the query that reads the issue (about one point
+// where a board listing costs about 300). `project{id}` tells the boards apart.
+const ITEMS_QUERY =
+  "projectItems(first:20){nodes{id project{id} " +
+  'fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}';
+
+function boardItem(
+  items: ProjectItemNode[] | undefined,
+  b: Board,
+): { id: string; status: string | null } | null {
+  for (const it of items ?? []) {
+    if (it.project?.id === b.id) return { id: it.id, status: it.fieldValueByName?.name ?? null };
   }
+  return null;
+}
+
+// The id of the issue's item on the board: the one it already has, else a new one. item-add is
+// idempotent, so an issue that a board workflow added meanwhile gets its existing item back.
+function itemId(b: Board, url: string, item: { id: string } | null): string {
+  if (item) return item.id;
   const added = ghj<any>([
     "project",
     "item-add",
@@ -246,10 +259,10 @@ function itemId(b: Board, nwo: string, number: number, url: string): [string, st
     "--format",
     "json",
   ]);
-  return [added.id, null];
+  return added.id;
 }
 
-function setColumn(b: Board, nwo: string, number: number, url: string, flow: string): void {
+function setColumn(b: Board, url: string, flow: string, item: { id: string } | null): void {
   const [field, opts] = statusField(b);
   const key = COLUMN[flow];
   if (key === undefined || !(key in opts)) {
@@ -257,7 +270,7 @@ function setColumn(b: Board, nwo: string, number: number, url: string, flow: str
       `board #${b.number} has no Status column for ${flow} (its columns: ${Object.keys(opts).join(", ")})`,
     );
   }
-  const [iid] = itemId(b, nwo, number, url);
+  const iid = itemId(b, url, item);
   gh([
     "project",
     "item-edit",
@@ -272,50 +285,36 @@ function setColumn(b: Board, nwo: string, number: number, url: string, flow: str
   ]);
 }
 
-function boardStatuses(b: Board, nwo: string): Record<number, string> {
-  const items = ghj<any>([
-    "project",
-    "item-list",
-    String(b.number),
-    "--owner",
-    b.ownerLogin ?? "",
-    "--format",
-    "json",
-    "--limit",
-    "1000",
-  ]);
-  const out: Record<number, string> = {};
-  for (const it of items.items ?? []) {
-    const c = it.content ?? {};
-    if (c.type === "Issue" && c.repository === nwo) {
-      out[c.number as number] = it.status ?? "";
-    }
-  }
-  return out;
-}
-
 // --- issues -----------------------------------------------------------------------------------
 function issueOf(owner: string, name: string, nwo: string, number: number): Issue {
   const q =
     "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){" +
     "issue(number:$number){number title body state stateReason url createdAt " +
-    "labels(first:50){nodes{name}} comments(first:100){nodes{body createdAt author{login}}}}}}";
-  const data = ghj<any>([
-    "api",
-    "graphql",
-    "-f",
-    `query=${q}`,
-    "-F",
-    `owner=${owner}`,
-    "-F",
-    `name=${name}`,
-    "-F",
-    `number=${number}`,
-  ]);
+    "labels(first:50){nodes{name}} comments(first:100){nodes{body createdAt author{login}}} " +
+    `${ITEMS_QUERY}}}}`;
+  let data: any;
+  try {
+    data = ghj<any>([
+      "api",
+      "graphql",
+      "-f",
+      `query=${q}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `number=${number}`,
+    ]);
+  } catch (e) {
+    if (e instanceof DieError) dieGh(`could not read issue #${number} in ${nwo}: ${e.msg}`);
+    throw e;
+  }
   const iss = data?.data?.repository?.issue;
   if (!iss) dieGh(`no issue #${number} in ${nwo}`);
   iss.labels = iss.labels?.nodes ?? [];
   iss.comments = iss.comments?.nodes ?? [];
+  iss.items = iss.projectItems?.nodes ?? [];
   return iss as Issue;
 }
 
@@ -323,7 +322,8 @@ function allIssues(owner: string, name: string): ListItem[] {
   const q =
     "query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){" +
     "issues(first:100,after:$after,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}){" +
-    "pageInfo{hasNextPage endCursor} nodes{number title state stateReason labels(first:50){nodes{name}}}}}}";
+    "pageInfo{hasNextPage endCursor} nodes{number title state stateReason labels(first:50){nodes{name}} " +
+    `${ITEMS_QUERY}}}}}`;
   const out: ListItem[] = [];
   let after: string | null = null;
   for (;;) {
@@ -346,6 +346,7 @@ function allIssues(owner: string, name: string): ListItem[] {
         state: n.state,
         stateReason: n.stateReason ?? null,
         labels: n.labels?.nodes ?? [],
+        items: n.projectItems?.nodes ?? [],
       });
     }
     if (!page.pageInfo?.hasNextPage) return out;
@@ -362,39 +363,49 @@ function flowState(
   return pyLower((status ?? "").replace(NONWORD_RE, "")) === "inprogress" ? "in-progress" : "todo";
 }
 
-function ensureLabel(nwo: string): void {
-  const labels = ghj<Array<{ name: string }>>([
-    "label",
-    "list",
-    "-R",
-    nwo,
-    "--json",
-    "name",
-    "--limit",
-    "200",
-  ]);
-  const names = new Set(labels.map((l) => pyLower(l.name)));
-  if (!names.has(BLOCKED)) {
-    gh([
-      "label",
-      "create",
-      BLOCKED,
-      "-R",
-      nwo,
-      "--color",
-      "B60205",
-      "--description",
-      "Waiting on something outside the run",
-    ]);
-  }
+const LABEL_COLORS: Record<string, [string, string]> = {
+  [BLOCKED]: ["B60205", "Waiting on something outside the run"],
+  [READY]: ["0E8A16", "Signed off by the user, ready to run"],
+};
+
+const NOT_FOUND_RE = /404|Not Found|does not exist/iu;
+
+// One REST call. `false` when GitHub says 404 and the caller allows it; any other failure stops.
+function rest(argv: string[], allow404 = false): boolean {
+  const r = run("gh", ["api", ...argv, "--silent"]);
+  if (r.code === 0) return true;
+  const said = `${r.err}\n${r.out}`;
+  if (allow404 && NOT_FOUND_RE.test(said)) return false;
+  dieGh(`gh api ${argv.slice(0, 3).join(" ")}: ${said.trim().slice(0, 300)}`);
 }
 
-function setLabel(nwo: string, number: number, present: boolean): void {
+function ensureLabel(nwo: string, name: string): void {
+  if (rest([`repos/${nwo}/labels/${encodeURIComponent(name)}`], true)) return;
+  const [color, description] = LABEL_COLORS[pyLower(name)] ?? ["D4C5F9", name];
+  rest([
+    "-X",
+    "POST",
+    `repos/${nwo}/labels`,
+    "-f",
+    `name=${name}`,
+    "-f",
+    `color=${color}`,
+    "-f",
+    `description=${description}`,
+  ]);
+}
+
+// Labels go over REST: gh's own `issue edit --add-label` reads the issue's projects and labels
+// through GraphQL first, about 100 points each time. Removing a label the issue lacks is fine.
+function setLabel(nwo: string, number: number, present: boolean, name = BLOCKED): void {
   if (present) {
-    ensureLabel(nwo);
-    gh(["issue", "edit", String(number), "-R", nwo, "--add-label", BLOCKED]);
+    ensureLabel(nwo, name);
+    rest(["-X", "POST", `repos/${nwo}/issues/${number}/labels`, "-f", `labels[]=${name}`]);
   } else {
-    gh(["issue", "edit", String(number), "-R", nwo, "--remove-label", BLOCKED]);
+    rest(
+      ["-X", "DELETE", `repos/${nwo}/issues/${number}/labels/${encodeURIComponent(name)}`],
+      true,
+    );
   }
 }
 
@@ -442,10 +453,14 @@ function main(): void {
   const argvAll = process.argv.slice(2);
   const REPO = argvAll[0];
   if (!REPO) {
-    dieGh("usage: github.sh <repo> board|create|edit|read|state|comment|list|access ...");
+    dieGh(
+      "usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access ...",
+    );
   }
   if (argvAll.length < 2) {
-    dieGh("usage: github.sh <repo> board|create|edit|read|state|comment|list|access ...");
+    dieGh(
+      "usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access ...",
+    );
   }
   if (!existsSync(REPO) || !statSync(REPO).isDirectory()) dieGh(`no such directory: ${REPO}`);
   REPO_DIR = REPO;
@@ -471,10 +486,10 @@ function main(): void {
     } else if (args[1] === "init" && (args.length === 2 || args.length === 3)) {
       boardInit(OWNER, NAME, NWO, args.length === 3 ? (args[2] ?? NAME) : trackerBinding() || NAME);
     } else {
-      dieGh("usage: github.sh <repo> board [init [title]]");
+      dieGh("usage: run github <repo> board [init [title]]");
     }
   } else if (cmd === "create") {
-    if (args.length !== 3) dieGh("usage: github.sh <repo> create <title> <body-file>");
+    if (args.length !== 3) dieGh("usage: run github <repo> create <title> <body-file>");
     bodyFile(args[2] ?? "");
     const b = boardOf(NWO, OWNER, NAME);
     const [, opts] = statusField(b);
@@ -494,7 +509,7 @@ function main(): void {
     const url = createOut.trim().split("\n").pop() ?? "";
     const number = parseInt(url.replace(/\/$/u, "").split("/").pop() ?? "0", 10);
     try {
-      setColumn(b, NWO, number, url, "todo");
+      setColumn(b, url, "todo", null);
     } catch (e) {
       if (e instanceof DieError) {
         console.log(String(number));
@@ -507,7 +522,7 @@ function main(): void {
   } else if (cmd === "edit") {
     if (args.length !== 4 || !existsSync(args[2] ?? "") || statSync(args[2] ?? "").isDirectory()) {
       dieGh(
-        "usage: github.sh <repo> edit <n> <body-file> <base-file>" +
+        "usage: run github <repo> edit <n> <body-file> <base-file>" +
           (args.length === 4 ? `; no such body file: ${args[2] ?? ""}` : ""),
       );
     }
@@ -521,9 +536,37 @@ function main(): void {
     }
     gh(["issue", "edit", String(n), "-R", NWO, "--body-file", args[2] ?? ""]);
     console.log(`#${n}: edited`);
+  } else if (cmd === "title") {
+    if (args.length !== 3) dieGh("usage: run github <repo> title <n> <title>");
+    const n = numberArg(args[1] ?? "");
+    const title = args[2] ?? "";
+    issueOf(OWNER, NAME, NWO, n);
+    gh(["issue", "edit", String(n), "-R", NWO, "--title", title]);
+    console.log(`#${n}: title changed`);
+  } else if (cmd === "label") {
+    if (args.length !== 4 || (args[2] !== "add" && args[2] !== "remove"))
+      dieGh("usage: run github <repo> label <n> add|remove <label>");
+    const n = numberArg(args[1] ?? "");
+    const verb = args[2] as "add" | "remove";
+    const name = args[3] ?? "";
+    issueOf(OWNER, NAME, NWO, n);
+    setLabel(NWO, n, verb === "add", name);
+    console.log(`#${n}: label ${verb === "add" ? "added" : "removed"} ${name}`);
+  } else if (cmd === "has-label") {
+    if (args.length !== 3) dieGh("usage: run github <repo> has-label <n> <label>");
+    const n = numberArg(args[1] ?? "");
+    const name = args[2] ?? "";
+    const iss = issueOf(OWNER, NAME, NWO, n);
+    // Exact membership: a label name may itself hold commas, so the
+    // comma-joined `labels:` line is display-only and never parsed back.
+    console.log(
+      (iss.labels ?? []).some((l) => pyLower(l.name ?? "") === pyLower(name))
+        ? "present"
+        : "absent",
+    );
   } else if (cmd === "read") {
     const bodyOnly = args.slice(2).length === 1 && args[2] === "--body";
-    if (args.length !== 2 && !bodyOnly) dieGh("usage: github.sh <repo> read <n> [--body]");
+    if (args.length !== 2 && !bodyOnly) dieGh("usage: run github <repo> read <n> [--body]");
     const n = numberArg(args[1] ?? "");
     const iss = issueOf(OWNER, NAME, NWO, n);
     const b = boardOf(NWO, OWNER, NAME);
@@ -531,10 +574,9 @@ function main(): void {
       process.stdout.write(`${iss.body ?? ""}\n`);
       return;
     }
-    const statuses = boardStatuses(b, NWO);
     console.log(`id: #${n}`);
     console.log(`title: ${iss.title ?? ""}`);
-    console.log(`state: ${flowState(iss, statuses[n])}`);
+    console.log(`state: ${flowState(iss, boardItem(iss.items, b)?.status ?? undefined)}`);
     console.log(`labels: ${(iss.labels ?? []).map((l) => l.name).join(", ")}`);
     console.log(`created: ${String(iss.createdAt ?? "").slice(0, 10)}`);
     console.log(`url: ${iss.url ?? ""}`);
@@ -555,7 +597,7 @@ function main(): void {
       }
     }
   } else if (cmd === "state") {
-    if (args.length !== 3) dieGh("usage: github.sh <repo> state <n> <state>");
+    if (args.length !== 3) dieGh("usage: run github <repo> state <n> <state>");
     const n = numberArg(args[1] ?? "");
     const newSt = args[2] ?? "";
     if (!STATES.includes(newSt)) {
@@ -578,11 +620,11 @@ function main(): void {
         if (closed) gh(["issue", "reopen", String(n), "-R", NWO]);
         gh(["issue", "close", String(n), "-R", NWO, "--reason", "not planned"]);
       }
-      setColumn(b, NWO, n, iss.url, newSt);
+      setColumn(b, iss.url, newSt, boardItem(iss.items, b));
     }
     console.log(`#${n}: ${newSt}`);
   } else if (cmd === "comment") {
-    if (args.length < 4) dieGh("usage: github.sh <repo> comment <n> <actor> <text>");
+    if (args.length < 4) dieGh("usage: run github <repo> comment <n> <actor> <text>");
     const n = numberArg(args[1] ?? "");
     const actor = args[2] ?? "";
     const text = args.slice(3).join(" ");
@@ -592,20 +634,20 @@ function main(): void {
     gh(["issue", "comment", String(n), "-R", NWO, "--body", line]);
     console.log(`#${n}: ${line}`);
   } else if (cmd === "list") {
-    if (args.length !== 1 && args.length !== 2) dieGh("usage: github.sh <repo> list [state]");
+    if (args.length !== 1 && args.length !== 2) dieGh("usage: run github <repo> list [state]");
     const want = args.length === 2 ? args[1] : null;
     if (want && !STATES.includes(want)) {
       dieGh(`invalid state ${want} (one of: ${STATES.join(", ")})`, 2);
     }
-    const statuses = boardStatuses(boardOf(NWO, OWNER, NAME), NWO);
+    const board = boardOf(NWO, OWNER, NAME);
     for (const iss of [...allIssues(OWNER, NAME)].sort((a, b) => a.number - b.number)) {
-      const st = flowState(iss, statuses[iss.number]);
+      const st = flowState(iss, boardItem(iss.items, board)?.status ?? undefined);
       if (want === null || st === want) {
         console.log(`#${iss.number}\t${st}\t${iss.title ?? ""}`);
       }
     }
   } else if (cmd === "access") {
-    if (args.length !== 1) dieGh("usage: github.sh <repo> access");
+    if (args.length !== 1) dieGh("usage: run github <repo> access");
     const q =
       "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){viewerPermission}}";
     const data = ghj<any>([
@@ -622,7 +664,7 @@ function main(): void {
     if (!perm) dieGh(`no permission on ${NWO} could be read`);
     console.log(perm);
   } else if (cmd === "search") {
-    if (args.length !== 2) dieGh("usage: github.sh <repo> search <text>");
+    if (args.length !== 2) dieGh("usage: run github <repo> search <text>");
     const text = (args[1] ?? "").replace(/[":]/gu, " ").trim();
     const hits = ghj<Array<{ number: number; title: string; state: string }>>([
       "search",
@@ -639,7 +681,9 @@ function main(): void {
       console.log(`#${h.number}\t${pyLower(String(h.state ?? ""))}\t${h.title ?? ""}`);
     }
   } else {
-    dieGh("usage: github.sh <repo> board|create|edit|read|state|comment|list|access|search ...");
+    dieGh(
+      "usage: run github <repo> board|create|edit|title|read|state|label|comment|list|access|search ...",
+    );
   }
 }
 

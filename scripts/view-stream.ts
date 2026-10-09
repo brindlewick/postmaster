@@ -1,10 +1,10 @@
 // Show a harness's event stream readably: what an agent says and runs, in full and wrapped to the
 // pane, never raw JSON. This is what a session host's pane shows while a launch runs
-// (scripts/host.sh). Event formats are harness-specific, so this script belongs to the harness
-// adapter beside launch.sh, and harnesses.md says which harness's events it knows.
+// (scripts/run host). Event formats are harness-specific, so this script belongs to the harness
+// adapter beside run launch, and harnesses.md says which harness's events it knows.
 //
-//   view-stream.sh < <events-file>                           render a stream, then stop
-//   view-stream.sh --follow <file> --pid <pid> [--from <byte>] render the file as it grows,
+//   run view-stream < <events-file>                           render a stream, then stop
+//   run view-stream --follow <file> --pid <pid> [--from <byte>] render the file as it grows,
 //                                                           and stop once <pid> has exited
 //                                                           and everything it wrote is shown
 //
@@ -22,6 +22,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
+import { processIsLive } from "./lib/processes.ts";
 import { digitValue, PY_S_CLASS, pySplitLines, pyTrim } from "./lib/text.ts";
 
 // --- the renderer (ported from the embedded Python) ---------------------------------------
@@ -904,22 +905,7 @@ function show(line: string, stamp: boolean): void {
 }
 
 function alive(p: number): boolean {
-  // A zombie has exited; nothing has reaped it yet. It is not alive for follow's purposes.
-  try {
-    const stat = readFileSync(`/proc/${p}/stat`, "utf8");
-    const state = stat.split(") ")[1]?.[0];
-    if (state === "Z") return false;
-  } catch {
-    // no /proc entry: the process is gone
-    return false;
-  }
-  try {
-    process.kill(p, 0);
-    return true;
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    return err.code === "EPERM";
-  }
+  return processIsLive(p);
 }
 
 const INT_SIGN_BODY = /^([+-]?)(.+)$/u;

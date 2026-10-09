@@ -7,14 +7,14 @@
 // and five match the claim itself in every file in scope (`overlapping file surfaces`,
 // `never two runs on`, `not change/touch/edit the same files`): a new sentence in one
 // of these phrasings trips the same guard. Further paraphrases are beyond a grep oracle.
-// Six presence checks hold the sections that survive: step 6 still exists as the
-// Order-them step under Stage A and orders by dependencies within its own lines (a
+// Six presence checks hold the sections that survive: the Order-them step still exists
+// under Stage A, whatever its number, and orders by dependencies within its own lines (a
 // word-boundary match, so `independence` never satisfies it), the `team.max_runs`
 // hard-rule limit stays verbatim in its section, and the concurrency note is
 // rewritten, not deleted, keeping second-resolves and never-rebase. The replacement
 // wording beyond those pins is judged by reading, not by this script.
 //
-//   parallel-runs-acceptance.sh [repo-root]   default: the repo this script lives in
+//   run parallel-runs-acceptance [repo-root]   default: the repo this script lives in
 //
 //   exit 0  no stale claim remains
 //   exit 1  stale claims, one per line on stdout: <file>: <what is still claimed>
@@ -29,7 +29,7 @@ import { toolRoot } from "./lib/paths.ts";
 import { casefold } from "./lib/text.ts";
 
 function usage(): never {
-  console.error("usage: parallel-runs-acceptance.sh [repo-root]");
+  console.error("usage: run parallel-runs-acceptance [repo-root]");
   process.exit(2);
 }
 
@@ -59,7 +59,7 @@ export interface AcceptResult {
 }
 
 const STALE: Array<readonly [string, string]> = [
-  ["step 6 orders by file surfaces", "then the file surfaces"],
+  ["the Order-them step orders by file surfaces", "then the file surfaces"],
   [
     "two tickets on one module do not run together",
     "Two tickets touching the same route table, transport interface or shared module do not run at the same time",
@@ -212,24 +212,32 @@ function walkScope(root: string): Scope {
 }
 
 // --- the surviving sections -----------------------------------------------------------------
-const STEP6_RE = /^6\. /u;
 const NUMSTEP_RE = /^[0-9]+\. /u;
 // grep -qiE '\bdependenc(y|ies)\b': grep's \b is an ASCII word boundary.
 const DEPENDENC_RE = /(?<![A-Za-z0-9_])dependenc(y|ies)(?![A-Za-z0-9_])/iu;
 
 /** Step 6's lines: from the `6.` item under `## Stage A` to the next step or heading. */
-function step6Lines(post: string): string[] {
+function orderStepLines(post: string): string[] {
   const step: string[] = [];
   let sect = false;
   let on = false;
-  for (const line of post.split("\n")) {
+  const lines = post.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
     if (line.startsWith("## Stage A")) {
       sect = true;
       continue;
     }
     if (sect && line.startsWith("## ")) break;
-    if (sect && STEP6_RE.test(line)) on = true;
-    if (on && NUMSTEP_RE.test(line) && !STEP6_RE.test(line)) break;
+    // The step is named in its number line, whatever its number; a heading
+    // split across the wrap still names it once folded with the next line.
+    if (
+      sect &&
+      NUMSTEP_RE.test(line) &&
+      fold(`${line} ${lines[i + 1] ?? ""}`).includes("Order them")
+    )
+      on = true;
+    if (on && step.length > 0 && NUMSTEP_RE.test(line)) break;
     if (on) step.push(line);
   }
   return step;
@@ -293,12 +301,14 @@ export function accept(root: string): AcceptResult {
     sweep(f, text, out);
   }
   const post = readText(`${root}/skills/postmaster/postmaster.md`);
-  const step6 = step6Lines(post);
-  const step6flat = fold(step6.join("\n"));
-  if (step6.length === 0 || !step6flat.includes("Order them")) {
+  const orderStep = orderStepLines(post);
+  const orderFlat = fold(orderStep.join("\n"));
+  if (orderStep.length === 0 || !orderFlat.includes("Order them")) {
     out.push("skills/postmaster/postmaster.md: no longer orders tickets in an Order-them step");
-  } else if (!DEPENDENC_RE.test(step6flat)) {
-    out.push("skills/postmaster/postmaster.md: no longer orders step 6 by dependencies");
+  } else if (!DEPENDENC_RE.test(orderFlat)) {
+    out.push(
+      "skills/postmaster/postmaster.md: no longer orders by dependencies in the Order-them step",
+    );
   }
   const rulesflat = fold(sectionBody(post, "## Hard rules").join("\n"));
   if (!rulesflat.includes("- Never launch more runs than `team.max_runs`.")) {

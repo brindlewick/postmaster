@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const cli = join(import.meta.dir, "cut-scratch.sh");
+const cli = join(import.meta.dir, "run");
 
 interface Run {
   code: number;
@@ -25,7 +25,7 @@ interface Run {
 }
 
 function sh(...args: string[]): Run {
-  const r = spawnSync(cli, args, { encoding: "utf8" });
+  const r = spawnSync(cli, ["cut-scratch", ...args], { encoding: "utf8" });
   return { code: r.status ?? -1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 
@@ -116,32 +116,32 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     expect(headOf(join(tmp, "wt"))).toBe(snap);
     expect(existsSync(join(tmp, "wt", "node_modules/dep/index.js"))).toBe(true);
-  }, 10000);
+  });
 
   test("a clone scratch is cut at the snapshot, with its dependencies cloned", () => {
     const r = sh(repo, synth, join(tmp, "clone"), snap, "--clone", base);
     expect(r.code).toBe(0);
     expect(headOf(join(tmp, "clone"))).toBe(snap);
     expect(existsSync(join(tmp, "clone", "node_modules/dep/index.js"))).toBe(true);
-  }, 10000);
+  });
 
   test("DEPS_DIRS with an NBSP clones one directory, not two", () => {
     // BASE `for d in $DEPS` splits on IFS space/tab/LF only: an NBSP never splits (bash-verified).
     const nbspDir = "a\u00a0b";
     mkdirSync(join(synth, nbspDir, "dep"), { recursive: true });
     writeFileSync(join(synth, nbspDir, "dep/index.js"), "x\n");
-    const r = spawnSync(cli, [repo, synth, join(tmp, "nbsp"), snap], {
+    const r = spawnSync(cli, ["cut-scratch", repo, synth, join(tmp, "nbsp"), snap], {
       encoding: "utf8",
       env: { ...process.env, DEPS_DIRS: nbspDir },
     });
     expect(r.status).toBe(0);
     expect(existsSync(join(tmp, "nbsp", nbspDir, "dep/index.js"))).toBe(true);
-  }, 10000);
+  });
 
   test("in it, the diff against origin/HEAD is exactly the change from the base", () => {
     const diff = git("-C", join(tmp, "clone"), "diff", "--name-only", "origin/HEAD...");
     expect(diff.out.trim()).toBe("b.txt");
-  }, 10000);
+  });
 
   test("and it copied no objects", () => {
     let altSize = 0;
@@ -166,23 +166,23 @@ describe("positive controls", () => {
     }
     expect(altSize > 0).toBe(true);
     expect(loose).toEqual([]);
-  }, 10000);
+  });
 
   test("--kind names each scratch and the repository it was cut from", () => {
     const kwt = sh("--kind", join(tmp, "wt"));
     const kcl = sh("--kind", join(tmp, "clone"));
     expect(kwt.out.trim()).toBe(`worktree ${repo}`);
     expect(kcl.out.trim()).toBe(`clone ${repo}`);
-  }, 10000);
+  });
 
   test("--check passes a clone at the snapshot whose origin/HEAD leads back to the base", () => {
     const r = sh("--check", join(tmp, "clone"), snap, "--clone", base);
     expect(r.code).toBe(0);
-  }, 10000);
+  });
 
   test("and a worktree at the snapshot", () => {
     expect(sh("--check", join(tmp, "wt"), snap).code).toBe(0);
-  }, 10000);
+  });
 
   test("with main moved on by another run's merge, a clone still reviews from the base", () => {
     commit(repo, "c.txt", "another run merged");
@@ -190,7 +190,7 @@ describe("positive controls", () => {
     const movedDiff = git("-C", join(tmp, "moved"), "diff", "--name-only", "origin/HEAD...");
     expect(r.code).toBe(0);
     expect(movedDiff.out.trim()).toBe("b.txt");
-  }, 10000);
+  });
 
   test("--remove takes a worktree scratch away through git", () => {
     const r = sh("--remove", repo, join(tmp, "wt"));
@@ -198,13 +198,13 @@ describe("positive controls", () => {
     expect(r.code).toBe(0);
     expect(existsSync(join(tmp, "wt"))).toBe(false);
     expect(wtList.out.includes(`worktree ${join(tmp, "wt")}`)).toBe(false);
-  }, 10000);
+  });
 
   test("--remove takes a clone scratch away", () => {
     const r = sh("--remove", repo, join(tmp, "clone"));
     expect(r.code).toBe(0);
     expect(existsSync(join(tmp, "clone"))).toBe(false);
-  }, 10000);
+  });
 });
 
 describe("negative controls", () => {
@@ -212,27 +212,27 @@ describe("negative controls", () => {
     const r = sh("--check", join(tmp, "moved"), base, "--clone", base);
     expect(r.code).toBe(1);
     expect(both(r)).toContain("is not at");
-  }, 10000);
+  });
 
   test("and a worktree where a clone is needed", () => {
     sh(repo, synth, join(tmp, "wt2"), snap);
     const r = sh("--check", join(tmp, "wt2"), snap, "--clone", base);
     expect(r.code).toBe(1);
     expect(both(r)).toContain("needs a clone");
-  }, 10000);
+  });
 
   test("and a clone whose origin/HEAD does not lead back to the base", () => {
     const r = sh("--check", join(tmp, "moved"), snap, "--clone", snap);
     expect(r.code).toBe(1);
     expect(both(r)).toContain("does not lead back");
-  }, 10000);
+  });
 
   test("a clone whose origin/HEAD does not lead back to the base is refused, and removed", () => {
     const r = sh(repo, synth, join(tmp, "wrong"), snap, "--clone", snap);
     expect(r.code).toBe(1);
     expect(existsSync(join(tmp, "wrong"))).toBe(false);
     expect(both(r)).toContain("does not lead back");
-  }, 10000);
+  });
 
   test("so is one cut while the repository has an unrelated branch checked out", () => {
     git("-C", repo, "switch", "-q", "--orphan", "elsewhere");
@@ -242,13 +242,13 @@ describe("negative controls", () => {
     expect(existsSync(join(tmp, "unrelated"))).toBe(false);
     expect(both(r)).toContain("merge base none");
     git("-C", repo, "switch", "-q", "main");
-  }, 10000);
+  });
 
   test("a base the repository does not have is refused, and nothing is cut", () => {
     const r = sh(repo, synth, join(tmp, "nobase"), snap, "--clone", "no-such-ref");
     expect(r.code).toBe(1);
     expect(existsSync(join(tmp, "nobase"))).toBe(false);
-  }, 10000);
+  });
 
   test("a dest that already exists is refused, and left alone", () => {
     mkdirSync(join(tmp, "taken"));
@@ -256,7 +256,7 @@ describe("negative controls", () => {
     const r = sh(repo, synth, join(tmp, "taken"), snap, "--clone", base);
     expect(r.code).toBe(1);
     expect(readdirSync(join(tmp, "taken"))).toEqual(["mine.txt"]);
-  }, 10000);
+  });
 
   test("for a worktree scratch too", () => {
     const r = sh(repo, synth, join(tmp, "taken"), snap);
@@ -272,14 +272,14 @@ describe("negative controls", () => {
     git("clone", "-q", "--shared", repo2, join(tmp, "borrowed"));
     git("-C", join(tmp, "borrowed"), "remote", "set-url", "origin", repo);
     sh(repo, synth, join(tmp, "other"), snap, "--clone", base);
-  }, 10000);
+  });
 
   for (const name of victimNames) {
     test(`--kind: ${name} is no scratch`, () => {
       const r = sh("--kind", victimPath(name));
       expect(r.code).toBe(1);
       expect(both(r)).toBe("");
-    }, 10000);
+    });
 
     test("--remove refuses it, and leaves it", () => {
       const victim = victimPath(name);
@@ -294,25 +294,25 @@ describe("negative controls", () => {
       }
       expect(r.code).toBe(1);
       expect(leftAlone).toBe(true);
-    }, 10000);
+    });
   }
 
   test("the synthesis worktree is untouched", () => {
     const list = git("-C", repo, "worktree", "list", "--porcelain");
     expect(existsSync(join(synth, "b.txt"))).toBe(true);
     expect(list.out.includes(`worktree ${synth}`)).toBe(true);
-  }, 10000);
+  });
 
   test("--remove refuses a scratch of another repository", () => {
     const r = sh("--remove", join(tmp, "repo2"), join(tmp, "other"));
     expect(r.code).toBe(1);
     expect(existsSync(join(tmp, "other/.git"))).toBe(true);
     expect(both(r)).toContain("not of");
-  }, 10000);
+  });
 
   test("--clone with no base is a usage error", () => {
     const r = sh(repo, synth, join(tmp, "x"), snap, "--clone");
     expect(r.code).toBe(1);
     expect(existsSync(join(tmp, "x"))).toBe(false);
-  }, 10000);
+  });
 });

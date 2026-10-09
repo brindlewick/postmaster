@@ -10,6 +10,7 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
+import { globalConfigPath } from "./lib/effective-config.ts";
 import { run } from "./lib/proc.ts";
 
 function isDirectory(p: string): boolean {
@@ -42,7 +43,7 @@ const LIMIT = nat(process.env.LIMIT, 12);
 const DEPTH = nat(process.env.DEPTH, 3);
 const EXCLUDE = envOr("EXCLUDE", "external"); // directory name segment to skip
 const HOME = process.env.HOME ?? "";
-const CONFIG = envOr("POSTMASTER_CONFIG", `${HOME}/.postmaster/config.toml`);
+const CONFIG = globalConfigPath();
 
 let roots = process.argv.slice(2);
 if (roots.length === 0 && existsSync(CONFIG)) {

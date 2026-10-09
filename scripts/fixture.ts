@@ -1,9 +1,9 @@
 // Run the flow end to end against a small app whose tickets have a known outcome, and score a
 // finished run from its own records.
 //
-//   fixture.sh new <name or dest> <ticket>
-//   fixture.sh score <dispatch> <repo>
-//   fixture.sh hidden <ticket> <app-dir>
+//   run fixture new <name or dest> <ticket>
+//   run fixture score <dispatch> <repo>
+//   run fixture hidden <ticket> <app-dir>
 //
 // `new` marks its copy with `.postmaster/fixture` in the first commit and
 // `postmaster.fixture` in that repository's local git config.
@@ -16,7 +16,7 @@
 //   exit 1  usage, a tool not on PATH, a refusal from new, or input that is not what it says
 //   exit 2  score, hidden: a check failed
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -26,17 +26,26 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { homedir, machine, release, tmpdir, type as osType } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { runMode } from "./lib/run-mode.ts";
 import { effortsLine } from "./run-meta.ts";
+import {
+  laneNamesFromBranches,
+  laneNamesFromWorkhorses,
+  ticketIdFromWaybill,
+} from "./fixture-lanes.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { die, run } from "./lib/proc.ts";
+import { reachActions } from "./reach.ts";
+import { computeTimes, fmt, parseTs } from "./run-times.ts";
 import {
   DOT_ALL,
   digitValue,
@@ -80,10 +89,11 @@ const _CHECKS = [
   "efforts",
   "ship-card",
 ];
+const REACH_READERS = new Set(["codex", "claude", "muse", "mimo", "pi"]);
 
 function usage(): never {
   die(
-    "usage: fixture.sh new <name or dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir>",
+    "usage: run fixture new <name or dest> <ticket> | score <dispatch> <repo> | hidden <ticket> <app-dir>",
     1,
   );
 }
@@ -235,18 +245,26 @@ export function makeAndFile(dest: string, ticket: string): number {
     return 1;
   }
   // make ticket store
-  const localSh = process.env.LOCAL_SH || join(HERE, "local.sh");
-  const storeR = run("bash", [localSh, dest, "store", "init"]);
+  const localOverride = process.env.LOCAL_SH;
+  const localCommand = localOverride || join(HERE, "run");
+  const localArgs = localOverride ? [] : ["local"];
+  const storeR = run(localCommand, [...localArgs, dest, "store", "init"]);
   if (storeR.code !== 0) {
     unmake();
     console.error(`fixture: could not make the ticket store in ${dest}`);
     return 1;
   }
-  // file the ticket: local.sh create takes a body file, not the body text
-  const body = ticketBody(ticket);
+  // file the ticket: run local create takes a body file, not the body text
+  const ticketBase = run("git", ["-C", dest, "rev-parse", "HEAD"]).out.trim();
+  const body = ticketBody(ticket).replaceAll("FIXTURE_BASE", ticketBase);
+  if (!/^[0-9a-f]{40}$/u.test(ticketBase) || body.includes("FIXTURE_BASE")) {
+    unmake();
+    console.error(`fixture: could not write the verified base into ${ticket}'s ticket`);
+    return 1;
+  }
   const title = ticketTitle(ticket);
   const bodyFile = makeBodyFile(body);
-  const createR = run("bash", [localSh, dest, "create", title, bodyFile]);
+  const createR = run(localCommand, [...localArgs, dest, "create", title, bodyFile]);
   rmSync(bodyFile, { force: true });
   const number = createR.out.trim().split("\n").pop() ?? "";
   // ASCII: BASE matches ^[0-9]+$ for the filed number in bash; local create prints one line
@@ -255,6 +273,12 @@ export function makeAndFile(dest: string, ticket: string): number {
     console.error(
       `fixture: filing the ticket in ${dest}'s own store failed (exit ${createR.code})`,
     );
+    return 1;
+  }
+  const labelR = run(localCommand, [...localArgs, dest, "label", number, "add", "ready"]);
+  if (labelR.code !== 0) {
+    unmake();
+    console.error(`fixture: could not mark ticket #${number} ready in ${dest}`);
     return 1;
   }
   const mark = run("git", ["-C", dest, "config", "--local", "postmaster.fixture", ticket]);
@@ -270,7 +294,7 @@ export function makeAndFile(dest: string, ticket: string): number {
     `fixture: filed ticket ${ticket} in ${dest}'s own ticket store as #${number}: ${title}`,
   );
   console.log(
-    `fixture: dispatch ticket #${number} against ${dest}, then: scripts/fixture.sh score <its dispatch directory> ${dest}`,
+    `fixture: dispatch ticket #${number} against ${dest}, then: scripts/run fixture score <its dispatch directory> ${dest}`,
   );
   return 0;
 }
@@ -338,10 +362,14 @@ export function hidden(
   ticket: string,
   app: string,
 ): { passed: boolean; detail: string; out: string } {
-  const r = sh(["bun", "test", "--timeout", "120000", "./"], join(TICKETS, ticket, "hidden"), {
-    ...(process.env as Record<string, string>),
-    FIXTURE_APP: app,
-  });
+  const r = sh(
+    [process.execPath, "test", "--timeout", "120000", "./"],
+    join(TICKETS, ticket, "hidden"),
+    {
+      ...(process.env as Record<string, string>),
+      FIXTURE_APP: app,
+    },
+  );
   const counts: Record<string, number> = {};
   for (const m of (r.out ?? "").matchAll(HIDDEN_RE)) {
     counts[m[2]!] = parseInt(digitValue(m[1]!), 10);
@@ -362,7 +390,7 @@ const LANE_LINE = /^(.*): ([0-9]+ pass, [0-9]+ fail|missing|failed to build)$/u;
 // Each lane's hidden status from fixture-lanes.ts; "" when there are no lanes.
 export function laneScores(dispatch: string, repo: string, ticket: string): string {
   const r = sh([
-    "bun",
+    process.execPath,
     "--no-env-file",
     `--config=${join(TOOL, "bunfig.toml")}`,
     join(HERE, "fixture-lanes.ts"),
@@ -427,17 +455,53 @@ export function score(dispatch: string, repo: string): { code: number; out: stri
   }
   const legs = legsOf(dispatch, manifest);
   const results: CheckResult[] = [
-    { name: "hidden-tests", ...checkHidden(dispatch, repo, app) },
+    { name: "hidden-tests", ...checkHidden(dispatch, repo, app, main) },
     { name: "gate", ...checkGate(app, repo, main) },
     { name: "stages", ...checkStages(dispatch), out: "" },
     { name: "markers", ...checkMarkers(dispatch, legs), out: "" },
     { name: "handoffs", ...checkHandoffs(dispatch, legs), out: "" },
     { name: "run.json", ...checkRunJson(dispatch), out: "" },
+    { name: "premises-order", ...checkPremisesOrder(dispatch), out: "" },
+    { name: "mode", ...checkMode(dispatch, repo), out: "" },
     { name: "efforts", ...checkWaybillEfforts(dispatch), out: "" },
     { name: "ship-card", ...checkCard(dispatch), out: "" },
   ];
+  // The reach item follows the run's recorded commit, not its pin directory:
+  // aftercare may release the pin once the run is done, and the score must
+  // not pass by leaving the item out. No recorded commit (a run from before
+  // pins) scores no item, as before; an unreadable commit fails the score.
+  const postmaster = meta?.postmaster;
+  const recorded =
+    typeof postmaster === "object" && postmaster !== null && !Array.isArray(postmaster)
+      ? (postmaster as Record<string, unknown>).commit
+      : undefined;
+  if (typeof recorded === "string" && recorded) {
+    const known = sh(["git", "-C", TOOL, "rev-parse", "--verify", "-q", `${recorded}^{commit}`]);
+    if (known.code !== 0 || !(known.out ?? "").trim()) {
+      rmSync(scratch, { recursive: true, force: true });
+      return {
+        code: 1,
+        out: `fixture: cannot tell whether ${recorded.slice(0, 12)} holds the reach check: git cannot read that commit\n`,
+      };
+    }
+    const blob = sh(["git", "-C", TOOL, "cat-file", "-e", `${recorded}:scripts/reach.ts`]);
+    if (blob.code === 0) {
+      results.push({ name: "reach", ...checkReach(dispatch), out: "" });
+    }
+  }
   rmSync(scratch, { recursive: true, force: true });
-  return report(results);
+  const scored = report(results);
+  return { code: scored.code, out: `${platformLine()}\n${scored.out}${timeReport(dispatch)}` };
+}
+
+export function gitVersionNumber(output: string): string {
+  // ASCII: the version digits are tool-printed ASCII; a vendor suffix is not the number.
+  return /\b([0-9]+(?:\.[0-9]+)+)/u.exec(output.trim())?.[1] ?? output.trim();
+}
+
+function platformLine(): string {
+  const git = run("git", ["--version"]);
+  return `platform: ${osType()} ${release()} ${machine()}, bun ${Bun.version}, git ${gitVersionNumber(git.out)}`;
 }
 
 function makeTmpDir(): string {
@@ -497,10 +561,61 @@ export function legsOf(dispatch: string, manifest: Record<string, unknown> | nul
   return Array.from({ length: max }, (_, i) => i + 1);
 }
 
+/** Scoring runs the example app's own checks: its hidden tests on main, on each lane's branch, and
+ * its gate from a clean checkout. That is about 17 seconds, and the same for every record of one
+ * app. A caller that scores many records of one app (the tests) sets POSTMASTER_FIXTURE_APP_CACHE
+ * to a directory it owns, and each result is kept there under a key made from everything it
+ * depends on, so the next record of the same app reads it. Nothing else sets it; with it unset
+ * every score runs everything. */
+export function appCached<T>(key: string, compute: () => T): T {
+  const dir = process.env.POSTMASTER_FIXTURE_APP_CACHE;
+  if (!dir) return compute();
+  const file = join(dir, `${createHash("sha256").update(key).digest("hex")}.json`);
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch {
+    // Not kept yet, or not readable: compute it.
+  }
+  const value = compute();
+  try {
+    mkdirSync(dir, { recursive: true });
+    const part = `${file}.${process.pid}.part`;
+    writeFileSync(part, JSON.stringify(value));
+    renameSync(part, file);
+  } catch {
+    // A cache that cannot be written only costs time.
+  }
+  return value;
+}
+
+/** What the lanes' scores depend on: the ticket, main, every local branch, the run's manifest and
+ * its waybill. */
+function laneKey(dispatch: string, repo: string, ticket: string, main: string): string {
+  const branches = sh([
+    "git",
+    "-C",
+    repo,
+    "for-each-ref",
+    "--format=%(refname) %(objectname)",
+    "refs/heads",
+  ]);
+  const read = (name: string): string => {
+    try {
+      return readFileSync(join(dispatch, name), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  return ["lanes", ticket, main, branches.out ?? "", read("manifest.json"), read("brief.md")].join(
+    "\0",
+  );
+}
+
 function checkHidden(
   dispatch: string,
   repo: string,
   app: string,
+  main: string,
 ): { ok: boolean; detail: string; out: string } {
   const brief = join(dispatch, "brief.md");
   const text = existsSync(brief) ? squash(readFileSync(brief, "utf8")) : "";
@@ -521,9 +636,12 @@ function checkHidden(
       out: "",
     };
   }
-  const h = hidden(found[0]!, app);
-  const mainDetail = `${found[0]}, from the waybill: ${h.detail} on main`;
-  const lanes = laneScores(dispatch, repo, found[0]!);
+  const ticket = found[0]!;
+  const h = appCached(`hidden\0${ticket}\0${main}`, () => hidden(ticket, app));
+  const mainDetail = `${ticket}, from the waybill: ${h.detail} on main`;
+  const lanes = appCached(laneKey(dispatch, repo, ticket, main), () =>
+    laneScores(dispatch, repo, ticket),
+  );
   return {
     ok: h.passed,
     detail: lanes ? `${mainDetail}; ${lanes}` : mainDetail,
@@ -536,19 +654,27 @@ function checkGate(
   repo: string,
   branch: string,
 ): { ok: boolean; detail: string; out: string } {
-  const r = sh(["bash", join(HERE, "discover-project.sh"), app]);
+  return appCached(`gate\0${branch}`, () => runGate(app, repo, branch));
+}
+
+function runGate(
+  app: string,
+  repo: string,
+  branch: string,
+): { ok: boolean; detail: string; out: string } {
+  const r = sh([join(HERE, "run"), "discover-project", app]);
   const gate = (r.out ?? "")
     .split("\n")
     .find((l) => l.startsWith("gate="))
     ?.slice(5);
   if (!gate)
-    return { ok: false, detail: "scripts/discover-project.sh found no gate", out: r.out ?? "" };
+    return { ok: false, detail: "scripts/run discover-project found no gate", out: r.out ?? "" };
   const install = (r.out ?? "")
     .split("\n")
     .find((l) => l.startsWith("install="))
     ?.slice(8);
   const argv = [
-    "bun",
+    process.execPath,
     "--no-env-file",
     `--config=${join(TOOL, "bunfig.toml")}`,
     join(HERE, "clean-checkout.ts"),
@@ -566,20 +692,25 @@ function checkGate(
 }
 
 function checkStages(dispatch: string): { ok: boolean; detail: string } {
-  const r = sh(["bash", join(HERE, "stage.sh"), "--list"]);
+  const r = sh([join(HERE, "run"), "stage", "--list"]);
   const listed = pyWords(r.out ?? "");
   if (r.code !== 0 || !listed.includes("done")) {
-    return { ok: false, detail: "scripts/stage.sh --list names no done stage" };
+    return { ok: false, detail: "scripts/run stage --list names no done stage" };
   }
   let expected = listed.slice(0, listed.indexOf("done") + 1);
-  const legsR = sh(["bash", join(HERE, "turnpikes.sh"), "legs", dispatch]);
+  const legsR = sh([join(HERE, "run"), "turnpikes", "legs", dispatch]);
   if (legsR.code !== 0)
-    return { ok: false, detail: `scripts/turnpikes.sh legs: ${tail(legsR.out ?? "")}` };
+    return { ok: false, detail: `scripts/run turnpikes legs: ${tail(legsR.out ?? "")}` };
   const hasReview = pySplitLines(legsR.out ?? "").some((line) => {
     const words = pyWords(line);
     return words.length > 1 && words[1] === "review";
   });
   expected = expected.filter((s) => s !== "review" || hasReview);
+  // A single-thread run never enters workhorses-running: the coachman writes the change
+  // itself in the synthesis stage, so that stage is not part of its schedule (D5).
+  if (runMode(dispatch) === "single-thread") {
+    expected = expected.filter((s) => s !== "workhorses-running");
+  }
   const events = readActions(dispatch);
   if (events === null) return { ok: false, detail: "no actions.jsonl" };
   const entered = events.filter((e) => e.action === "stage").map((e) => e.target);
@@ -605,6 +736,125 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
     };
   }
   return { ok: false, detail: `entered ${entered[due.length]} after done` };
+}
+
+/** The coachman must record the base check before its first workhorse dispatch. */
+export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: string } {
+  const events = readActions(dispatch);
+  if (events === null) return { ok: false, detail: "no readable actions.jsonl" };
+  const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
+  const config = meta?.config as Record<string, unknown> | undefined;
+  const team = config?.team as Record<string, unknown> | undefined;
+  let names = Array.isArray(team?.workhorses) ? team.workhorses.map(String) : [];
+  if (names.length === 0) {
+    try {
+      const brief = readFileSync(join(dispatch, "brief.md"), "utf8");
+      const line = brief.split(/\r?\n/u).find((row) => row.startsWith("workhorses:")) ?? "";
+      names = line
+        .slice("workhorses:".length)
+        .split(",")
+        .map((entry) => entry.trim().split("=")[0] ?? "")
+        .filter(Boolean);
+    } catch {
+      names = [];
+    }
+  }
+  const lanes = new Set(names);
+  const premiseIndex = events.findIndex(
+    (event) => event.action === "premises" && event.actor === "coachman",
+  );
+  const dispatchIndex = events.findIndex(
+    (event) =>
+      event.action === "dispatch" &&
+      event.actor === "coachman" &&
+      typeof event.target === "string" &&
+      lanes.has(event.target),
+  );
+  if (premiseIndex < 0) return { ok: false, detail: "no coachman premises action" };
+  if (dispatchIndex >= 0 && premiseIndex >= dispatchIndex)
+    return { ok: false, detail: "the first workhorse dispatch precedes the premises action" };
+  // A run that recorded its premises and stopped before any lane (a premise
+  // escalation) holds the order: only dispatch-before-premises fails it.
+  if (dispatchIndex < 0)
+    return { ok: true, detail: "premises action recorded and no workhorse dispatched" };
+  return { ok: true, detail: "premises action precedes the first workhorse dispatch" };
+}
+
+export { runMode };
+
+/** The run's ticket id, from its waybill's first line, else the dispatch directory's name. */
+function waybillTicket(dispatch: string): string {
+  try {
+    const id = ticketIdFromWaybill(readFileSync(join(dispatch, "brief.md"), "utf8"));
+    if (id !== null) return id;
+  } catch {
+    /* fall through */
+  }
+  return basename(dispatch);
+}
+
+/** The run kept its mode: no workhorse dispatch and no wb/ branch in a single-thread run; one
+ * coachman dispatch and one wb/<ticket>-<lane> branch per configured workhorse in a synthesis
+ * run. A record with no mode reads as synthesis (D14). */
+export function checkMode(dispatch: string, repo: string): { ok: boolean; detail: string } {
+  const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
+  if (!meta) return { ok: true, detail: "skipped: no run.json" };
+  const raw = meta.mode;
+  const mode = raw === undefined ? "synthesis" : raw;
+  if (mode !== "synthesis" && mode !== "single-thread") {
+    return {
+      ok: false,
+      detail: `run.json records mode ${String(mode)}, which is neither synthesis nor single-thread`,
+    };
+  }
+  const events = readActions(dispatch);
+  if (events === null) return { ok: false, detail: "no actions.jsonl" };
+  const dispatched = events.filter(
+    (e) => e.action === "dispatch" && e.actor === "coachman" && typeof e.target === "string",
+  );
+  const listed = sh(["git", "-C", repo, "for-each-ref", "--format=%(refname)", "refs/heads/wb/"]);
+  const refs = listed.code === 0 ? listed.out.split(/\r?\n/u).filter((r) => r !== "") : [];
+  const ticket = waybillTicket(dispatch);
+  const branched = laneNamesFromBranches(refs, ticket);
+  if (mode === "single-thread") {
+    if (dispatched.length > 0) {
+      return {
+        ok: false,
+        detail: `single-thread run logged a workhorse dispatch: ${dispatched
+          .map((e) => String(e.target))
+          .join(", ")}`,
+      };
+    }
+    if (branched.length > 0) {
+      return {
+        ok: false,
+        detail: `single-thread run has workhorse branches: ${branched.join(", ")}`,
+      };
+    }
+    return { ok: true, detail: "single-thread: no workhorse dispatch, no workhorse branch" };
+  }
+  const config = meta.config as Record<string, unknown> | undefined;
+  const team = config?.team as Record<string, unknown> | undefined;
+  let lanes = Array.isArray(team?.workhorses) ? team.workhorses.map(String) : [];
+  if (lanes.length === 0) {
+    try {
+      const brief = readFileSync(join(dispatch, "brief.md"), "utf8");
+      lanes = laneNamesFromWorkhorses(brief);
+    } catch {
+      lanes = [];
+    }
+  }
+  if (lanes.length === 0) return { ok: false, detail: "synthesis run names no workhorses" };
+  const targets = new Set(dispatched.map((e) => String(e.target)));
+  const undispatched = lanes.filter((lane) => !targets.has(lane));
+  if (undispatched.length > 0) {
+    return { ok: false, detail: `synthesis run never dispatched: ${undispatched.join(", ")}` };
+  }
+  const unbranched = lanes.filter((lane) => !branched.includes(lane));
+  if (unbranched.length > 0) {
+    return { ok: false, detail: `synthesis run has no branch for: ${unbranched.join(", ")}` };
+  }
+  return { ok: true, detail: `synthesis: dispatched and branched ${lanes.join(", ")}` };
 }
 
 function readActions(dispatch: string): Array<Record<string, unknown>> | null {
@@ -644,7 +894,7 @@ function checkHandoffs(dispatch: string, legs: number[]): { ok: boolean; detail:
       bad.push(`handoff-${n}.md missing`);
       continue;
     }
-    const r = sh(["bash", join(HERE, "handoff-check.sh"), f]);
+    const r = sh([join(HERE, "run"), "handoff-check", f]);
     if (r.code !== 0) {
       const said = (r.out ?? "")
         .split("\n")
@@ -655,7 +905,7 @@ function checkHandoffs(dispatch: string, legs: number[]): { ok: boolean; detail:
     }
   }
   if (bad.length > 0) return { ok: false, detail: bad.join("; ") };
-  return { ok: true, detail: `${legs.length} hand-offs pass scripts/handoff-check.sh` };
+  return { ok: true, detail: `${legs.length} hand-offs pass scripts/run handoff-check` };
 }
 
 function checkRunJson(dispatch: string): { ok: boolean; detail: string } {
@@ -748,6 +998,65 @@ export function checkWaybillEfforts(dispatch: string): { ok: boolean; detail: st
   return { ok: true, detail: "waybill Team efforts match run.json" };
 }
 
+function checkReach(dispatch: string): { ok: boolean; detail: string } {
+  let actions: ReturnType<typeof reachActions>;
+  try {
+    actions = reachActions(dispatch);
+  } catch (e) {
+    return { ok: false, detail: `cannot read reach actions: ${String(e)}` };
+  }
+  const points = actions.filter(({ event }) => event.kind === "point");
+  const pointNames = new Set(points.map(({ event }) => event.point));
+  // A single-thread run never runs "Check lane reach before synthesis", so the
+  // workhorses point is expected only of a synthesis run; a record with no mode
+  // reads as synthesis, as the mode item does.
+  const expected = new Set(["card"]);
+  const single = runMode(dispatch) === "single-thread";
+  if (!single) expected.add("workhorses");
+  const logs = join(dispatch, "logs");
+  try {
+    for (const name of readdirSync(logs)) {
+      const match = /^review-r([1-9][0-9]*)\.json$/u.exec(name);
+      if (match) expected.add(`r${match[1]}`);
+    }
+  } catch (e) {
+    return { ok: false, detail: `cannot list review records: ${String(e)}` };
+  }
+  const missing = [...expected].filter((point) => !pointNames.has(point));
+  if (missing.length > 0) return { ok: false, detail: `not checked: ${missing.join(", ")}` };
+
+  const findings = actions.filter(({ event }) => event.kind === "finding" || event.kind === "void");
+  if (findings.length > 0) {
+    const first = findings[0]!.event;
+    return {
+      ok: false,
+      detail: `reach found at ${first.point}: ${first.path ?? first.reason ?? first.kind}`,
+    };
+  }
+  for (const { event } of points) {
+    if (event.result === "finding") return { ok: false, detail: `reach found at ${event.point}` };
+    const lanes = Array.isArray(event.lanes) ? event.lanes : [];
+    for (const laneValue of lanes) {
+      const lane =
+        typeof laneValue === "object" && laneValue !== null
+          ? (laneValue as Record<string, unknown>)
+          : {};
+      if (lane.status === "not checked" && REACH_READERS.has(String(lane.harness ?? ""))) {
+        return {
+          ok: false,
+          detail: `not checked: ${String(lane.lane ?? "lane")} at ${event.point}`,
+        };
+      }
+    }
+  }
+  return {
+    ok: true,
+    detail: single
+      ? "review rounds and card checked with no reach"
+      : "workhorses, review rounds and card checked with no reach",
+  };
+}
+
 function checkCard(dispatch: string): { ok: boolean; detail: string } {
   const path = join(dispatch, "card.md");
   if (!existsSync(path)) return { ok: false, detail: "no card.md" };
@@ -769,6 +1078,171 @@ function report(results: CheckResult[]): { code: number; out: string } {
   return { code: results.every((r) => r.ok) ? 0 : 2, out: `${lines.join("\n")}\n` };
 }
 
+// --- time lines (#265) -------------------------------------------------------------------
+// The stage table and the lane times report where the run's time went; they print after the
+// checks and never change the exit, which comes from the checks alone. A wait over 10 minutes
+// and a run over an hour are named, not failed: the providers and the machine's load are not
+// the change the run was proving.
+const LONG_WAIT_SEC = 600;
+const HOUR_SEC = 3600;
+
+/** A lane or lens name safe to carry into a marker path: no traversal, no glob. */
+function safeTimingName(value: unknown): value is string {
+  return (
+    typeof value === "string" && value !== "." && value !== ".." && /^[A-Za-z0-9._-]+$/u.test(value)
+  );
+}
+
+function markerMtime(path: string): number | null {
+  try {
+    const file = lstatSync(path);
+    if (!file.isFile()) return null;
+    return file.mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+interface TimedLine {
+  line: string;
+  secs: number | null;
+}
+
+/** The lines slowest first, ties by line so the order is stable on every machine; a lane
+ * that could not be timed comes last, as named. */
+function slowestFirst(entries: TimedLine[]): string[] {
+  return [...entries]
+    .sort((a, b) => (b.secs ?? -1) - (a.secs ?? -1) || (a.line < b.line ? -1 : 1))
+    .map((e) => e.line);
+}
+
+/** `workhorses: …`, one entry per lane the coachman launched: its dispatch to its
+ * `.done` marker, or the lane named as having no marker. */
+function workhorseLine(dispatch: string, events: Array<Record<string, unknown>>): string | null {
+  const launched = new Map<string, number>();
+  for (const e of events) {
+    if (e.action !== "dispatch" || e.actor !== "coachman") continue;
+    if (!safeTimingName(e.target)) continue;
+    const ts = typeof e.ts === "string" ? parseTs(e.ts) : null;
+    if (ts === null) continue;
+    const at = ts.getTime();
+    if (!launched.has(e.target) || at < (launched.get(e.target) ?? Infinity)) {
+      launched.set(e.target, at);
+    }
+  }
+  if (launched.size === 0) return null;
+  const entries: TimedLine[] = [];
+  for (const [lane, launch] of launched) {
+    const marker = markerMtime(join(dispatch, "logs", `${lane}.done`));
+    if (marker === null) {
+      entries.push({ line: `${lane} no marker`, secs: null });
+      continue;
+    }
+    const secs = Math.max(0, (marker - launch) / 1000);
+    entries.push({ line: `${lane} ${fmt(secs)}`, secs });
+  }
+  return `workhorses: ${slowestFirst(entries).join(", ")}`;
+}
+
+/** The `review-launch` that started this reviewer's attempt: its detail names the lens
+ * and the round, as the coachman logs them. The earliest at or after the round's own
+ * start wins; before it only if nothing else was logged. */
+function reviewLaunch(
+  events: Array<Record<string, unknown>>,
+  lane: string,
+  lens: string,
+  round: number,
+  since: Date | null,
+): Date | null {
+  // ASCII: launch details are machine-logged lines.
+  const lensRe = new RegExp(`\\b${lens.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`, "u");
+  // ASCII: launch details are machine-logged lines.
+  const roundRe = new RegExp(`\\bround\\s*${round}\\b|\\br${round}\\b`, "u");
+  let found: Date | null = null;
+  let any = false;
+  for (const e of events) {
+    if (e.action !== "review-launch" || e.target !== lane || typeof e.detail !== "string") continue;
+    if (!lensRe.test(e.detail) || !roundRe.test(e.detail)) continue;
+    const ts = typeof e.ts === "string" ? parseTs(e.ts) : null;
+    if (ts === null) continue;
+    any = true;
+    if (since !== null && ts < since) continue;
+    if (found === null || ts < found) found = ts;
+  }
+  if (found === null && any) return reviewLaunch(events, lane, lens, round, null);
+  return found;
+}
+
+/** One `review round N:` line per round file, each reviewer named with its lens and its
+ * launch-to-marker time, slowest first; a lane with no marker is named, never timed. */
+function reviewRoundLines(dispatch: string, events: Array<Record<string, unknown>>): string[] {
+  const logs = join(dispatch, "logs");
+  let files: string[];
+  try {
+    files = readdirSync(logs);
+  } catch {
+    return [];
+  }
+  const rounds = files
+    // ASCII: round files are machine-named review-rN.json.
+    .map((f) => /^review-r(\d+)\.json$/u.exec(f))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .sort((a, b) => parseInt(a[1]!, 10) - parseInt(b[1]!, 10));
+  const lines: string[] = [];
+  for (const m of rounds) {
+    const n = parseInt(m[1]!, 10);
+    const data = tryJsonFile<Record<string, unknown>>(join(logs, `review-r${n}.json`));
+    if (!data) continue;
+    const since = typeof data.started === "string" ? parseTs(data.started) : null;
+    const reviewers = Array.isArray(data.reviewers) ? data.reviewers : [];
+    const entries: TimedLine[] = [];
+    for (const r of reviewers) {
+      if (!Array.isArray(r) || !safeTimingName(r[0]) || !safeTimingName(r[1])) continue;
+      const [lens, lane] = [r[0], r[1]];
+      const marker = markerMtime(join(logs, `review-r${n}-${lens}-${lane}.done`));
+      if (marker === null) {
+        entries.push({ line: `${lane} ${lens} no marker`, secs: null });
+        continue;
+      }
+      const launch = reviewLaunch(events, lane, lens, n, since);
+      if (launch === null) {
+        entries.push({ line: `${lane} ${lens} no launch`, secs: null });
+        continue;
+      }
+      const secs = Math.max(0, (marker - launch.getTime()) / 1000);
+      entries.push({ line: `${lane} ${lens} ${fmt(secs)}`, secs });
+    }
+    if (entries.length > 0) lines.push(`review round ${n}: ${slowestFirst(entries).join(", ")}`);
+  }
+  return lines;
+}
+
+/** Everything the score prints after its checks: the run-times stage table (the same
+ * figures `run run-times` prints), the lane lines, then the named waits and the total.
+ * A log with no stage changes is said, and the verdict is the checks' own. */
+export function timeReport(dispatch: string): string {
+  const lines: string[] = [];
+  const times = computeTimes(dispatch);
+  if (times.ok) lines.push(...times.table.text.replace(/\n$/u, "").split("\n"));
+  else lines.push(`the run could not be timed: ${times.message}`);
+  const events = readActions(dispatch) ?? [];
+  const workhorses = workhorseLine(dispatch, events);
+  if (workhorses !== null) lines.push(workhorses);
+  lines.push(...reviewRoundLines(dispatch, events));
+  if (times.ok) {
+    const longWaits = times.table.rows.filter(
+      (r) => r.waitSec !== null && r.waitSec > LONG_WAIT_SEC,
+    );
+    if (longWaits.length > 0) {
+      lines.push(`long wait: ${longWaits.map((r) => `${r.stage} ${fmt(r.waitSec!)}`).join(", ")}`);
+    }
+    if (times.table.totalSec > HOUR_SEC) {
+      lines.push(`the run took longer than an hour: ${fmt(times.table.totalSec)}`);
+    }
+  }
+  return lines.map((l) => `${l}\n`).join("");
+}
+
 // --- entry -----------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
 if (import.meta.main) {
@@ -779,7 +1253,7 @@ if (import.meta.main) {
     process.exit(newRun(argv[1]!, argv[2]!));
   } else if (argv[0] === "score") {
     if (argv.length !== 3) usage();
-    need("git", "bun", "npm", "jq");
+    need("git", "bun", "node", "npm");
     const dispatch = argv[1]!;
     const repo = argv[2]!;
     if (!existsSync(dispatch) || !statSync(dispatch).isDirectory()) {

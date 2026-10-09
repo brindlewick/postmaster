@@ -1,20 +1,22 @@
 # ~/.postmaster/config.toml
 #
 # The user's machine-level choices, and nothing about any target project. Projects are
-# discovered (scripts/discover-project.sh), never configured. scripts/setup.sh writes this
+# discovered (scripts/run discover-project), never configured. scripts/run setup writes this
 # file from your answers; copy it by hand if you prefer. Model ids are whatever the provider
-# serves under the harness; confirm each with one trial launch (scripts/launch.sh form <name>
-# prints the exact command). Every value below is one that scripts/launch.sh can run today.
+# serves under the harness; confirm each with one trial launch (scripts/run launch form <name>
+# prints the exact command). Every value below is one that scripts/run launch can run today.
 # A run keeps the config it was dispatched with, recorded in its run.json: an edit here
-# reaches the next run, never one already in flight.
+# reaches the next run, never one already in flight. A project may override any setting
+# here from its own .postmaster/settings.toml (see settings.example.toml); a settings
+# file git tracks takes effect once the user has accepted it.
 
-# Where projects live. scripts/find-projects.sh reads this when given no roots.
+# Where projects live. scripts/run find-projects reads this when given no roots.
 projects_roots = ["~/Code"]
 
 # Whether lanes run confined in sandbox-runtime (Bubblewrap on Linux, Seatbelt on macOS).
-# "off" when the key is absent, so an existing config keeps today's behavior. setup.sh
-# writes this from the confine answer; scripts/probe-confine.sh says whether the machine
-# can run it and what finishes it. launch.sh reading the key is a separate change.
+# "off" when the key is absent, so an existing config keeps today's behavior. scripts/run
+# setup writes this from the confine answer; scripts/run probe-confine says whether the machine
+# can run it and what finishes it. scripts/run launch reading the key is a separate change.
 confine = "off"
 
 # A lane is a harness plus a model plus an effort, and is a workhorse or a reviewer or
@@ -39,7 +41,8 @@ model = "<plan-provider>/mimo-v2.6-pro"         # the provider id of your key's 
 effort = "high"                                 # MiMo V2.6 Pro's variants are low, medium, high
 env_file = "~/.postmaster/lanes/mimo.env"       # XIAOMI_API_KEY=<key>
 
-# The team for a run. At least two workhorses from different vendors. Reviewers are lanes too, the
+# The team for a run. The booking clerk prepares tickets with the user. At least two workhorses
+# from different vendors. Reviewers are lanes too, the
 # workhorses by default; a third lane of another family may be added. The coachman and its fallback
 # are never a model that runs as a lane in the same run, and both need a harness with a
 # resume form (codex, grok, claude, pi, muse or mimo), since rulings arrive by resuming the
@@ -50,26 +53,33 @@ reviewers = ["luna", "deepseek"]
 coachman = { harness = "grok", model = "grok-4.6", effort = "xhigh" }
 coachman_fallback = { harness = "codex", model = "gpt-6-astra", effort = "max" }
 postmaster = { harness = "agy", model = "gemini-3.8-flash-high" }   # interactive, in tmux
+clerk = { harness = "claude", model = "<strongest affordable model>", effort = "high" }
 max_runs = 2                                    # concurrent runs per project
+mode = "synthesis"                           # how runs dispatch: "synthesis" (the default) has the
+                                              # coachman harness the workhorse lanes; "single-thread"
+                                              # has the coachman write the change itself; "alternate"
+                                              # gives each ticket of a project the mode the project's
+                                              # previous run did not have. A mode the user names for a
+                                              # ticket wins over this setting.
 
 # A muse coachman takes its key from an env file, as any role may:
 # coachman = { harness = "muse", model = "muse-spark-1.3-contributor", effort = "max",
 #              env_file = "~/.postmaster/lanes/muse.env" }     # holds META_API_KEY=<key>
 
 # Optional: a different coachman per leg. The legs are synthesis and review (and ship for a
-# run dispatched before the two-leg change), and scripts/launch.sh refuses a config that names
+# run dispatched before the two-leg change), and scripts/run launch refuses a config that names
 # any other.
 # [team.coachman_legs]
 # synthesis = { harness = "codex", model = "gpt-6-astra", effort = "max" }
 
 # Optional: a lens's own reviewer lanes, where they differ from `reviewers`, such as a lane
 # whose harness has a skill for that lens alone. A lens not named here is reviewed by
-# `reviewers`. The lenses are the review stage's: `scripts/reviewers.sh lenses` lists them, and
-# `scripts/reviewers.sh lines` refuses any other name, or a lane not defined above.
+# `reviewers`. The lenses are the review stage's: `scripts/run reviewers lenses` lists them, and
+# `scripts/run reviewers lines` refuses any other name, or a lane not defined above.
 # [team.lens_reviewers]
 # security = ["luna", "deepseek", "sentinel"]   # sentinel: a third lane, defined under [lanes]
 
-# Per-launch resource limits. On Linux with a working systemd user manager, each host.sh run
+# Per-launch resource limits. On Linux with a working systemd user manager, each run host run
 # gets its own cgroup. Role values override either default; omitted values inherit from [limits].
 [limits]
 memory_max = "8G"
@@ -92,7 +102,7 @@ poll_seconds = 120
 #   github  GitHub Issues on a GitHub Projects board, through the gh CLI (the default; needs
 #           gh logged in with the project scope, nothing else)
 #   plane   Plane work items through its REST API; url and workspace here, the key in env_file
-#   local   tickets in each repository's own git directory, through scripts/local.sh; no
+#   local   tickets in each repository's own git directory, through scripts/run local; no
 #           service, no login, nothing more here. A repository whose store exists uses it
 #           whatever this kind is.
 #   other   a tracker the agent reaches through its own tooling, named here and described in
@@ -108,15 +118,15 @@ postmaster_may_create = false   # true lets the postmaster create tickets withou
 [review]
 # Seconds a review round may run; a run keeps the value recorded in its run.json at dispatch.
 # A reviewer still running at the limit is stopped and recorded DEGRADED, with timeout as the
-# cause (scripts/review-round.sh). 2400 when unset.
+# cause (scripts/run review-round). 2400 when unset.
 round_timeout_seconds = 2400
 
 [planning]
-# Optional. A template for the link that puts the run's one spec to the user during the
-# planning stage, with {path} replaced by the absolute path of the folder that holds
-# WORKHORSE-SPEC.md under review (code-server opens folders). Leave empty to send the
-# file's path alone. The host is private to this machine, so it lives here and never in
-# a ticket.
+# Optional. A template for the link that puts a ticket draft to the user while
+# the booking clerk prepares it, with {path} replaced by the absolute path of
+# the folder that holds the draft (code-server opens folders). Leave empty to
+# send the file's path alone. The host is private to this machine, so it lives
+# here and never in a ticket.
 review_link = ""
 
 [ship]

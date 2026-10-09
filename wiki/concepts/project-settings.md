@@ -33,17 +33,19 @@ whole, and sharing is one narrow file a project chooses to commit. The machine's
 - **Sharing is opt-in and narrow.** One file, `project.toml`, holds what the project requires
   of a run: the checks, the default turnpikes, the tracker binding by name, the risk
   surfaces. It carries no credential, no filesystem path, no machine name and no role
-  assignment — those are properties of a person's machine. Local `settings.toml` holds the
-  role assignments and never travels.
+  assignment — those are properties of a person's machine. The person's `settings.toml`
+  overrides the global config setting by setting for that project, models and env files
+  included; a project may commit it to share it, and a tracked file is used only after
+  the user has accepted it, and again after it changes.
 - **The normal case is no file at all.** With nothing shared and nothing local, the flow
   discovers what it can and the agent conducts the rest in conversation. A missing settings
   file is never an error and never a prompt to create one.
 - **Precedence is stated once.** Discovery supplies defaults; the shared file declares what
-  the project requires; local settings are this person's choices on this machine; the
-  machine config supplies what is machine-specific and is never overridden by a project.
-  None of these sets a floor of turnpikes: a ticket names its own turnpikes
-  ([#40](https://github.com/brindlewick/postmaster/issues/40)), and project settings only
-  say what `default` means for that project.
+  the project requires; the person's file overrides the global config setting by setting,
+  a group merging and a list or single value replaced whole; the machine config supplies
+  the machine's defaults. None of these sets a floor of turnpikes: a ticket names its own
+  turnpikes ([#40](https://github.com/brindlewick/postmaster/issues/40)), and project
+  settings only say what `default` means for that project.
 - **It softens design rule 1 deliberately.** The rule says the flow discovers what a project
   needs and does not demand configuration, and that stays true. What the folder adds is a
   place for a decision discovery cannot make and a correction where discovery guessed wrong,
@@ -54,8 +56,9 @@ whole, and sharing is one narrow file a project chooses to commit. The machine's
 - A run already in flight under the old `~/.postmaster/runs/<basename>/` layout is not
   migrated. It finishes where it started.
 - Two settings files with a precedence between them is one more thing to get wrong. The
-  reader is one script (`scripts/project-settings.sh`) that enforces the shape and the
-  no-path/no-credential rule, so a mistake is named rather than silently honoured.
+  reader is one loader behind `scripts/run project-settings` that enforces the shape and,
+  for the shared file, the no-path/no-credential rule, so a mistake is named rather than
+  silently honoured.
 
 ## What would change it
 
@@ -67,10 +70,10 @@ whole, and sharing is one narrow file a project chooses to commit. The machine's
 
 ## What changed because of it
 
-`scripts/project-settings.sh` reads and writes the two files and refuses a credential or a
-path in either. `scripts/turnpikes.sh` expands `default` from a project's declared set.
-`scripts/discover-project.sh` reports whether the target has one. Run artifacts live at
-`<project>/.postmaster/runs/`, and `log-action.sh` names the project from its root.
+`scripts/run project-settings` reads and writes the two files and refuses a credential or a
+path in the shared one. `scripts/run turnpikes` expands `default` from a project's declared set.
+`scripts/run discover-project` reports whether the target has one. Run artifacts live at
+`<project>/.postmaster/runs/`, and `run log-action` names the project from its root.
 `settings.example.toml` and `project.example.toml` document the shapes. The setup
 conversation offers a project decision for `.postmaster/` and says which file it proposes.
 A run resolves the target's local roles at dispatch, and every run launch's durable session

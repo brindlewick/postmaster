@@ -1,7 +1,7 @@
 // Tests beside scripts/lib/text.ts, moved from its --self-test on #109: 9 controls.
 // The golden cases, tsGolden and the fixture diff stay one control of 35099 cases, as before.
 // The golden-case builders stay in the module: the regen note in scripts/fixtures/
-// text-goldens.json runs them through text.sh --dump-golden-cases, so only the controls
+// text-goldens.json runs them through run text --dump-golden-cases, so only the controls
 // moved. The guard scan walks the same file set with the same exclusion (the module itself),
 // plus the generated bundles and the #208 port, which are not hand-written text-port code.
 import { describe, expect, test } from "bun:test";
@@ -78,7 +78,7 @@ describe("goldens", () => {
       }
     }
     expect([missing, missingCp]).toEqual([0, 0]);
-  }, 60000);
+  });
 
   test(`module goldens vs python3 (${goldenCasesBuilt.length} cases, fixture ${goldenFixture.python})`, () => {
     const cases = goldenCasesBuilt;

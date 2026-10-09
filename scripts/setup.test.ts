@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
 import { run } from "./lib/proc.ts";
 
-const SELF = join(import.meta.dir, "setup.sh");
+const SELF = join(import.meta.dir, "run");
 
 let tmp = "";
 let plainRc = -1;
@@ -51,6 +51,8 @@ function answers(name: string, extra?: string): void {
     "fallback.model=spare",
     "postmaster.harness=bash",
     "postmaster.model=pm",
+    "clerk.harness=claude",
+    "clerk.model=clerk-model",
   ];
   if (extra) lines.push(extra);
   writeFileSync(join(tmp, `${name}.answers`), `${lines.join("\n")}\n`, "utf8");
@@ -58,8 +60,8 @@ function answers(name: string, extra?: string): void {
 
 function runSetup(name: string, extraEnv: Record<string, string> = {}): number {
   const r = run(
-    "bash",
-    [SELF, "--answers", join(tmp, `${name}.answers`), "--config", join(tmp, `${name}.toml`)],
+    SELF,
+    ["setup", "--answers", join(tmp, `${name}.answers`), "--config", join(tmp, `${name}.toml`)],
     {
       env: {
         ...(process.env as Record<string, string>),
@@ -114,16 +116,104 @@ function planningLink(name: string): string {
 
 describe("positive controls", () => {
   test("setup lists confine, asks once after the probe, and defaults it to off", () => {
-    const keys = run("bash", [SELF, "--keys"]);
+    const keys = run(SELF, ["setup", "--keys"]);
     const out = readFileSync(join(tmp, "plain.out"), "utf8");
     const cfg = tryTomlFile(join(tmp, "plain.toml"));
     expect(keys.code).toBe(0);
     expect(keys.out).toContain("confine                    off");
+    expect(keys.out).toContain("clerk.harness");
+    expect(keys.out).toContain("clerk.model");
+    expect(keys.out).toContain("clerk.effort?");
+    expect(keys.out).toContain("clerk.env_file?");
     expect(plainRc).toBe(0);
     expect(cfg?.confine).toBe("off");
+    expect((cfg?.team as Record<string, unknown> | undefined)?.mode).toBe("synthesis");
     expect(out).toContain("lane confinement:");
     expect(out.match(/Run lanes confined \(on\/off\)/gu)?.length).toBe(1);
-  }, 30000);
+  });
+
+  test("setup lists the mode key with its three values and default, and writes each", () => {
+    const keys = run(SELF, ["setup", "--keys"]);
+    expect(keys.code).toBe(0);
+    expect(keys.out).toContain("dispatch mode: synthesis, single-thread or alternate");
+    expect(keys.out).toMatch(/mode +synthesis +dispatch mode:/u);
+    for (const mode of ["synthesis", "single-thread", "alternate"]) {
+      answers(`mode-${mode}`, `mode=${mode}`);
+      expect(runSetup(`mode-${mode}`)).toBe(0);
+      const cfg = tryTomlFile(join(tmp, `mode-${mode}.toml`));
+      expect((cfg?.team as Record<string, unknown> | undefined)?.mode).toBe(mode);
+    }
+  }, 120000);
+
+  test("the adding verb inserts clerk in [team] and preserves the other config lines", () => {
+    const before = `[team]\nworkhorses = ["alpha", "beta"]\npostmaster = { harness = "claude", model = "pm" }\n\n[postmaster]\npoll_seconds = 9\n`;
+    writeFileSync(join(tmp, "legacy.toml"), before);
+    answers("legacy", "clerk.harness=claude");
+    const r = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "legacy.answers"),
+        "--config",
+        join(tmp, "legacy.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(r.code).toBe(0);
+    const after = readFileSync(join(tmp, "legacy.toml"), "utf8");
+    expect(after.replace('clerk = { harness = "claude", model = "clerk-model" }\n', "")).toBe(
+      before,
+    );
+    const team = tryTomlFile(join(tmp, "legacy.toml"))?.team as Record<string, unknown>;
+    expect(team.clerk).toBeDefined();
+    expect((team.clerk as Record<string, unknown>).harness).toBe("claude");
+    expect((team.clerk as Record<string, unknown>).model).toBe("clerk-model");
+  });
+
+  test("the adding verb names a missing clerk harness or model", () => {
+    writeFileSync(join(tmp, "missing-clerk.toml"), `[team]\nworkhorses = ["alpha", "beta"]\n`);
+    writeFileSync(join(tmp, "missing-harness.answers"), "clerk.model=clerk-model\n");
+    const noHarness = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "missing-harness.answers"),
+        "--config",
+        join(tmp, "missing-clerk.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(noHarness.code).toBe(1);
+    expect(noHarness.err).toContain("clerk.harness");
+    writeFileSync(join(tmp, "missing-model.answers"), "clerk.harness=claude\n");
+    const noModel = run(
+      "bash",
+      [
+        SELF,
+        "setup",
+        "--add-clerk",
+        "--answers",
+        join(tmp, "missing-model.answers"),
+        "--config",
+        join(tmp, "missing-clerk.toml"),
+      ],
+      {
+        env: { ...process.env, PATH: `${join(tmp, "bin")}:${process.env.PATH}` },
+      },
+    );
+    expect(noModel.code).toBe(1);
+    expect(noModel.err).toContain("clerk.model");
+  });
 
   test("confine=on is written when Bubblewrap starts", () => {
     answers("confine-ready", "confine=on");
@@ -131,7 +221,7 @@ describe("positive controls", () => {
     const cfg = tryTomlFile(join(tmp, "confine-ready.toml"));
     expect(rc).toBe(0);
     expect(cfg?.confine).toBe("on");
-  }, 30000);
+  });
 
   test("confine=on is written for a partial AppArmor result", () => {
     answers("confine-partial", "confine=on");
@@ -141,7 +231,7 @@ describe("positive controls", () => {
     expect(rc).toBe(0);
     expect(cfg?.confine).toBe("on");
     expect(out).toContain("lane confinement: partial");
-  }, 30000);
+  });
 
   test("confine=off is written even when the probe is unavailable", () => {
     answers("confine-off", "confine=off");
@@ -149,7 +239,7 @@ describe("positive controls", () => {
     const cfg = tryTomlFile(join(tmp, "confine-off.toml"));
     expect(rc).toBe(0);
     expect(cfg?.confine).toBe("off");
-  }, 30000);
+  });
 
   test("a lens given its own lanes is written to [team.lens_reviewers]", () => {
     answers("lens", "reviewers.security=alpha, beta, sentinel");
@@ -160,11 +250,11 @@ describe("positive controls", () => {
     expect(JSON.stringify((cfg?.team as Record<string, unknown> | undefined)?.lens_reviewers)).toBe(
       '{"security":["alpha","beta","sentinel"]}',
     );
-  }, 30000);
+  });
 
   test("the written config resolves: the reviewers default to the workhorses, and security has its own", () => {
-    const r = run("bash", [
-      join(import.meta.dir, "reviewers.sh"),
+    const r = run(join(import.meta.dir, "run"), [
+      "reviewers",
       "lines",
       "--config",
       join(tmp, "lens.toml"),
@@ -172,7 +262,7 @@ describe("positive controls", () => {
     expect(r.out.trim()).toBe(
       "reviewers: alpha, beta\nbug reviewers: \nsecurity reviewers: alpha, beta, sentinel",
     );
-  }, 30000);
+  });
 
   test("without lens answers there is no table, as before", () => {
     const cfg = tryTomlFile(join(tmp, "plain.toml"));
@@ -182,7 +272,7 @@ describe("positive controls", () => {
     expect(JSON.stringify((cfg?.team as Record<string, unknown> | undefined)?.reviewers)).toBe(
       '["alpha","beta"]',
     );
-  }, 30000);
+  });
 
   test("the coachman, the fallback and the postmaster each get their env file, with or without an effort", () => {
     answers(
@@ -203,29 +293,29 @@ describe("positive controls", () => {
     expect(JSON.stringify(t?.postmaster)).toBe(
       '{"harness":"bash","model":"pm","env_file":"~/.postmaster/lanes/pm.env"}',
     );
-  }, 30000);
+  });
 
   test("a role with no env file answer gets no env_file key", () => {
     const cfg = tryTomlFile(join(tmp, "plain.toml"));
     const t = cfg?.team as Record<string, unknown> | undefined;
     expect(JSON.stringify(t?.coachman)).toBe('{"harness":"bash","model":"judge"}');
-  }, 30000);
+  });
 
   test("a planning link defaults to empty under [planning]", () => {
     expect(planningLink("plain")).toBe("");
-  }, 30000);
+  });
 
   test("the planning link template is stored under [planning]", () => {
     answers("planlink", "planning.review_link=https://code.example/open?file={path}");
     const planlinkRc = runSetup("planlink");
     expect(planlinkRc).toBe(0);
     expect(planningLink("planlink")).toBe("https://code.example/open?file={path}");
-  }, 30000);
+  });
 
   test("launch memory and process caps default to 8G and 512", () => {
     expect(capLimit("plain", "default", "memory_max")).toBe("8G");
     expect(capLimit("plain", "default", "tasks_max")).toBe("512");
-  }, 30000);
+  });
 
   test("a role can override either cap and inherit the other", () => {
     answers(
@@ -240,7 +330,7 @@ describe("positive controls", () => {
     expect(capLimit("caps", "lane", "tasks_max")).toBe("384");
     expect(capLimit("caps", "reviewer", "memory_max")).toBe("8G");
     expect(capLimit("caps", "reviewer", "tasks_max")).toBe("96");
-  }, 30000);
+  });
 
   test("a malformed default memory cap is refused, and nothing is written", () => {
     answers("badmemory", "limits.memory_max=4.5G");
@@ -249,7 +339,7 @@ describe("positive controls", () => {
     expect(badmemoryRc).toBe(1);
     expect(existsSync(join(tmp, "badmemory.toml"))).toBe(false);
     expect(out).toContain("memory_max must be");
-  }, 30000);
+  });
 
   test("a zero role process cap is refused, and nothing is written", () => {
     answers("badtasks", "limits.reviewer.tasks_max=0");
@@ -258,18 +348,18 @@ describe("positive controls", () => {
     expect(badtasksRc).toBe(1);
     expect(existsSync(join(tmp, "badtasks.toml"))).toBe(false);
     expect(out).toContain("reviewer.tasks_max must be");
-  }, 30000);
+  });
 
   test("a review round's time limit defaults to 2400 seconds, under [review]", () => {
     expect(limit("plain")).toBe("2400");
-  }, 30000);
+  });
 
   test("an answer sets it, up to 86400", () => {
     answers("limit", "round_timeout_seconds=86400");
     const limitRc = runSetup("limit");
     expect(limitRc).toBe(0);
     expect(limit("limit")).toBe("86400");
-  }, 30000);
+  });
 
   test("setup names unsupported bug reviewers and warns when none has a review form", () => {
     answers("no-bug", "reviewers.bug=alpha, beta");
@@ -279,7 +369,7 @@ describe("positive controls", () => {
     expect(out).toContain("bug reviewer 'alpha' uses bash, which has no code-review form");
     expect(out).toContain("bug reviewer 'beta' uses bash, which has no code-review form");
     expect(out).toContain("warning: no configured bug reviewer has a code-review form");
-  }, 30000);
+  });
 
   test("setup warns for the ineligible lane and resolves the eligible bug reviewer", () => {
     answers("mixed-bug", "reviewers.bug=alpha, beta");
@@ -290,8 +380,8 @@ describe("positive controls", () => {
     writeFileSync(ap, swapped, "utf8");
     const mixedBugRc = runSetup("mixed-bug");
     const out = readFileSync(join(tmp, "mixed-bug.out"), "utf8");
-    const er = run("bash", [
-      join(import.meta.dir, "reviewers.sh"),
+    const er = run(join(import.meta.dir, "run"), [
+      "reviewers",
       "eligible",
       "bug",
       "--config",
@@ -300,7 +390,102 @@ describe("positive controls", () => {
     expect(mixedBugRc).toBe(0);
     expect(out).toContain("bug reviewer 'beta' uses pi, which has no code-review form");
     expect(er.out.trim()).toBe("alpha");
-  }, 30000);
+  });
+
+  // A stand-in uname names another system: setup decides by the test
+  // systemdCapability() uses, so this takes the same path a Mac takes.
+  const otherSystemPath = (): string => {
+    const bin = join(tmp, "other-system");
+    mkdirSync(bin, { recursive: true });
+    const uname = join(bin, "uname");
+    writeFileSync(uname, '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Darwin; else exit 1; fi\n');
+    chmodSync(uname, 0o755);
+    return `${bin}:${join(tmp, "bin")}:${process.env.PATH}`;
+  };
+
+  test("where no launch can be capped, the keys list carries no limits and no limits line", () => {
+    const keys = run(SELF, ["setup", "--keys"], { env: { PATH: otherSystemPath() } });
+    expect(keys.code).toBe(0);
+    expect(keys.out).not.toContain("limits.");
+    expect(keys.out.match(/^limits\./gmu)).toBeNull();
+    const linuxKeys = run(SELF, ["setup", "--keys"]);
+    expect(linuxKeys.out).toContain("limits.memory_max");
+  });
+
+  test("where no launch can be capped, setup asks no limit question, says so once, and writes no limits table", () => {
+    answers("no-cap", "limits.memory_max=bogus");
+    const rc = runSetup("no-cap", { PATH: otherSystemPath() });
+    const out = readFileSync(join(tmp, "no-cap.out"), "utf8");
+    expect(rc).toBe(0);
+    expect(out.match(/without memory or process limits/gu)?.length).toBe(1);
+    expect(out).not.toContain("default memory cap");
+    expect(out).not.toContain("[limits]");
+    const cfg = tryTomlFile(join(tmp, "no-cap.toml"));
+    expect(cfg).not.toBeNull();
+    expect(cfg?.limits).toBeUndefined();
+  });
+
+  test("where launches can be capped, setup never says they run without limits", () => {
+    const out = readFileSync(join(tmp, "plain.out"), "utf8");
+    expect(out).not.toContain("without memory or process limits");
+    expect(out).toContain("default memory cap");
+  });
+
+  test("interactive setup where no launch can be capped reports uncapped launches once", () => {
+    const answers = [
+      "",
+      "", // roots and lane names
+      "bash",
+      "lane-alpha",
+      "",
+      "", // alpha
+      "bash",
+      "lane-beta",
+      "",
+      "", // beta
+      "",
+      "", // workhorses and reviewers
+      "",
+      "",
+      "", // style, bug and security reviewer overrides
+      "bash",
+      "coachman",
+      "",
+      "", // coachman
+      "bash",
+      "fallback",
+      "",
+      "", // fallback
+      "bash",
+      "postmaster",
+      "",
+      "", // postmaster
+      "bash",
+      "clerk",
+      "",
+      "", // clerk
+      "",
+      "", // run count and poll interval
+      "",
+      "", // tracker and confinement
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "", // create tickets, timeout, merge, checkpoint, links
+    ].join("\n");
+    const interactive = run(SELF, ["setup", "--dry-run"], {
+      env: { PATH: otherSystemPath() },
+      input: `${answers}\n`,
+    });
+    expect(interactive.code).toBe(0);
+    expect(interactive.out).not.toContain("Launch limits:");
+    expect(interactive.out).not.toContain("[limits]");
+    expect(interactive.out.match(/without memory or process limits/gu)?.length).toBe(1);
+  });
 });
 
 describe("negative controls", () => {
@@ -311,7 +496,7 @@ describe("negative controls", () => {
     expect(rc).toBe(1);
     expect(out).toContain("confine=on is unavailable");
     expect(existsSync(join(tmp, "confine-unavailable.toml"))).toBe(false);
-  }, 30000);
+  });
 
   test("a value other than on or off is refused", () => {
     answers("confine-invalid", "confine=maybe");
@@ -320,7 +505,16 @@ describe("negative controls", () => {
     expect(rc).toBe(1);
     expect(out).toContain("confine must be on or off");
     expect(existsSync(join(tmp, "confine-invalid.toml"))).toBe(false);
-  }, 30000);
+  });
+
+  test("a mode other than synthesis, single-thread or alternate is refused, naming the three", () => {
+    answers("mode-invalid", "mode=two-lanes");
+    const rc = runSetup("mode-invalid");
+    const out = readFileSync(join(tmp, "mode-invalid.out"), "utf8");
+    expect(rc).toBe(1);
+    expect(out).toContain("mode must be synthesis, single-thread or alternate");
+    expect(existsSync(join(tmp, "mode-invalid.toml"))).toBe(false);
+  });
 
   const badLimits = [
     "0",
@@ -342,7 +536,7 @@ describe("negative controls", () => {
       expect(rc).toBe(1);
       expect(existsSync(join(tmp, `${name}.toml`))).toBe(false);
       expect(out).toContain("round_timeout_seconds must be");
-    }, 30000);
+    });
   }
 
   test("a lens reviewer that is not a lane is refused, and nothing is written", () => {
@@ -352,7 +546,7 @@ describe("negative controls", () => {
     expect(ghostRc).toBe(1);
     expect(existsSync(join(tmp, "ghost.toml"))).toBe(false);
     expect(out).toContain("security reviewer 'ghost' is not one of the lanes");
-  }, 30000);
+  });
 
   test("a coachman on a lane's model is refused", () => {
     answers("shared", "coachman.model=m1");
@@ -364,7 +558,7 @@ describe("negative controls", () => {
     expect(sharedRc).toBe(1);
     expect(existsSync(join(tmp, "shared.toml"))).toBe(false);
     expect(out).toContain("cannot run on a lane's model");
-  }, 30000);
+  });
 
   test("a missing answer is refused, naming it", () => {
     answers("missing");
@@ -376,7 +570,7 @@ describe("negative controls", () => {
     expect(missingRc).toBe(1);
     expect(existsSync(join(tmp, "missing.toml"))).toBe(false);
     expect(out).toContain("no answer for fallback.model");
-  }, 30000);
+  });
 
   test("a non-empty planning link without {path} is refused", () => {
     answers("badlink", "planning.review_link=https://code.example/open");
@@ -385,5 +579,5 @@ describe("negative controls", () => {
     expect(badlinkRc).toBe(1);
     expect(existsSync(join(tmp, "badlink.toml"))).toBe(false);
     expect(out).toContain("planning.review_link must contain {path}");
-  }, 30000);
+  });
 });

@@ -4,6 +4,7 @@
 // The process-exit cleanup is an afterAll; withTempDir still owns the temp dir.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -14,9 +15,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { run, withTempDir } from "./lib/proc.ts";
-import { ARG_SPLIT_RE, monotonic } from "./review-round.ts";
+import { processState } from "./lib/processes.ts";
+import { ARG_SPLIT_RE, monotonic, reachCheckMissing } from "./review-round.ts";
 
-const self = join(import.meta.dir, "review-round.sh");
+const self = join(import.meta.dir, "run");
 
 const skipBootId = !existsSync("/proc/sys/kernel/random/boot_id");
 if (skipBootId) {
@@ -148,7 +150,7 @@ esac
     }
     const runSelf = (...args: string[]): void => {
       const t0 = Date.now();
-      const r = run(self, args);
+      const r = run(self, ["review-round", ...args]);
       out = r.out + r.err;
       rc = r.code;
       took = Math.round((Date.now() - t0) / 1000);
@@ -163,13 +165,7 @@ esac
       }
     };
     const alive = (pid: number): boolean => {
-      try {
-        const r = run("ps", ["-o", "stat=", "-p", String(pid)]);
-        const s = r.out.trim();
-        return s !== "" && !s.startsWith("Z");
-      } catch {
-        return false;
-      }
+      return processState(pid) === "live";
     };
     // dead <pid> [<seconds>]: wait until a process is gone (or a zombie).
     // An empty pid is a failed fixture, never a dead process: fail, do not pass.
@@ -228,8 +224,9 @@ esac
     const launch = (round: number, lens: string, lane: string, kind: string): void => {
       n += 1;
       const r = run(
-        join(import.meta.dir, "host.sh"),
+        join(import.meta.dir, "run"),
         [
+          "host",
           "run",
           `T-1 · ${lane} ${lens} review`,
           join(repo, ".worktrees", `T-1-rev-${lens}-${lane}`),
@@ -254,7 +251,7 @@ esac
         console.log(`  (could not launch ${lens} ${lane})`);
         return;
       }
-      // host.sh run waits 10s for the launch pid itself; this covers a slower
+      // run host run waits 10s for the launch pid itself; this covers a slower
       // runner, so an empty pid below means the launch failed, never that it lags.
       const launchPidFile = join(tmp, "pids", `launch.${n}`);
       let i = 0;
@@ -406,7 +403,7 @@ esac
     const first = Bun.spawn([
       "bash",
       "-c",
-      `exec "${self}" wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
+      `exec "${self}" review-round wait "${d}" 2 "${repo}" bug:three > "${firstOut}" 2>&1`,
     ]);
     const firstRc = waitLine(firstOut, "round 2,", 60);
     // Let some deadline age while the first wait runs, so a reset (left back to the limit) stands out.
@@ -467,6 +464,41 @@ esac
         run("git", ["-C", repo, "rev-parse", "-q", "--verify", "refs/heads/probe"]).code === 0,
     );
 
+    // A wall: both reviewers' launches end on their provider's usage limit, which the
+    // launches recorded as `wall` lines before their markers landed (C11). The round
+    // closes without them, each DEGRADED with the provider's message, and nothing escalates.
+    limit("60");
+    cutScratch("bug", "stub");
+    cutScratch("security", "sec");
+    runSelf("start", d, "5");
+    launch(5, "bug", "stub", "fast");
+    launch(5, "security", "sec", "fast");
+    const codexWall = "You’ve hit your usage limit. try again at 2:29 AM.";
+    const claudeWall = "You've hit your weekly limit · resets 3am (UTC)";
+    appendFileSync(
+      join(d, "actions.jsonl"),
+      `${JSON.stringify({ ts: new Date().toISOString(), project: "p", run: "T-1", actor: "lane:stub", action: "wall", target: "stub", detail: `reviewer bug 5 none ${codexWall}` })}\n` +
+        `${JSON.stringify({ ts: new Date().toISOString(), project: "p", run: "T-1", actor: "lane:sec", action: "wall", target: "sec", detail: `reviewer security 5 none ${claudeWall}` })}\n`,
+    );
+    runSelf("wait", d, "5", repo, "bug:stub security:sec");
+    let wallRunLog = "";
+    try {
+      wallRunLog = readFileSync(join(d, "run-log.md"), "utf8");
+    } catch {
+      wallRunLog = "";
+    }
+    check(
+      "a walled reviewer is DEGRADED with the provider's message and the round closes (C11)",
+      rc === 0 &&
+        wallRunLog.includes(`stub bug: DEGRADED, provider wall: "${codexWall}"`) &&
+        wallRunLog.includes(`sec security: DEGRADED, provider wall: "${claudeWall}"`) &&
+        has(`WALL bug stub: DEGRADED, provider wall: "${codexWall}"`) &&
+        actionsLines('"action":"degrade"') === 4 &&
+        actionsLines('"target":"stub","detail":"bug r5: provider wall:') === 1 &&
+        actionsLines('"target":"sec","detail":"security r5: provider wall:') === 1 &&
+        !existsSync(join(d, ".escalation-ready")),
+    );
+
     console.log("negative controls");
     out = waitOut;
     rc = waitRc;
@@ -491,7 +523,7 @@ esac
     const stale = Bun.spawn([
       "bash",
       "-c",
-      `"${self}" wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
+      `"${self}" review-round wait "${d}" 4 "${repo}" bug:four > "${staleOut}" 2>&1; echo $? > "${staleRcFile}"`,
     ]);
     // The wait must have read this start's attempt before the next start replaces it.
     const staleRc = waitLine(staleOut, "round 4,", 60);
@@ -522,7 +554,7 @@ esac
     const _insideOut = join(tmp, "inside.out");
     const insideR = run("bash", [
       "-c",
-      `cd "$1" && "${self}" teardown "${d}" 4 "${repo}" bug:four`,
+      `cd "$1" && "${self}" review-round teardown "${d}" 4 "${repo}" bug:four`,
       "_",
       join(repo, ".worktrees/T-1-rev-bug-four"),
     ]);
@@ -709,6 +741,7 @@ describe("positive controls", () => {
     "when every marker is in, wait exits 0 and records nothing",
     "teardown stops what a finished reviewer's launch left running, and says so",
     "a scratch a reviewer switched onto a branch is still removed, and the branch kept",
+    "a walled reviewer is DEGRADED with the provider's message and the round closes (C11)",
   ];
   for (const label of labels) {
     test(label, () => {
@@ -787,5 +820,123 @@ describe("negative controls", () => {
   }
   test("reviewers on several lines, one given twice, are each waited on once", () => {
     assertControl("reviewers on several lines, one given twice, are each waited on once");
+  });
+});
+
+// Teardown waits for the round's reach check: the round's own teardown, which names no reviewers,
+// does not run before a reach check named for a round that took its reach snapshot. These need no
+// sequence, only a fresh run.
+const pointLine = (point: string): string =>
+  JSON.stringify({
+    ts: "2026-10-09T00:00:00Z",
+    actor: "coachman",
+    action: "reach",
+    target: point,
+    detail: JSON.stringify({ kind: "point", point, result: "clean" }),
+  });
+
+interface Torn {
+  code: number;
+  out: string;
+  actions: string;
+  runLog: string;
+}
+
+/** Start round 1 of a fresh run with one reviewer, then `review-round teardown` it, naming it or not. */
+function teardown(snapshot: boolean, actions: string[], named: boolean): Torn {
+  return withTempDir((tmp) => {
+    const repo = join(tmp, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "T-1");
+    mkdirSync(dispatch, { recursive: true });
+    run("git", ["init", "-q", "-b", "main", repo]);
+    run(self, ["review-round", "start", dispatch, "1"]);
+    const statePath = join(dispatch, "logs", "review-r1.json");
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    writeFileSync(statePath, JSON.stringify({ ...state, reviewers: [["bug", "luna"]] }));
+    if (snapshot) {
+      mkdirSync(join(dispatch, "reach"), { recursive: true });
+      writeFileSync(join(dispatch, "reach", "before-r1.json"), "{}\n");
+    }
+    if (actions.length > 0)
+      writeFileSync(join(dispatch, "actions.jsonl"), `${actions.join("\n")}\n`);
+    const r = run(self, [
+      "review-round",
+      "teardown",
+      dispatch,
+      "1",
+      repo,
+      ...(named ? ["bug:luna"] : []),
+    ]);
+    const read = (name: string): string => {
+      try {
+        return readFileSync(join(dispatch, name), "utf8");
+      } catch {
+        return "";
+      }
+    };
+    return {
+      code: r.code,
+      out: r.out + r.err,
+      actions: read("actions.jsonl"),
+      runLog: read("run-log.md"),
+    };
+  });
+}
+
+describe("reachCheckMissing", () => {
+  test("it waits only for the round's own teardown of a round with no point of its own", () => {
+    expect(reachCheckMissing(true, [], "1")).toBe(true);
+    expect(reachCheckMissing(true, ["r2", "card"], "1")).toBe(true);
+    expect(reachCheckMissing(true, ["r1"], "1")).toBe(false);
+    expect(reachCheckMissing(true, ["workhorses", "r1", "r2"], "2")).toBe(false);
+    expect(reachCheckMissing(false, [], "1")).toBe(false);
+    expect(reachCheckMissing(false, ["r1"], "1")).toBe(false);
+  });
+});
+
+describe("teardown and the round's reach check", () => {
+  test("a round with a reach snapshot and no reach check is not torn down, and says why", () => {
+    const t = teardown(true, [], false);
+    expect(t.code).toBe(1);
+    expect(t.out).toContain("no reach check r1 is recorded: nothing was removed");
+    expect(t.actions).toContain("r1: teardown waits for the reach check");
+    expect(t.runLog).not.toContain("round 1: removed");
+  });
+
+  test("with the round's reach check recorded, the same teardown goes on", () => {
+    const t = teardown(true, [pointLine("r1")], false);
+    expect(t.code).toBe(0);
+    expect(t.out).not.toContain("no reach check");
+    expect(t.runLog).toContain("round 1: removed 0 of 1 scratches, 1 already gone");
+  });
+
+  test("a check recorded for another round does not stand in for this one", () => {
+    const t = teardown(true, [pointLine("r2"), pointLine("card")], false);
+    expect(t.code).toBe(1);
+    expect(t.out).toContain("no reach check r1 is recorded");
+  });
+
+  test("a round that took no reach snapshot is torn down as before", () => {
+    const t = teardown(false, [], false);
+    expect(t.code).toBe(0);
+    expect(t.runLog).toContain("round 1: removed 0 of 1 scratches, 1 already gone");
+  });
+
+  test("a scratch an interrupted round left behind is cleaned up by name, with no check", () => {
+    const t = teardown(true, [], true);
+    expect(t.code).toBe(0);
+    expect(t.out).toContain("no scratch at");
+    expect(t.out).not.toContain("no reach check");
+  });
+
+  test("an unreadable reach record stops the teardown and is named", () => {
+    const t = teardown(
+      true,
+      [JSON.stringify({ ts: "2026-10-09T00:00:00Z", action: "reach", detail: "not json" })],
+      false,
+    );
+    expect(t.code).toBe(1);
+    expect(t.out).toContain("cannot read the reach record to teardown round 1");
+    expect(t.runLog).not.toContain("round 1: removed");
   });
 });

@@ -1,0 +1,8 @@
+# Test files that start a process, at commit a265197, read 2026-10-05
+
+test files: 62
+with a spawn call: 34
+importing the process helper and calling run(, with no spawn call: 20
+start a process, together: 54
+positive control, spawnSync( calls in scripts/summary-evidence.test.ts: 2
+negative control, files holding a string no test holds: 0

@@ -26,7 +26,7 @@ import {
   safePath,
 } from "./scrub-report.ts";
 
-const USAGE = "usage: raw-promote.sh <src> <dest> | --help";
+const USAGE = "usage: run raw-promote <src> <dest> | --help";
 
 function repoRoot(): string {
   // Walk up to the worktree root without spawning: under the 512 MB virtual

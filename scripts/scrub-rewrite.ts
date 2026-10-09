@@ -9,7 +9,7 @@ import { run } from "./lib/proc.ts";
 import { pyWords } from "./lib/text.ts";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const USAGE = "usage: scrub-rewrite.sh [<base> [<head>]] | --help";
+const USAGE = "usage: run scrub-rewrite [<base> [<head>]] | --help";
 
 interface Item {
   commit: string;

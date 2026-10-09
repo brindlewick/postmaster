@@ -2,12 +2,25 @@
 // postmaster commit it was dispatched from. Written once and never edited: the manifest is the
 // run's current state, this is what the run started from and the checkout it runs on.
 //
-//   run-meta.sh <dispatch> <repo>   <repo> is the target project's checkout; also cuts the pin
-//   run-meta.sh pin <repo> <commit> a shared checkout of <repo> at <commit> under $POSTMASTER_TOOL_PINS
-//   run-meta.sh path <dispatch>     print the canonical path of the run's tool checkout
-//   run-meta.sh check <dispatch>    the run's checkout still serves its dispatch commit
-//   run-meta.sh release <dispatch>  remove the pin when no claimed run is in flight
-//   run-meta.sh efforts <dispatch>  print the waybill's efforts line from run.json
+//   run run-meta <dispatch> <repo> [--mode <synthesis|single-thread>]
+//                                    <repo> is the target project's checkout; also cuts the pin
+//   run run-meta pin <repo> <commit> a shared checkout of <repo> at <commit> under $POSTMASTER_TOOL_PINS
+//   run run-meta path <dispatch>     print the canonical path of the run's tool checkout
+//   run run-meta mode <dispatch>     print the run's mode, its source and the setting at dispatch
+//   run run-meta check <dispatch>    the run's checkout still serves its dispatch commit
+//   run run-meta release <dispatch>  remove the pin when no claimed run is in flight
+//   run run-meta efforts <dispatch>  print the waybill's efforts line from run.json
+//   run run-meta run-pinned <dispatch> <name> [args...]  run a script from the run's pinned checkout
+//
+// The dispatch mode resolves at dispatch: the user's --mode first, then the machine config's
+// team.mode (synthesis, the default; single-thread; or alternate, which gives this project the
+// mode its latest run did not have, a run that records no mode counting as synthesis and a
+// project with no run starting at single-thread). The record keeps the mode, its source
+// (user or setting) and the setting's value at dispatch as top-level keys beside confinement;
+// a config without team.mode reads as synthesis. `mode` prints the three. `check` also compares
+// the waybill's Team section `mode:` line with the record: both present and different fails
+// naming both, one side missing fails naming the side that has one, and a run with neither
+// is accepted.
 //
 // Records when it was written; the run and project; the target repo's HEAD and branch; the
 // postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
@@ -19,7 +32,7 @@
 //
 // The pin is a detached worktree of the postmaster repo at the dispatch commit, under
 // $POSTMASTER_TOOL_PINS (default ~/.postmaster/tool-pins), one directory per commit so every
-// run dispatched at that commit shares it. It is the run's `<tool>`: its host.sh, its launch.sh
+// run dispatched at that commit shares it. It is the run's `<tool>`: its run host, its run launch
 // and the runbooks its prompts name. The live checkout still serves the front door and the
 // postmaster's own supervision. A bare `pin` holds no claim; each dispatch appends its own
 // path to the pin's claims file beside it, so release finds every run that names the pin,
@@ -46,7 +59,7 @@
 //           be written, the pin lock could not be taken, no pin or it does not serve its
 //           commit, or git could not make or remove it
 //
-// Port notes (main scripts/run-meta.sh): the flock(2) pin lock is an O_EXCL lock file holding
+// Port notes (main scripts/run run-meta): the flock(2) pin lock is an O_EXCL lock file holding
 // the owner's PID, stolen from a dead owner or an empty file old enough that no live
 // creator is mid-write, never by age otherwise, since a dispatch legitimately holds it
 // across 15-second harness probes; the lock file is removed on release rather than left
@@ -79,16 +92,27 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { tryJsonFile, tryTomlFile } from "./lib/data.ts";
+import { tryJsonFile } from "./lib/data.ts";
+import {
+  absolutizeProjectEnvFiles,
+  acceptanceStorePath,
+  effectiveConfigForProject,
+  globalConfigPath,
+  inspect,
+  isDie,
+  sortedJson,
+} from "./lib/effective-config.ts";
+import { runPinned } from "./lib/pinned.ts";
 import { toolRoot } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
+import { processState } from "./lib/processes.ts";
 import { pySplitLines, pyTrim } from "./lib/text.ts";
 
 const TOOL = toolRoot(import.meta);
 const SCRIPT = import.meta.path;
 
 const USAGE =
-  "usage: run-meta.sh <dispatch> <repo> | pin <repo> <commit> | path <dispatch> | check <dispatch> | release <dispatch> | efforts <dispatch>";
+  "usage: run run-meta <dispatch> <repo> [--mode <synthesis|single-thread>] | pin <repo> <commit> | path <dispatch> | mode <dispatch> | run-pinned <dispatch> <name> [args...] | check <dispatch> | release <dispatch> | efforts <dispatch>";
 
 // Every command returns its exit code with the bytes for each stream; the CLI boundary writes
 // them, and the tests inspect them. stdout carries results (the pin path, the checkout,
@@ -215,12 +239,7 @@ function lockOwnerDead(lockPath: string): boolean {
   }
   const pid = Number(text.trim());
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException)?.code === "ESRCH";
-  }
+  return processState(pid) !== "live";
 }
 
 function withPinLock<T>(
@@ -323,6 +342,81 @@ function fieldCommit(runJson: string): string {
   if (typeof commit === "boolean") return commit ? "True" : "False";
   if (typeof commit === "number") return String(commit);
   return JSON.stringify(commit) ?? "";
+}
+
+// --- dispatch mode ---------------------------------------------------------------------------
+// The values the machine config's team.mode takes, and the values a run's mode takes.
+export const SETTING_MODES = ["synthesis", "single-thread", "alternate"];
+export const RUN_MODES = ["synthesis", "single-thread"];
+
+// previousRunMode <dispatch>: the mode of the project's latest run under the run root (the
+// dispatch's parent), by the `written` time in its run.json, whatever its stage. A latest run
+// that records no mode is a synthesis run; null when the project has no run yet. Ties break
+// by file time, then directory name, so the answer never depends on directory order.
+function previousRunMode(dispatch: string): string | null {
+  const root = dirname(dispatch);
+  let names: string[];
+  try {
+    names = readdirSync(root).sort();
+  } catch {
+    return null;
+  }
+  let latest: { written: number; mtime: number; name: string; mode: string } | null = null;
+  for (const name of names) {
+    const candidate = join(root, name);
+    if (candidate === dispatch || !isDir(candidate)) continue;
+    const path = join(candidate, "run.json");
+    const record = tryJsonFile<Record<string, unknown>>(path);
+    if (!record) continue;
+    let mtime = 0;
+    try {
+      mtime = statSync(path).mtimeMs;
+    } catch {
+      continue;
+    }
+    const parsed = typeof record.written === "string" ? Date.parse(record.written) : Number.NaN;
+    const written = Number.isFinite(parsed) ? parsed : mtime;
+    const mode: string = record.mode === "single-thread" ? "single-thread" : "synthesis";
+    if (
+      latest === null ||
+      written > latest.written ||
+      (written === latest.written &&
+        (mtime > latest.mtime || (mtime === latest.mtime && name > latest.name)))
+    ) {
+      latest = { written, mtime, name, mode };
+    }
+  }
+  return latest?.mode ?? null;
+}
+
+// resolveRunMode <config> <dispatch> <requested>: the run's mode, its source and the setting.
+// The user's mode wins; otherwise the setting, with alternate resolved against the project's
+// latest run. A config without team.mode reads as synthesis; anything else is a question back
+// to the caller, never a silent default.
+function resolveRunMode(
+  config: Record<string, unknown>,
+  dispatch: string,
+  requested: string | undefined,
+): { mode: string; source: "user" | "setting"; setting: string } | { error: string } {
+  const team = config.team;
+  const configured =
+    typeof team === "object" && team !== null && !Array.isArray(team)
+      ? (team as Record<string, unknown>).mode
+      : undefined;
+  const setting = configured === undefined ? "synthesis" : configured;
+  if (typeof setting !== "string" || !SETTING_MODES.includes(setting)) {
+    return {
+      error: `run-meta: team.mode must be synthesis, single-thread, alternate, not ${String(setting)}`,
+    };
+  }
+  if (requested !== undefined) return { mode: requested, source: "user", setting };
+  if (setting !== "alternate") return { mode: setting, source: "setting", setting };
+  const previous = previousRunMode(dispatch);
+  return {
+    mode: previous === "single-thread" ? "synthesis" : "single-thread",
+    source: "setting",
+    setting,
+  };
 }
 
 // --- waybill fallback ---------------------------------------------------------------------------
@@ -569,8 +663,6 @@ function scanHoldMs(): number {
 }
 
 function runScanChild(root: string, checkout: string): { code: number; out: string; err: string } {
-  const bun = Bun.which("bun");
-  if (bun === null) return { code: 127, out: "", err: "" };
   const args = [
     "--no-env-file",
     `--config=${join(TOOL, "bunfig.toml")}`,
@@ -584,7 +676,10 @@ function runScanChild(root: string, checkout: string): { code: number; out: stri
   // The scan runs where the caller's environment cannot reach it: PATH alone crosses over,
   // and the tool bunfig.toml anchors config discovery, so no HOME, no startup file and no
   // working-directory config reaches the scan.
-  const r = spawnSync(bun, args, { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+  const r = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "" },
+  });
   let code: number;
   if (r.status !== null && r.status !== undefined) code = r.status;
   else if (r.signal) code = signalExitCode(r.signal);
@@ -795,48 +890,135 @@ export function efforts(d: string): Outcome {
   return ok(`${effortsLine(cfg as Record<string, unknown>)}\n`);
 }
 
-type Built =
-  | { ok: true; record: Record<string, unknown>; warnings: string[] }
-  | { ok: false; messages: string[] };
-
-function parseSettingsJson(text: string, what: string): { value: unknown } | { error: string } {
+// mode <dispatch>: the run's mode, its source and the setting's value at dispatch. A record
+// with no mode is a synthesis run written before the mode existed, so its mode prints as
+// synthesis and its sources as unrecorded.
+export function mode(d: string): Outcome {
+  const runJson = join(d, "run.json");
+  if (!isFile(runJson)) return fail(`run-meta: no run.json in ${d}\n`);
+  let rec: unknown;
   try {
-    return { value: JSON.parse(text) as unknown };
-  } catch (e) {
-    // main reports the Python JSON error; V8's text is the documented approximation.
-    return { error: `${what} gave no JSON: ${(e as Error).message}` };
+    rec = JSON.parse(readFileSync(runJson, "utf8")) as unknown;
+  } catch {
+    return fail(`run-meta: ${runJson} cannot be read\n`);
   }
+  if (typeof rec !== "object" || rec === null || Array.isArray(rec)) {
+    return fail(`run-meta: ${runJson} is not an object\n`);
+  }
+  const r = rec as Record<string, unknown>;
+  const m = typeof r.mode === "string" && r.mode !== "" ? r.mode : "synthesis";
+  const source =
+    typeof r.mode_source === "string" && r.mode_source !== "" ? r.mode_source : "unrecorded";
+  const setting =
+    typeof r.mode_setting === "string" && r.mode_setting !== "" ? r.mode_setting : "unrecorded";
+  return ok(`mode: ${m}\nmode source: ${source}\nmode setting: ${setting}\n`);
 }
 
-// The python heredoc: resolve the effective config and project settings, then build the
-// record. Expected failures report their message; unexpected throws fail bare, the way an
-// uncaught exception (including a bad TOML load, whose value main never uses) fails the
-// heredoc with only the traceback main prints and this port does not.
+// check_mode <dispatch>: the waybill's Team section `mode:` line and the record's mode agree.
+// A mismatch fails naming both; a run that names neither is accepted, so a dispatch from
+// before the mode existed still passes. One side missing fails too: a missing line reads as
+// synthesis, so accepting it would let a mistreated single-thread run down the workhorse path.
+function checkMode(d: string): Outcome {
+  const runJson = join(d, "run.json");
+  let rec: unknown;
+  try {
+    rec = JSON.parse(readFileSync(runJson, "utf8")) as unknown;
+  } catch {
+    return ok(); // an unreadable record is the pin check's refusal, not this one's
+  }
+  const recorded =
+    typeof rec === "object" &&
+    rec !== null &&
+    !Array.isArray(rec) &&
+    typeof (rec as Record<string, unknown>).mode === "string" &&
+    (rec as Record<string, unknown>).mode !== ""
+      ? ((rec as Record<string, unknown>).mode as string)
+      : "";
+  let waybill = "";
+  try {
+    waybill = teamModeLine(readFileSync(join(d, "brief.md"), "utf8"));
+  } catch {
+    waybill = "";
+  }
+  if (recorded === "" && waybill === "") return ok();
+  if (recorded !== "" && waybill !== "" && recorded === waybill) return ok();
+  if (recorded === "") {
+    return fail(`run-meta: the waybill names mode ${waybill}, but the run records no mode\n`);
+  }
+  if (waybill === "") {
+    return fail(`run-meta: the run records mode ${recorded}, but the waybill names no mode\n`);
+  }
+  return fail(
+    `run-meta: the waybill names mode ${waybill}, and the run records mode ${recorded}\n`,
+  );
+}
+
+// teamModeLine <brief>: the value of the `mode:` line in the waybill's Team section, "" when
+// the section or the line is absent. Read from the last Team section: the ticket is copied
+// verbatim before the generated one, so the first match may be a quoted heading.
+export function teamModeLine(brief: string): string {
+  const lines = brief.split("\n");
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^##[ \t]+Team[ \t]*$/iu.test(lines[i] as string)) start = i;
+  }
+  if (start < 0) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^##[ \t]+/u.test(l));
+  const team = (end < 0 ? rest : rest.slice(0, end)).join("\n");
+  // ASCII: the waybill's mode token is template-written, so \S with this marker reads ASCII-only.
+  const m = /^mode:[ \t]*(\S+)/imu.exec(team);
+  return m ? (m[1] as string) : "";
+}
+
+type Built =
+  | { ok: true; record: Record<string, unknown>; warnings: string[]; notice: string | null }
+  | { ok: false; messages: string[]; notice: string | null };
+
+// Resolve the effective config and project settings, then build the record. Expected
+// failures report their message; unexpected throws fail bare.
 function buildRecord(
   d: string,
   resolvedRepo: string,
   config: string,
   checkout: string,
   pinnedCommit: string,
+  requestedMode: string | undefined,
 ): Built {
-  if (tryTomlFile(config) === null) return { ok: false, messages: [] };
-  const settingsScript = join(TOOL, "scripts", "project-settings.sh");
-  const inspected = run(settingsScript, ["inspect", resolvedRepo]);
-  if (inspected.code !== 0) {
-    return { ok: false, messages: [pyTrim(inspected.err) || "project settings could not be read"] };
-  }
-  const settings = parseSettingsJson(inspected.out, "project settings");
-  if ("error" in settings) return { ok: false, messages: [settings.error] };
-  const effective = run(settingsScript, ["effective", resolvedRepo, config]);
-  if (effective.code !== 0) {
+  const resolved = effectiveConfigForProject(resolvedRepo, config);
+  if (resolved.config === null || resolved.error !== null) {
     return {
       ok: false,
-      messages: [pyTrim(effective.err) || "effective machine config could not be resolved"],
+      messages: [`run-meta: ${resolved.error ?? "effective config could not be resolved"}`],
+      notice: resolved.notice,
     };
   }
-  const cfg = parseSettingsJson(effective.out, "effective machine config");
-  if ("error" in cfg) return { ok: false, messages: [cfg.error] };
-  const resolvedConfig = cfg.value as Record<string, unknown>;
+  let settings: unknown;
+  try {
+    settings = JSON.parse(
+      sortedJson(inspect(resolvedRepo, { storePath: acceptanceStorePath(config) })),
+    ) as unknown;
+  } catch (e) {
+    if (isDie(e)) {
+      return { ok: false, messages: [`run-meta: ${e.message}`], notice: resolved.notice };
+    }
+    throw e;
+  }
+  // Sorted back through JSON so run.json keeps the key order the printed
+  // project-settings output always had.
+  const resolvedConfig = JSON.parse(sortedJson(resolved.config)) as Record<string, unknown>;
+  // The record carries the project base in its values: project-set relative
+  // env paths resolve against the project root here, so --run launches
+  // agree with --project ones.
+  if (resolved.projectFile !== null) {
+    absolutizeProjectEnvFiles(
+      resolvedConfig,
+      resolved.local,
+      dirname(dirname(resolved.projectFile)),
+    );
+  }
+  const mode = resolveRunMode(resolvedConfig, d, requestedMode);
+  if ("error" in mode) return { ok: false, messages: [mode.error], notice: resolved.notice };
   const warnings = existsSync(join(resolvedRepo, ".postmaster", "fixture"))
     ? fixtureEfforts(resolvedConfig)
     : [];
@@ -847,12 +1029,13 @@ function buildRecord(
   return {
     ok: true,
     warnings,
+    notice: resolved.notice,
     record: {
       written: utcStamp(new Date()),
       coachman_contract: 2,
       project: projectName(d),
       run: basename(realpathSync(d)),
-      project_settings: settings.value,
+      project_settings: settings,
       target: {
         head: git(resolvedRepo, "rev-parse", "HEAD"),
         branch: git(resolvedRepo, "symbolic-ref", "--short", "-q", "HEAD"),
@@ -864,28 +1047,33 @@ function buildRecord(
       },
       config: resolvedConfig,
       confinement: { mode: confinementMode },
+      mode: mode.mode,
+      mode_source: mode.source,
+      mode_setting: mode.setting,
       harness_versions: harnessVersions,
     },
   };
 }
 
 function readConfig(): string {
-  return process.env.POSTMASTER_CONFIG ?? join(homedir(), ".postmaster/config.toml");
+  return globalConfigPath();
 }
 
 function readTools(): string {
   return process.env.POSTMASTER_TOOL_PINS ?? join(homedir(), ".postmaster/tool-pins");
 }
 
-// meta <dispatch> <repo>
-export function meta(d: string, repo: string): Outcome {
+// meta <dispatch> <repo> [--mode <mode>]
+export function meta(d: string, repo: string, requestedMode?: string): Outcome {
+  if (requestedMode !== undefined && !RUN_MODES.includes(requestedMode)) {
+    return fail(`run-meta: --mode must be synthesis or single-thread, not ${requestedMode}\n`);
+  }
   const config = readConfig();
   const tools = readTools();
   if (!isDir(d)) return fail(`run-meta: no such dispatch directory: ${d}\n`);
   if (git(repo, "rev-parse", "--git-dir") === null) {
     return fail(`run-meta: not a git repo: ${repo}\n`);
   }
-  if (!isFile(config)) return fail(`run-meta: no config at ${config}\n`);
   const resolvedRepo = canon(repo);
   if (resolvedRepo === null) return fail(`run-meta: cannot resolve project ${repo}\n`);
   const runJson = join(d, "run.json");
@@ -915,12 +1103,12 @@ export function meta(d: string, repo: string): Outcome {
     }
     let built: Built;
     try {
-      built = buildRecord(d, resolvedRepo, config, checkout, commit);
+      built = buildRecord(d, resolvedRepo, config, checkout, commit, requestedMode);
     } catch {
-      built = { ok: false, messages: [] };
+      built = { ok: false, messages: [], notice: null };
     }
     if (!built.ok) {
-      let err = "";
+      let err = built.notice !== null ? `${built.notice}\n` : "";
       for (const m of built.messages) err += `${m}\n`;
       err += `run-meta: could not write ${d}/run.json\n`;
       err += unclaim(tools, commit, dc).err;
@@ -944,10 +1132,11 @@ export function meta(d: string, repo: string): Outcome {
       return { code: 1, out: "", err };
     }
     const commit12 = (commit === "" ? "?" : commit).slice(0, 12);
+    const warnings = built.warnings.map((warning) => `${warning}\n`).join("");
     return {
       code: 0,
-      out: `run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout})\n`,
-      err: built.warnings.map((warning) => `${warning}\n`).join(""),
+      out: `run-meta: wrote ${runJson} (postmaster ${commit12}, pinned at ${checkout}, mode=${String(built.record.mode)}, mode_source=${String(built.record.mode_source)}, mode_setting=${String(built.record.mode_setting)})\n`,
+      err: built.notice !== null ? `${built.notice}\n${warnings}` : warnings,
     };
   });
   if (!held.locked) return fail(`run-meta: could not lock ${tools}\n`);
@@ -1099,17 +1288,31 @@ if (import.meta.main) {
   }
   {
     const cmd = argv[0];
-    const verbs = ["pin", "path", "check", "release", "efforts"];
+    const verbs = ["pin", "path", "mode", "check", "release", "efforts", "run-pinned"];
     let outcome: Outcome;
     if (cmd === "pin" && argv.length === 3)
       outcome = pin(argv[1] as string, argv[2] as string, readTools());
     else if (cmd === "path" && argv.length === 2) outcome = pathOf(argv[1] as string);
-    else if (cmd === "check" && argv.length === 2)
-      outcome = checkPinAndConfinement(argv[1] as string);
-    else if (cmd === "release" && argv.length === 2) outcome = releasePin(argv[1] as string);
-    else if (cmd === "efforts" && argv.length === 2) outcome = efforts(argv[1] as string);
-    else if (cmd !== undefined && !verbs.includes(cmd) && argv.length === 2) {
-      outcome = meta(argv[0] as string, argv[1] as string);
+    else if (cmd === "mode" && argv.length === 2) outcome = mode(argv[1] as string);
+    else if (cmd === "check" && argv.length === 2) {
+      const pinCheck = checkPinAndConfinement(argv[1] as string);
+      outcome = pinCheck.code !== 0 ? pinCheck : checkMode(argv[1] as string);
+    } else if (cmd === "release" && argv.length === 2) outcome = releasePin(argv[1] as string);
+    else if (cmd === "run-pinned" && argv.length >= 3) {
+      const pinned = pathOf(argv[1] as string);
+      if (pinned.code !== 0) outcome = pinned;
+      else {
+        const result = runPinned(pinned.out.trim(), argv[2] as string, argv.slice(3));
+        outcome = { code: result.code, out: result.out, err: result.err };
+      }
+    } else if (cmd === "efforts" && argv.length === 2) outcome = efforts(argv[1] as string);
+    else if (
+      cmd !== undefined &&
+      !verbs.includes(cmd) &&
+      (argv.length === 2 || argv.length === 4)
+    ) {
+      if (argv.length === 4 && argv[2] !== "--mode") usage();
+      outcome = meta(argv[0] as string, argv[1] as string, argv[3]);
     } else usage();
     if (outcome.out !== "") process.stdout.write(outcome.out);
     if (outcome.err !== "") process.stderr.write(outcome.err);

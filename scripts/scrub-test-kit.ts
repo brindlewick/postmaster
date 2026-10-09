@@ -53,7 +53,7 @@ export function runScript(
   cwd: string,
   env: Record<string, string> = {},
 ) {
-  return spawnSync(join(ROOT, "scripts", `${script}.sh`), args, {
+  return spawnSync(join(ROOT, "scripts", "run"), [script, ...args], {
     cwd,
     env: { ...process.env, ...env },
     encoding: "utf8",

@@ -31,7 +31,7 @@ import {
   trim,
 } from "./verify-examples.ts";
 
-const SELF = join(import.meta.dir, "verify-examples.sh");
+const SELF = join(import.meta.dir, "run");
 
 const spacedDone = process.env.POSTMASTER_SPACED_DONE === "1";
 if (spacedDone) {
@@ -272,7 +272,7 @@ afterAll(() => {
 });
 
 const runExample = (project: string, ticket: string): { code: number; out: string } => {
-  const r = run("bash", [SELF, join(tmp, project), "--ticket", ticket]);
+  const r = run(SELF, ["verify-examples", join(tmp, project), "--ticket", ticket]);
   return { code: r.code, out: r.out + r.err };
 };
 
@@ -408,9 +408,13 @@ describe("negative controls", () => {
   });
 
   test("a build whose package manager is not installed is not run", () => {
-    const r = run("bash", [SELF, join(tmp, "built"), "--ticket", join(tmp, "built.md")], {
-      env: { ...process.env, PATH: join(tmp, "fewtools") },
-    });
+    const r = run(
+      SELF,
+      ["verify-examples", join(tmp, "built"), "--ticket", join(tmp, "built.md")],
+      {
+        env: { ...process.env, PATH: join(tmp, "fewtools") },
+      },
+    );
     const out = r.out + r.err;
     expect(r.code).toBe(3);
     expect(out.includes("run through npm, which is not on PATH")).toBe(true);
@@ -467,7 +471,7 @@ describe("timeouts", () => {
     expect(rc).toBe(1);
     expect(lines.some((l) => l.includes("(timed out after 1s)"))).toBe(true);
     expect(lines.some((l) => l.includes("got none, it timed out"))).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("#! line splitting", () => {
@@ -522,19 +526,11 @@ describe("#! line splitting", () => {
     expect(mismatches).toEqual([]);
   });
 
-  test.skipIf(!hasEcho)(
-    "a quoted #! program splits as shlex splits, and runs",
-    () => {
-      checkExample("quoted", join(tmp, "quoted.md"), 0, "1 of 1");
-    },
-    30000,
-  );
+  test.skipIf(!hasEcho)("a quoted #! program splits as shlex splits, and runs", () => {
+    checkExample("quoted", join(tmp, "quoted.md"), 0, "1 of 1");
+  });
 
-  test.skipIf(!hasEcho)(
-    "an unbalanced #! quote fails as BASE's shlex raises",
-    () => {
-      checkExample("unbalanced", join(tmp, "unbalanced.md"), 1);
-    },
-    30000,
-  );
+  test.skipIf(!hasEcho)("an unbalanced #! quote fails as BASE's shlex raises", () => {
+    checkExample("unbalanced", join(tmp, "unbalanced.md"), 1);
+  });
 });

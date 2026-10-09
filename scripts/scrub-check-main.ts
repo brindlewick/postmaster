@@ -20,7 +20,7 @@ import {
 import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const USAGE =
-  "usage: scrub-check.sh <base> <head> | --files <path>... | --files-inert <path>... | --pr-description <file> | --spans <path>... | --findings <base> <head> | --safe-path <path>... | --log-detection <rule> <file> <line> [<commit>] | --help";
+  "usage: run scrub-check <base> <head> | --files <path>... | --files-inert <path>... | --pr-description <file> | --spans <path>... | --findings <base> <head> | --safe-path <path>... | --log-detection <rule> <file> <line> [<commit>] | --help";
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const disabled = new Set(pyWords((process.env.SCRUB_CHECK_DISABLE ?? "").replaceAll(",", " ")));
 

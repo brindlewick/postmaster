@@ -13,7 +13,7 @@ import {
   readRestrictedUsernsFile,
 } from "./probe-confine.ts";
 
-const SELF = join(import.meta.dir, "probe-confine.sh");
+const SELF = join(import.meta.dir, "run");
 const UBUNTU_2404 = 'ID=ubuntu\nVERSION_ID="24.04"\n';
 const DEBIAN_13 = 'ID=debian\nVERSION_ID="13"\n';
 
@@ -31,9 +31,10 @@ afterAll(() => {
 function stubBin(name: string, tools: Record<string, number>): string {
   const bin = join(tmp, name);
   mkdirSync(bin, { recursive: true });
-  // The wrapper needs bun and dirname; absolute /bin/bash runs it below.
-  for (const link of ["bun", "dirname"] as const) {
-    const target = link === "bun" ? process.execPath : "/usr/bin/dirname";
+  // The entry needs bun, dirname and bash; the probe below runs it with this PATH.
+  for (const link of ["bun", "dirname", "bash"] as const) {
+    const target =
+      link === "bun" ? process.execPath : link === "bash" ? "/bin/bash" : "/usr/bin/dirname";
     writeFileSync(join(bin, link), `#!/bin/sh\nexec ${target} "$@"\n`, "utf8");
     chmodSync(join(bin, link), 0o755);
   }
@@ -58,7 +59,7 @@ function probe(
   apparmor = "0",
   secure = "1",
 ): { code: number; out: string } {
-  const r = run("/bin/bash", [SELF, ...args], {
+  const r = run(SELF, ["probe-confine", ...args], {
     env: {
       PATH: bin,
       POSTMASTER_PROBE_PLATFORM: platform,

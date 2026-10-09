@@ -3,42 +3,45 @@
 // skills/postmaster/hosts.md records each form per host; this script is their executable
 // form, and the two change together.
 //
-//   host.sh detect                        herdr, tmux or none, on stdout
-//   host.sh name <dispatch>               the run's ticket name
-//   host.sh name <dispatch> coachman <leg-name> <leg-number>
-//   host.sh name <dispatch> workhorse <lane>
-//   host.sh name <dispatch> review <lane> <lens> <round>
-//   host.sh name <dispatch> postmaster
-//   host.sh name <dispatch> role <text...>                          any other launch, by its role alone
-//   host.sh leg launch|takeover <dispatch> <worktree> <leg> <number> <prompt>
-//   host.sh leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>
-//   host.sh leg retry <dispatch> <worktree> <leg> <number>
-//   host.sh leg outcome <dispatch> <number>
-//   host.sh leg backfill <dispatch> <leg> <number>
-//   host.sh leg waiting add|remove|list <runs> <ticket> [<question-file>]
-//   host.sh run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
-//               [--out <file>] [--err <file>] [--append] [--marker <file>]
+//   run host detect                        herdr, tmux or none, on stdout
+//   run host name <dispatch>               the run's ticket name
+//   run host name <dispatch> coachman <leg-name> <leg-number>
+//   run host name <dispatch> workhorse <lane>
+//   run host name <dispatch> review <lane> <lens> <round>
+//   run host name <dispatch> postmaster
+//   run host name <dispatch> role <text...>                          any other launch, by its role alone
+//   run host leg launch|takeover <dispatch> <worktree> <leg> <number> <prompt>
+//   run host leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>
+//   run host leg retry <dispatch> <worktree> <leg> <number>
+//   run host leg outcome <dispatch> <number>
+//   run host leg backfill <dispatch> <leg> <number>
+//   run host leg waiting add|remove|list <runs> <ticket> [<question-file>]
+//   run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>]
+//               [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>]
 //               [--pidfile <file>] -- <command...>
-//   host.sh stop <worktree>               stop every launch still running in a worktree, and
+//   run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
+//                                         print the launch limits that would apply:
+//                                         memory=<max> and tasks=<max>
+//   run host stop <worktree>               stop every launch still running in a worktree, and
 //                                         everything each one started
-//   host.sh close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
-//   host.sh stop-run <dispatch>           stop launches in every worktree the run created
-//   host.sh close-run <dispatch>          close spaces/windows for every worktree the run created
-//   host.sh spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
+//   run host close <worktree>              close its tabs/space (Herdr) and its windows (tmux)
+//   run host stop-run <dispatch>           stop launches in every worktree the run created
+//   run host close-run <dispatch>          close spaces/windows for every worktree the run created
+//   run host spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 //                                         the handle becomes a Herdr agent name
-//   host.sh send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
+//   run host send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
 //                                         and with --wait block until it settles (default 600)
-//   host.sh wait <handle> [<seconds>]     block until it settles, when nothing was just sent
-//   host.sh read <handle> [<lines>]       print what it shows (default 120 lines)
-//   host.sh --live-test                   the ticket's controls, against the hosts on this machine
+//   run host wait <handle> [<seconds>]     block until it settles, when nothing was just sent
+//   run host read <handle> [<lines>]       print what it shows (default 120 lines)
+//   run host --live-test                   the ticket's controls, against the hosts on this machine
 //
 // run: <command> is the same headless command a caller would otherwise background with `&`. It
-// runs from the directory host.sh was called in, with the caller's environment except for
+// runs from the directory run host was called in, with the caller's environment except for
 // Claude Code session identity and caller Herdr variables, and an empty stdin, in a session of
 // its own with no terminal; its stdout goes to --out, added to with
 // --append, and its stderr to --err, which holds only this launch's errors. --marker is removed
 // as it starts and touched when it exits,
-// whatever its exit, and also when host.sh cannot start it, with the reason in --err. --pidfile
+// whatever its exit, and also when run host cannot start it, with the reason in --err. --pidfile
 // gets its pid, which is also its process group: `kill -- -<pid>` stops all of it. <cwd> is the
 // directory the launch belongs to, usually its worktree: in Herdr the launch runs in a new tab of
 // that worktree's space, opened with `herdr worktree open` under the repository's space if it is
@@ -46,14 +49,14 @@
 // the caller. A run launch's <cwd>, including a reviewer's scratch clone, is its tab's working
 // directory inside the run's synthesis-worktree space in Herdr. In tmux a scratch clone joins
 // the session of the repository it was cut from. <name> labels the tab or window and the pane's
-// title, and names the thread where the harness can (POSTMASTER_LAUNCH_NAME, read by launch.sh).
-// If --out is set, its absolute path also reaches launch.sh as POSTMASTER_EVENT_STREAM so that a
+// title, and names the thread where the harness can (POSTMASTER_LAUNCH_NAME, read by run launch).
+// If --out is set, its absolute path also reaches run launch as POSTMASTER_EVENT_STREAM so that a
 // run can retain the harness's durable session beside that event stream. For a run launch,
-// --role reaches a run's launch.sh command as POSTMASTER_LAUNCH_ROLE; it is the explicit role
+// --role reaches a run's run launch command as POSTMASTER_LAUNCH_ROLE; it is the explicit role
 // used in its usage record, and is removed before the harness starts.
-// Pass a role-specific `host.sh name` result as the launch name and pass the dispatch separately,
+// Pass a role-specific `run host name` result as the launch name and pass the dispatch separately,
 // so the ticket title labels only the run space and never passes through a shell. A pane shows
-// the stream through view-stream.sh. A launch carries its own pane's identity (Herdr's six
+// the stream through run view-stream. A launch carries its own pane's identity (Herdr's six
 // HERDR_* pane values, or TMUX_PANE), never its caller's. It drops caller HERDR_* and Claude
 // session identity: CLAUDECODE, CLAUDE_PID, CLAUDE_CODE_SESSION_ID,
 // CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_EXECPATH,
@@ -90,7 +93,7 @@
 //   exit 0  detected, named, started, stopped, closed, sent, settled or read
 //   exit 1  usage, or nothing could be started
 //   exit 2  close refused: a launch still runs in the worktree, or an affected pane or space
-//           holds something host.sh did not open; or stop left something of a launch running,
+//           holds something run host did not open; or stop left something of a launch running,
 //           named, or refused a set of processes it could not vouch for, saying why
 //   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
 //           or wait that did not settle, stopped at an approval or a question, or showed no turn
@@ -122,12 +125,20 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTomlText } from "./lib/data.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import {
+  bootId,
+  processCommandLine,
+  processStart,
+  processState,
+  processTable as sharedProcessTable,
+  sameBoot,
+} from "./lib/processes.ts";
+import {
   BOUND_L,
   BOUND_R,
-  DOT_ALL,
   END_OF_STRING,
   PY_DOT,
   PY_S_CLASS,
@@ -138,7 +149,6 @@ import {
 } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
-const SELF = join(HERE, "host.ts");
 const SOURCE = "custom:postmaster";
 const META = "custom:postmaster-meta";
 let STATE = process.env.POSTMASTER_HOST_STATE ?? join(homedir(), ".postmaster", "host");
@@ -207,7 +217,12 @@ function hasOwn(obj: object, key: string): boolean {
   return Object.hasOwn(obj, key);
 }
 function limit(seconds: number, program: string, args: string[] = []) {
-  return has("timeout") ? run("timeout", [String(seconds), program, ...args]) : run(program, args);
+  // timeout(1) where it exists; otherwise run()'s own millisecond timeout, so
+  // a program that never answers cannot hold a launch or a close forever on a
+  // system without coreutils.
+  return has("timeout")
+    ? run("timeout", [String(seconds), program, ...args])
+    : run(program, args, { timeout: seconds * 1000 });
 }
 function clean(value: string): string {
   return [...value]
@@ -258,7 +273,7 @@ function detect(): string {
   return has("tmux") ? "tmux" : "none";
 }
 function cloneOrigin(path: string): string {
-  const result = run(join(HERE, "cut-scratch.sh"), ["--kind", path]);
+  const result = run(join(HERE, "run"), ["cut-scratch", "--kind", path]);
   return result.code === 0 && result.out.startsWith("clone ") ? result.out.trim().slice(6) : "";
 }
 function repoOf(path: string): string {
@@ -303,7 +318,7 @@ function handleOf(text: string): string {
 // text.ts: BASE re.sub(r"\s{2,}\(.*\)$", "", line[5:]).strip() (host.sh:142).
 const NOTE_STRIP = new RegExp("[" + PY_S_CLASS + "]{2,}\\(" + PY_DOT + "*\\)" + END_OF_STRING, "u");
 
-function dispatchInfo(dispatch: string): { name: string; worktree: string } {
+export function dispatchInfo(dispatch: string): { name: string; worktree: string } {
   let lines: string[] = [];
   try {
     lines = pySplitLines(readFileSync(join(dispatch, "brief.md"), "utf8"));
@@ -331,7 +346,6 @@ const LEGACY_REVIEW = new RegExp(
 const REVIEW_ROUND_FILE = new RegExp("^review-r([0-9]+)\\.json" + END_OF_STRING, "u");
 const HERDR_TAB_ID = new RegExp("^w[A-Za-z0-9]+:t[0-9A-Za-z]+" + END_OF_STRING, "u");
 const PATH_COMPONENT = new RegExp("^[A-Za-z0-9._-]+$", "u");
-const REVIEW_STATE_GLOB = new RegExp("^review-r[0-9]" + DOT_ALL + "*\\.json$", "u");
 const LENS_WORD = new RegExp(BOUND_L + "(style|bug|security)" + BOUND_R, "u");
 
 function isPathComponent(value: unknown): boolean {
@@ -354,7 +368,7 @@ function asRecord(value: unknown): Record<string, any> {
 function nameCmd(dispatch: string, ...args: string[]): string {
   if (!dispatch)
     die(
-      "usage: host.sh name <dispatch> [coachman <leg-name> <leg-number> | workhorse <lane> | review <lane> <lens> <round> | postmaster | role <text...>]",
+      "usage: run host name <dispatch> [coachman <leg-name> <leg-number> | workhorse <lane> | review <lane> <lens> <round> | postmaster | role <text...>]",
     );
   let brief: string[] = [];
   try {
@@ -412,7 +426,7 @@ function nameCmd(dispatch: string, ...args: string[]): string {
     return lens;
   };
   const turnpikeLegs = (): string[][] => {
-    const legs = run(join(HERE, "turnpikes.sh"), ["legs", dispatch]);
+    const legs = run(join(HERE, "run"), ["turnpikes", "legs", dispatch]);
     if (legs.code !== 0) return [];
     return pySplitLines(legs.out).map((line) => pyWords(line));
   };
@@ -503,14 +517,7 @@ type Registry = {
 function runBoot(...args: string[]): string {
   return run(args[0]!, args.slice(1), { env: { LC_ALL: "C" } }).out.trim();
 }
-function bootId(): string {
-  try {
-    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
-  } catch {
-    // ASCII: sysctl kern.boottime is kernel-emitted ASCII on macOS.
-    return runBoot("sysctl", "-n", "kern.boottime").split(/\s+/u).join(" ");
-  }
-}
+
 function bootTime(): number | null {
   try {
     const text = readFileSync("/proc/stat", "utf8");
@@ -526,60 +533,14 @@ function bootTime(): number | null {
   const seconds = Number(words[at + 2]);
   return Number.isInteger(seconds) ? seconds : null;
 }
-function procStat(pid: number): { name: string; fields: string[] } | null {
-  try {
-    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const pos = raw.lastIndexOf(")");
-    return {
-      name: raw.slice(raw.indexOf("(") + 1, pos),
-      fields: raw
-        .slice(pos + 1)
-        .trim()
-        // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-        .split(/\s+/u),
-    };
-  } catch {
-    return null;
-  }
-}
 function startOf(pid: number): string {
-  const p = procStat(pid);
-  if (p) return p.fields[0] !== "Z" ? (p.fields[19] ?? "") : "";
-  const fields = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], {
-    env: { LC_ALL: "C" },
-  })
-    .out.trim()
-    // ASCII: ps -o stat/lstart is tool-emitted ASCII; the date holds single spaces.
-    .split(/\s+/u);
-  return fields.length >= 6 && !fields[0]!.startsWith("Z") ? fields.slice(1, 6).join(" ") : "";
+  return processStart(pid) ?? "";
 }
-function processes(): Map<number, ProcessInfo> {
+export function processes(): Map<number, ProcessInfo> {
   const table = new Map<number, ProcessInfo>();
-  try {
-    for (const entry of readdirSync("/proc")) {
-      if (!/^[0-9]+$/u.test(entry)) continue;
-      const stat = procStat(Number(entry));
-      if (stat && stat.fields[0] !== "Z" && stat.fields[2] && stat.fields[19])
-        table.set(Number(entry), { group: Number(stat.fields[2]), start: stat.fields[19]! });
-    }
-    return table;
-  } catch {}
-  const output = run("ps", ["-A", "-o", "pid=,pgid=,stat=,lstart="], {
-    env: { LC_ALL: "C" },
-  }).out;
-  for (const line of output.split(/\r?\n/u)) {
-    // ASCII: ps -A -o pid/pgid/stat/lstart is tool-emitted ASCII.
-    const fields = line.trim().split(/\s+/u);
-    if (
-      fields.length >= 8 &&
-      /^[0-9]+$/u.test(fields[0]!) &&
-      /^[0-9]+$/u.test(fields[1]!) &&
-      !fields[2]!.startsWith("Z")
-    )
-      table.set(Number(fields[0]), {
-        group: Number(fields[1]),
-        start: fields.slice(3, 8).join(" "),
-      });
+  for (const [pid, info] of sharedProcessTable()) {
+    if (info.state === "live" && info.start)
+      table.set(pid, { group: info.group, start: info.start });
   }
   return table;
 }
@@ -647,7 +608,9 @@ function loadRecord(path: string): Registry | null {
       if (key === "start") rec.start = value;
       else if (key === "boot") rec.boot = value;
       else if (key === "member") {
-        const [pid, start] = value.split(" ", 2);
+        const separator = value.indexOf(" ");
+        const pid = separator < 0 ? value : value.slice(0, separator);
+        const start = separator < 0 ? "" : value.slice(separator + 1);
         if (/^[0-9]+$/u.test(pid ?? "") && start) rec.members.push([Number(pid), start]);
       }
     }
@@ -694,7 +657,7 @@ function recordRoots(
     rec.boot = boot;
     saveRecord(path, rec);
   }
-  if (!rec.boot || rec.boot !== boot) return [];
+  if (!rec.boot || !sameBoot(rec.boot, boot)) return [];
   if (procs.has(group) && rec.start && procs.get(group)!.start === rec.start)
     return [`group|${group}|${rec.start}`];
   return rec.members
@@ -1083,7 +1046,7 @@ function herdrFinishPlacement(space: string, tab: string, pane: string): number 
     case "missing":
       break;
     case "unowned":
-      warn(`completed launch pane ${pane} is no longer owned by host.sh; left it open`);
+      warn(`completed launch pane ${pane} is no longer owned by run host; left it open`);
       return 2;
     case "pane":
       if (herdr(["pane", "close", pane]).code !== 0) {
@@ -1092,11 +1055,11 @@ function herdrFinishPlacement(space: string, tab: string, pane: string): number 
       }
       break;
     case "tab":
-      // A tab in a space host.sh did not open keeps the project space's shell:
-      // closing its last tab would destroy the space, which host.sh never does.
+      // A tab in a space run host did not open keeps the project space's shell:
+      // closing its last tab would destroy the space, which run host never does.
       if (!herdrSpaceOpened(space)) {
         warn(
-          `completed launch tab ${tab} is in space ${space}, which host.sh did not open; left it open`,
+          `completed launch tab ${tab} is in space ${space}, which run host did not open; left it open`,
         );
         return 2;
       }
@@ -1142,14 +1105,14 @@ function tmuxFinishPlacement(window: string, pane: string): number {
       if (owned === "yes") found = true;
     }
   }
-  // The recorded pane is gone but the window stands: only panes host.sh did not
+  // The recorded pane is gone but the window stands: only panes run host did not
   // open remain, so this refuses like a split rather than reporting success.
   if (!present) {
-    warn(`tmux window ${window} holds only panes host.sh did not open; left them open`);
+    warn(`tmux window ${window} holds only panes run host did not open; left them open`);
     return 2;
   }
   if (!found) {
-    warn(`completed tmux pane ${pane} is no longer owned by host.sh; left it open`);
+    warn(`completed tmux pane ${pane} is no longer owned by run host; left it open`);
     return 2;
   }
   if (total === 1) {
@@ -1162,7 +1125,7 @@ function tmuxFinishPlacement(window: string, pane: string): number {
       warn(`tmux could not close completed pane ${pane}; left it open`);
       return 2;
     }
-    warn(`tmux window ${window} holds panes host.sh did not open; left them open`);
+    warn(`tmux window ${window} holds panes run host did not open; left them open`);
     return 2;
   }
   return 0;
@@ -1638,13 +1601,7 @@ function readable(path: string): boolean {
 }
 
 function processAlive(pid: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as { code?: string }).code !== "ESRCH";
-  }
+  return pid > 0 && processState(pid) === "live";
 }
 
 const MEMORY_MAX_PATTERN = new RegExp("^[1-9][0-9]*(?:K|M|G|T)" + END_OF_STRING, "u");
@@ -1653,6 +1610,7 @@ function launchLimits(
   role: string,
   dispatch: string,
   configPath: string,
+  project = "",
 ): { memory: string; tasks: number } {
   const memoryDefault = "8G";
   const tasksDefault = 512;
@@ -1673,6 +1631,13 @@ function launchLimits(
     if (typeof top !== "object" || top === null || Array.isArray(top))
       die("run.json must hold an object");
     config = (top as Record<string, unknown>).config ?? {};
+  } else if (project) {
+    const resolved = effectiveConfigForProject(project, configPath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      die(`cannot read launch limits: ${resolved.error ?? "cannot resolve project settings"}`);
+    }
+    config = resolved.config;
   } else if (isRegularFile(configPath)) {
     let text: string;
     try {
@@ -1712,6 +1677,31 @@ function launchLimits(
   if (typeof tasks !== "number" || !Number.isInteger(tasks) || tasks < 1 || tasks > 2147483647)
     die("tasks_max must be a whole number from 1 to 2147483647");
   return { memory, tasks };
+}
+
+function limitsCmd(args: string[]): void {
+  let role = "default";
+  let dispatch = "";
+  let project = "";
+  let at = 0;
+  while (at < args.length) {
+    const option = args[at]!;
+    if (option === "--role" || option === "--run" || option === "--project") {
+      if (at + 1 >= args.length) die(`${option} needs a value`);
+      if (option === "--role") role = args[at + 1]!;
+      else if (option === "--run") dispatch = args[at + 1]!;
+      else project = args[at + 1]!;
+      at += 2;
+    } else {
+      die(
+        "usage: run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]",
+      );
+    }
+  }
+  if (role !== "default" && role !== "lane" && role !== "coachman" && role !== "reviewer")
+    die(`unknown launch role: ${role}`);
+  const limits = launchLimits(role, absolute(dispatch), globalConfigPath(), absolute(project));
+  console.log(`memory=${limits.memory}\ntasks=${limits.tasks}`);
 }
 
 function random31(): number {
@@ -1984,7 +1974,7 @@ function appendFailure(err: string, marker: string, message: string): never {
   die(message);
 }
 function startDetached(args: string[], env?: Record<string, string | undefined>) {
-  const child = spawn("bun", [SELF, ...args], {
+  const child = spawn(process.execPath, [join(HERE, "host.ts"), ...args], {
     detached: true,
     stdio: "ignore",
     env: env ?? process.env,
@@ -1994,7 +1984,7 @@ function startDetached(args: string[], env?: Record<string, string | undefined>)
 }
 async function watch(pid: number, marker: string): Promise<void> {
   while (true) {
-    if (!procStat(pid) || procStat(pid)?.fields[0] === "Z") break;
+    if (processState(pid) !== "live") break;
     await Bun.sleep(500);
   }
   touch(marker);
@@ -2002,28 +1992,45 @@ async function watch(pid: number, marker: string): Promise<void> {
 async function envWrite(path: string): Promise<void> {
   const until = Date.now() + 120_000;
   while (Date.now() < until && existsSync(dirname(path))) {
+    let fd: number;
     try {
-      const fd = openSync(path, constants.O_WRONLY | constants.O_NONBLOCK);
-      try {
-        const data = new TextEncoder().encode(
-          `${Object.entries(process.env)
-            .filter((entry): entry is [string, string] => entry[1] !== undefined)
-            .map(([key, value]) => `${key}=${value}\0`)
-            .join("")}POSTMASTER_ENV_OK=1\0`,
-        );
-        let at = 0;
-        while (at < data.length) at += writeSync(fd, data, at, data.length - at);
-      } finally {
-        closeSync(fd);
-      }
-      return;
+      fd = openSync(path, constants.O_WRONLY | constants.O_NONBLOCK);
     } catch (error) {
+      // ENXIO: no reader yet; ENOENT: no FIFO yet. Anything else cannot arrive.
       if (
         (error as { code?: string }).code !== "ENXIO" &&
         (error as { code?: string }).code !== "ENOENT"
       )
         return;
       await Bun.sleep(100);
+      continue;
+    }
+    try {
+      const data = new TextEncoder().encode(
+        `${Object.entries(process.env)
+          .filter((entry): entry is [string, string] => entry[1] !== undefined)
+          .map(([key, value]) => `${key}=${value}\0`)
+          .join("")}POSTMASTER_ENV_OK=1\0`,
+      );
+      let at = 0;
+      while (at < data.length) {
+        try {
+          at += writeSync(fd, data, at, data.length - at);
+        } catch (error) {
+          const code = (error as { code?: string }).code;
+          // The FIFO is full: wait for the reader to drain it and write the
+          // rest, so an environment larger than the pipe arrives whole.
+          if (code === "EAGAIN" || code === "EWOULDBLOCK") {
+            if (Date.now() >= until) return;
+            await Bun.sleep(10);
+            continue;
+          }
+          return; // the reader is gone; nothing more can arrive
+        }
+      }
+      return;
+    } finally {
+      closeSync(fd);
     }
   }
 }
@@ -2067,6 +2074,8 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     touch(spec.marker);
     throw hostError("", 1);
   }
+  if (paneEnv.POSTMASTER_PROC_ROOT === undefined) delete process.env.POSTMASTER_PROC_ROOT;
+  else process.env.POSTMASTER_PROC_ROOT = paneEnv.POSTMASTER_PROC_ROOT;
   // Strip caller identity at the one boundary every run launch crosses. The Claude list is
   // intentionally exact plus session-identity families: other CLAUDE_CODE_* names configure
   // the harness and must reach it. Add a new identity name or family here and to the
@@ -2099,10 +2108,8 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     if (!isCallerIdentity(key) && !drop.has(key) && value !== undefined) env[key] = value;
   for (const key of keep) if (process.env[key] !== undefined) env[key] = process.env[key]!;
   env.POSTMASTER_LAUNCH_NAME = spec.name;
-  if (
-    basename(spec.argv[0] ?? "") === "launch.sh" &&
-    (spec.role === "lane" || spec.role === "coachman" || spec.role === "reviewer")
-  )
+  const isLaunch = basename(spec.argv[0] ?? "") === "run" && (spec.argv[1] ?? "") === "launch";
+  if (isLaunch && (spec.role === "lane" || spec.role === "coachman" || spec.role === "reviewer"))
     env.POSTMASTER_LAUNCH_ROLE = spec.role;
   if (spec.out) env.POSTMASTER_EVENT_STREAM = spec.out;
 
@@ -2252,7 +2259,7 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
     if (spec.out)
       followed = new Promise((resolveFollow) => {
         const follower = spawn(
-          "bun",
+          process.execPath,
           [
             join(HERE, "view-stream.ts"),
             "--follow",
@@ -2359,6 +2366,7 @@ async function runCmd(args: string[]): Promise<void> {
   let under = "";
   let role = "default";
   let dispatch = "";
+  let project = "";
   let out = "";
   let err = "";
   let marker = "";
@@ -2372,6 +2380,7 @@ async function runCmd(args: string[]): Promise<void> {
       option === "--under" ||
       option === "--role" ||
       option === "--run" ||
+      option === "--project" ||
       option === "--out" ||
       option === "--err" ||
       option === "--marker" ||
@@ -2384,6 +2393,7 @@ async function runCmd(args: string[]): Promise<void> {
       if (option === "--under") under = args[at + 1]!;
       else if (option === "--role") role = args[at + 1]!;
       else if (option === "--run") dispatch = args[at + 1]!;
+      else if (option === "--project") project = args[at + 1]!;
       else if (option === "--out") out = args[at + 1]!;
       else if (option === "--err") err = args[at + 1]!;
       else if (option === "--marker") marker = args[at + 1]!;
@@ -2405,10 +2415,11 @@ async function runCmd(args: string[]): Promise<void> {
   marker = absolute(marker);
   pidfile = absolute(pidfile);
   dispatch = absolute(dispatch);
+  project = absolute(project);
   under = absolute(under);
   if (bad) appendFailure(err, marker, bad);
   if (!name || !givenCwd)
-    appendFailure(err, marker, "usage: host.sh run <name> <cwd> [options] -- <command...>");
+    appendFailure(err, marker, "usage: run host run <name> <cwd> [options] -- <command...>");
   const argv = args.slice(at);
   if (!argv.length) appendFailure(err, marker, "run needs a command after --");
   if (!existsSync(givenCwd) || !statSync(givenCwd).isDirectory())
@@ -2467,11 +2478,7 @@ async function runCmd(args: string[]): Promise<void> {
   let memory = "";
   let tasks = "";
   try {
-    const limits = launchLimits(
-      role,
-      dispatch,
-      process.env.POSTMASTER_CONFIG || join(homedir(), ".postmaster", "config.toml"),
-    );
+    const limits = launchLimits(role, dispatch, globalConfigPath(), project);
     memory = limits.memory;
     tasks = String(limits.tasks);
   } catch (error) {
@@ -2549,7 +2556,7 @@ async function runCmd(args: string[]): Promise<void> {
       startFinishWatcher("herdr", placed.space, placed.tab, placed.pane, cwd, marker);
       run("mkfifo", [join(specDir, "env")]);
       startDetached(["_env-write", join(specDir, "env")]);
-      const line = ` cd -- ${quote(cwd)} && bun ${quote(SELF)} _run herdr ${quote(specDir)}`;
+      const line = ` cd -- ${quote(cwd)} && ${quote(process.execPath)} ${quote(join(HERE, "host.ts"))} _run herdr ${quote(specDir)}`;
       if (herdr(["pane", "run", placed.pane, line]).code === 0)
         where = `host=herdr space=${placed.space} tab=${placed.tab} pane=${placed.pane}`;
     }
@@ -2561,8 +2568,8 @@ async function runCmd(args: string[]): Promise<void> {
     const argsForPane = [
       "bash",
       "-c",
-      ['bun "$0" _run tmux "$1"; exec "', String.fromCharCode(36), '{SHELL:-/bin/sh}"'].join(""),
-      SELF,
+      `${quote(process.execPath)} "$0" _run tmux "$1"; exec "${String.fromCharCode(36)}{SHELL:-/bin/sh}"`,
+      join(HERE, "host.ts"),
       specDir,
     ];
     const target = `=${session}`;
@@ -2647,10 +2654,10 @@ async function runCmd(args: string[]): Promise<void> {
     where = "host=none";
   }
   for (let i = 0; i < 120 && existsSync(specDir); i++) {
-    if (runnerPid && !procStat(runnerPid)) break;
+    if (runnerPid && processState(runnerPid) !== "live") break;
     await Bun.sleep(250);
   }
-  if (existsSync(specDir) && runnerPid && !procStat(runnerPid)) {
+  if (existsSync(specDir) && runnerPid && processState(runnerPid) !== "live") {
     dropSpec(specDir);
     appendFailure(err, marker, `'${launchName}' did not start in the background`);
   }
@@ -2671,63 +2678,19 @@ function pidSize(path: string): number {
 type ProcRow = { ppid: number; group: number; start: string; zombie: boolean; name: string };
 function processTable(): Map<number, ProcRow> {
   const rows = new Map<number, ProcRow>();
-  try {
-    for (const entry of readdirSync("/proc")) {
-      if (!/^[0-9]+$/u.test(entry)) continue;
-      try {
-        const raw = readFileSync(`/proc/${entry}/stat`, "utf8");
-        const close = raw.lastIndexOf(")");
-        const name = raw.slice(raw.indexOf("(") + 1, close);
-        const fields = raw
-          .slice(close + 1)
-          .trim()
-          // ASCII: /proc/<pid>/stat past the name is kernel-emitted ASCII numerics.
-          .split(/\s+/u);
-        rows.set(Number(entry), {
-          ppid: Number(fields[1]),
-          group: Number(fields[2]),
-          start: fields[19] ?? "",
-          zombie: fields[0] === "Z",
-          name,
-        });
-      } catch {}
-    }
-    return rows;
-  } catch {}
-  const output = run("ps", ["-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="], {
-    env: { LC_ALL: "C" },
-  }).out;
-  for (const line of output.split(/\r?\n/u)) {
-    // ASCII: ps -A -o ... is tool-emitted ASCII; comm may hold spaces, hence the limit.
-    const fields = line.trim().split(/\s+/u, 10);
-    if (
-      fields.length !== 10 ||
-      !/^[0-9]+$/u.test(fields[0]!) ||
-      !/^[0-9]+$/u.test(fields[1]!) ||
-      !/^[0-9]+$/u.test(fields[2]!)
-    )
-      continue;
-    rows.set(Number(fields[0]), {
-      ppid: Number(fields[1]),
-      group: Number(fields[2]),
-      start: fields.slice(4, 9).join(" "),
-      zombie: fields[3]!.startsWith("Z"),
-      name: fields[9]!,
+  for (const [pid, info] of sharedProcessTable()) {
+    rows.set(pid, {
+      ppid: info.parent,
+      group: info.group,
+      start: info.start,
+      zombie: info.state === "zombie",
+      name: info.name,
     });
   }
   return rows;
 }
 function commandLine(pid: number): string {
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/gu, " ").trim();
-  } catch {
-    // Main falls back to ps only where there is no /proc at all.
-    try {
-      statSync("/proc/self");
-      return "";
-    } catch {}
-    return run("ps", ["-o", "args=", "-p", String(pid)], { env: { LC_ALL: "C" } }).out.trim();
-  }
+  return processCommandLine(pid);
 }
 function protectedProcess(pid: number, name: string): string {
   // ASCII: argv words are NUL-separated and the joiner spaces them;
@@ -2920,7 +2883,7 @@ async function stopCmd(args: string[]): Promise<void> {
   } else die(`could not stop the launches in ${path}: ${result.text}`);
 }
 function worktreeArg(path: string, what: string): string {
-  if (!path) die(`usage: host.sh ${what} <worktree>`);
+  if (!path) die(`usage: run host ${what} <worktree>`);
   if (!existsSync(path) || !statSync(path).isDirectory()) die(`no such directory: ${path}`);
   return realpathSync(path);
 }
@@ -2943,7 +2906,7 @@ async function closeCmd(args: string[]): Promise<void> {
   let code = 0;
   if (has("tmux")) code = closeTmux(path) || code;
   if (herdrUp()) code = closeHerdr(path) || code;
-  if (!code) console.log(`closed what host.sh opened for ${path}`);
+  if (!code) console.log(`closed what run host opened for ${path}`);
   if (code) throw hostError("", code);
 }
 
@@ -3011,7 +2974,7 @@ function herdrReport(pid: number, name: string): Promise<void> {
     `pgid=${pid}`,
   ]);
   return (async () => {
-    while (procStat(pid) && procStat(pid)?.fields[0] !== "Z") await Bun.sleep(250);
+    while (processState(pid) === "live") await Bun.sleep(250);
     herdr(["pane", "release-agent", pane, "--source", SOURCE, "--agent", "headless"]);
     herdr([
       "pane",
@@ -3036,7 +2999,7 @@ function spawnCmd(args: string[]): void {
   const originalHandle = args[0] ?? "";
   const givenCwd = args[1] ?? "";
   if (!originalHandle || !givenCwd)
-    die("usage: host.sh spawn <handle> <cwd> [--label <text>] -- <command...>");
+    die("usage: run host spawn <handle> <cwd> [--label <text>] -- <command...>");
   let label = "";
   let at = 2;
   while (at < args.length) {
@@ -3150,7 +3113,7 @@ function spawnCmd(args: string[]): void {
 async function sendCmd(args: string[]): Promise<void> {
   const rawHandle = args[0] ?? "",
     file = args[1] ?? "";
-  if (!rawHandle || !file) die("usage: host.sh send <handle> <file> [--wait [<seconds>]]");
+  if (!rawHandle || !file) die("usage: run host send <handle> <file> [--wait [<seconds>]]");
   const waitFor = args[2] === "--wait" ? count(args[3] ?? "600", "seconds") : null;
   const handle = handleOf(rawHandle);
   if (!existsSync(file) || !statSync(file).isFile()) die(`no such file: ${file}`);
@@ -3216,7 +3179,7 @@ async function sendCmd(args: string[]): Promise<void> {
 }
 async function waitCmd(args: string[]): Promise<void> {
   const rawHandle = args[0] ?? "";
-  if (!rawHandle) die("usage: host.sh wait <handle> [<seconds>]");
+  if (!rawHandle) die("usage: run host wait <handle> [<seconds>]");
   const seconds = count(args[1] ?? "600", "seconds");
   const handle = handleOf(rawHandle);
   const host = detect();
@@ -3260,7 +3223,7 @@ async function waitCmd(args: string[]): Promise<void> {
 }
 function readCmd(args: string[]): void {
   const rawHandle = args[0] ?? "";
-  if (!rawHandle) die("usage: host.sh read <handle> [<lines>]");
+  if (!rawHandle) die("usage: run host read <handle> [<lines>]");
   const lines = count(args[1] ?? "120", "lines");
   const handle = handleOf(rawHandle);
   const host = detect();
@@ -3289,7 +3252,7 @@ function readCmd(args: string[]): void {
 // --- coachman legs ---------------------------------------------------------------------------
 // One attempt at a time per leg, every attempt recorded: a start validates, takes the leg's
 // lock, backfills whatever died unrecorded, writes its intent and phase, and runs _leg_exec,
-// which owns the lock, runs launch.sh, and classifies the attempt from its stream slice.
+// which owns the lock, runs run launch, and classifies the attempt from its stream slice.
 const LEG_WALL_TERMS = [
   "quota",
   "usage limit",
@@ -3350,44 +3313,13 @@ function legNumber(text: string): number {
   if (n <= 0) die("leg number must be positive");
   return n;
 }
-// A process's start time in the lock's owner format, or null when it has none: /proc's
-// starttime past the command name, else ps lstart, skipping zombies both ways.
+// A process's start time in the lock's owner format, or null when it has none.
 function legStartOf(pid: number): string | null {
-  try {
-    if (statSync("/proc/self").isDirectory()) {
-      let rest: string[];
-      try {
-        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-        rest = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
-      } catch {
-        return null;
-      }
-      return rest[0] !== "Z" && rest.length > 19 ? (rest[19] ?? null) : null;
-    }
-  } catch {
-    // No /proc/self: fall through to ps.
-  }
-  const out = run("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: { LC_ALL: "C" } }).out;
-  const fields = pyWords(out);
-  return fields.length >= 6 && !fields[0]!.startsWith("Z") ? fields.slice(1, 6).join(" ") : null;
+  return processStart(pid);
 }
 // This process's start time, in the lock's owner format.
 function legSelfStart(): string | null {
-  let readable = false;
-  try {
-    accessSync(`/proc/${process.pid}/stat`, constants.R_OK);
-    readable = true;
-  } catch {}
-  if (readable) {
-    try {
-      const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
-      const fields = pyWords(stat.slice(stat.lastIndexOf(")") + 1));
-      if (fields.length >= 20 && fields[19]) return fields[19];
-    } catch {}
-    return null;
-  }
-  const start = pyWords(run("ps", ["-o", "lstart=", "-p", String(process.pid)]).out).join(" ");
-  return start === "" ? null : start;
+  return processStart(process.pid);
 }
 // End a newline-less tail line, if the file has one: a record write torn by a kill leaves a
 // tail with no line terminator, and the next append would fuse onto it and stay corrupt.
@@ -3433,12 +3365,7 @@ function legMutexOwnerDead(mutexPath: string): boolean {
   }
   const pid = Number(text.trim());
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException)?.code === "ESRCH";
-  }
+  return processState(pid) !== "live";
 }
 type MutexTake = { status: "taken" } | { status: "busy" } | { status: "error"; error: unknown };
 // The steal races a fresh holder: the liveness verdict names a pid, but the
@@ -4052,7 +3979,7 @@ function legBackfill(
     // A later zero is ignored only when that attempt never wrote a phase: it died before it
     // could spawn, so it wrote no byte. A later launch that reached its phase may have
     // truncated the stream, and there is no spawn-truth signal to say it did not — refused
-    // phases included, since launch.sh refuses after the runner truncates. The earlier
+    // phases included, since run launch refuses after the runner truncates. The earlier
     // attempt's bytes may be gone, so its slice reads empty rather than foreign.
     const reset = [...new Set([...phases, ...intents.keys()])].some(
       (k) => k > m && phases.has(k) && (!intents.has(k) || off0(intents.get(k)!)),
@@ -4414,8 +4341,8 @@ async function legStart(
   if (append) runargs.push("--append");
   runargs.push(
     "--",
-    "bun",
-    SELF,
+    process.execPath,
+    join(HERE, "host.ts"),
     "_leg_exec",
     d,
     wt,
@@ -4575,7 +4502,7 @@ function legWaitingRemoveInner(f: string, ticket: string): void {
 function legWaitingUnderFlock(lockPath: string, inner: string[]): boolean {
   if (Bun.which("flock") === null) return false;
   const self = fileURLToPath(import.meta.url);
-  const r = spawnSync("flock", ["--exclusive", lockPath, process.execPath, self, ...inner], {
+  const r = spawnSync("flock", ["-x", lockPath, process.execPath, self, ...inner], {
     stdio: "inherit",
   });
   if (r.error) return false;
@@ -4664,30 +4591,30 @@ function legWaitingList(runs: string): void {
 async function legCmd(args: string[]): Promise<void> {
   const request = args[0] ?? "";
   if (args.length === 0)
-    die("usage: host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ...");
+    die("usage: run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...");
   const rest = args.slice(1);
   switch (request) {
     case "launch":
       if (rest.length !== 5)
-        die("usage: host.sh leg launch <dispatch> <worktree> <leg> <number> <prompt>");
+        die("usage: run host leg launch <dispatch> <worktree> <leg> <number> <prompt>");
       await legStart("launch", rest[0]!, rest[1]!, rest[2]!, rest[3]!, rest[4]!);
       return;
     case "resume":
       if (rest.length !== 6)
-        die("usage: host.sh leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>");
+        die("usage: run host leg resume <dispatch> <worktree> <leg> <number> <thread-id> <prompt>");
       await legStart("resume", rest[0]!, rest[1]!, rest[2]!, rest[3]!, rest[5]!, rest[4]!);
       return;
     case "takeover":
       if (rest.length !== 5)
-        die("usage: host.sh leg takeover <dispatch> <worktree> <leg> <number> <prompt>");
+        die("usage: run host leg takeover <dispatch> <worktree> <leg> <number> <prompt>");
       await legStart("takeover", rest[0]!, rest[1]!, rest[2]!, rest[3]!, rest[4]!);
       return;
     case "outcome":
-      if (rest.length !== 2) die("usage: host.sh leg outcome <dispatch> <number>");
+      if (rest.length !== 2) die("usage: run host leg outcome <dispatch> <number>");
       legOutcome(rest[0]!, rest[1]!);
       return;
     case "backfill":
-      if (rest.length !== 3) die("usage: host.sh leg backfill <dispatch> <leg> <number>");
+      if (rest.length !== 3) die("usage: run host leg backfill <dispatch> <leg> <number>");
       legBackfillOnly(rest[0]!, rest[1]!, rest[2]!);
       return;
     case "waiting": {
@@ -4695,19 +4622,19 @@ async function legCmd(args: string[]): Promise<void> {
       const subRest = rest.slice(1);
       if (sub === "add") {
         if (subRest.length !== 3)
-          die("usage: host.sh leg waiting add <runs> <ticket> <question-file>");
+          die("usage: run host leg waiting add <runs> <ticket> <question-file>");
         legWaitingAdd(subRest[0]!, subRest[1]!, subRest[2]!);
       } else if (sub === "remove") {
-        if (subRest.length !== 2) die("usage: host.sh leg waiting remove <runs> <ticket>");
+        if (subRest.length !== 2) die("usage: run host leg waiting remove <runs> <ticket>");
         legWaitingRemove(subRest[0]!, subRest[1]!);
       } else if (sub === "list") {
-        if (subRest.length !== 1) die("usage: host.sh leg waiting list <runs>");
+        if (subRest.length !== 1) die("usage: run host leg waiting list <runs>");
         legWaitingList(subRest[0]!);
-      } else die("usage: host.sh leg waiting add|remove|list ...");
+      } else die("usage: run host leg waiting add|remove|list ...");
       return;
     }
     case "retry": {
-      if (rest.length !== 4) die("usage: host.sh leg retry <dispatch> <worktree> <leg> <number>");
+      if (rest.length !== 4) die("usage: run host leg retry <dispatch> <worktree> <leg> <number>");
       const d = rest[0]!;
       const wt = rest[1]!;
       const leg = rest[2]!;
@@ -4733,7 +4660,7 @@ async function legCmd(args: string[]): Promise<void> {
       return;
     }
     default:
-      die("usage: host.sh leg launch|resume|takeover|retry|outcome|backfill|waiting ...");
+      die("usage: run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...");
   }
 }
 // The hosted executor; the caller owns paths and clears markers. Ownership is established by
@@ -4797,15 +4724,15 @@ async function legExec(args: string[]): Promise<void> {
       }
     };
     const errFd = openSync(err, "a", 0o666);
-    // The runner injects the host role only when its child is launch.sh itself; the leg's
+    // The runner injects the host role only when its child is run launch itself; the leg's
     // child is _leg_exec, so the role arrives here unsaid. Say it: every leg attempt runs
     // with the coachman host role, fallback takeovers included.
     process.env.POSTMASTER_LAUNCH_ROLE = "coachman";
     const child = spawn(
-      join(HERE, "launch.sh"),
+      join(HERE, "run"),
       launchMode === "resume"
-        ? ["resume", role, wt, thread, prompt, "--leg", leg, "--run", d]
-        : ["launch", role, wt, prompt, "--leg", leg, "--run", d],
+        ? ["launch", "resume", role, wt, thread, prompt, "--leg", leg, "--run", d]
+        : ["launch", "launch", role, wt, prompt, "--leg", leg, "--run", d],
       {
         env: process.env,
         stdio: ["ignore", "inherit", "pipe"],
@@ -4938,6 +4865,9 @@ async function main(): Promise<void> {
     case "run":
       await runCmd(args);
       return;
+    case "limits":
+      limitsCmd(args);
+      return;
     case "stop":
       await stopCmd(args);
       return;
@@ -4966,7 +4896,7 @@ async function main(): Promise<void> {
       await legExec(args);
       return;
     case "_waiting_add": {
-      if (args.length !== 3) die("usage: host.sh _waiting_add <runs> <ticket> <question-file>");
+      if (args.length !== 3) die("usage: run host _waiting_add <runs> <ticket> <question-file>");
       const runs = args[0]!;
       const f = join(runs, "postmaster", "ESCALATION.md");
       try {
@@ -4978,7 +4908,7 @@ async function main(): Promise<void> {
       return;
     }
     case "_waiting_remove": {
-      if (args.length !== 2) die("usage: host.sh _waiting_remove <runs> <ticket>");
+      if (args.length !== 2) die("usage: run host _waiting_remove <runs> <ticket>");
       legWaitingRemoveInner(join(args[0]!, "postmaster", "ESCALATION.md"), args[1]!);
       return;
     }
@@ -5023,18 +4953,20 @@ async function main(): Promise<void> {
       return;
     default:
       die(
-        "usage: host.sh leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
+        "usage: run host leg | detect | name | run [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] | limits | stop | close | stop-run | close-run | spawn | send | wait | read | --live-test (see the header)",
       );
   }
 }
-main().catch((error: unknown) => {
-  if (isHostError(error)) {
-    if (error.message) console.error(`host: ${error.message}`);
-    process.exit(hostCode(error));
-  }
-  console.error(`host: ${String((error as Error)?.message ?? error)}`);
-  process.exit(1);
-});
+// The one entry: imported for its helpers (aftercare.ts), the module runs nothing.
+if (import.meta.main)
+  main().catch((error: unknown) => {
+    if (isHostError(error)) {
+      if (error.message) console.error(`host: ${error.message}`);
+      process.exit(hostCode(error));
+    }
+    console.error(`host: ${String((error as Error)?.message ?? error)}`);
+    process.exit(1);
+  });
 function tmuxCloseWindow(window: string, pane: string): number {
   if (pane) return tmuxFinishPlacement(window, pane);
   // A window from before panes were recorded: a lone pane is the host's own
@@ -5194,11 +5126,11 @@ function herdrClosePlacements(worktree: string): number {
         return 2;
       }
       markerRemove(file);
-      warn(`launch tab ${tab} in space ${space} holds panes host.sh did not open; left it open`);
+      warn(`launch tab ${tab} in space ${space} holds panes run host did not open; left it open`);
       return 2;
     }
     if (ownership === "mixed") {
-      warn(`launch tab ${tab} in space ${space} holds panes host.sh cannot place; left it open`);
+      warn(`launch tab ${tab} in space ${space} holds panes run host cannot place; left it open`);
       return 2;
     }
     if (ownership === "idless") {
@@ -5211,7 +5143,7 @@ function herdrClosePlacements(worktree: string): number {
       continue;
     }
     if (ownership !== "owned") {
-      warn(`launch tab ${tab} in space ${space} is no longer owned by host.sh; left it open`);
+      warn(`launch tab ${tab} in space ${space} is no longer owned by run host; left it open`);
       return 2;
     }
     if (herdr(["tab", "close", tab]).code !== 0) {
@@ -5247,7 +5179,7 @@ function spaceVerdict(infoText: string, panesText: string): string {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("bad panes");
   if (tokensOf(ws).postmaster !== "opened") {
     if (ws.workspace_id === undefined || ws.workspace_id === null) throw new Error("bad space");
-    return `refuse\tspace ${jsonValue(ws.workspace_id)} was not opened by host.sh`;
+    return `refuse\tspace ${jsonValue(ws.workspace_id)} was not opened by run host`;
   }
   for (const entry of panes) {
     const tokens = tokensOf(entry);
@@ -5263,7 +5195,7 @@ function spaceVerdict(infoText: string, panesText: string): string {
       ws.workspace_id === null
     )
       throw new Error("bad panes");
-    return `refuse\tpane ${jsonValue(entry.pane_id)} in space ${jsonValue(ws.workspace_id)} was not opened by host.sh`;
+    return `refuse\tpane ${jsonValue(entry.pane_id)} in space ${jsonValue(ws.workspace_id)} was not opened by run host`;
   }
   return "ok";
 }
@@ -5476,8 +5408,42 @@ function pyStrScalar(value: unknown): string {
   }
 }
 
+/** The launch registry's record for a group leader, as `run` writes it. aftercare.ts reads
+ * it to verify a recorded launch before signalling its process group. */
+export function launchRecord(group: number): Registry | null {
+  return loadRecord(recordPath(group));
+}
+
+/** Live launches registered for one directory, read-only: their names, as close's scan
+ * finds them, with nothing removed. aftercare.ts's dry run reads this, skipping the preview
+ * group it plans to stop. */
+export function liveLaunchNames(dir: string, exceptGroup?: number): string[] {
+  const procs = processes();
+  const boot = bootId();
+  let names: string[] = [];
+  try {
+    names = readdirSync(registryDir()).sort();
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const name of names) {
+    if (!/^[0-9]+$/u.test(name)) continue;
+    const rec = loadRecord(join(registryDir(), name));
+    if (!rec || rec.dir !== dir) continue;
+    const group = Number(name);
+    if (exceptGroup !== undefined && group === exceptGroup) continue;
+    const live =
+      (rec.start !== "" && procs.get(group)?.start === rec.start) ||
+      rec.members.some(([pid, start]) => procs.get(pid)?.start === start) ||
+      (rec.start === "" && procs.has(group));
+    if (live && (!rec.boot || sameBoot(rec.boot, boot))) found.push(rec.name);
+  }
+  return found;
+}
+
 // NUL-separated worktrees made for one dispatch, from its waybill and records.
-function runWorktreePaths(givenDispatch: string): string[] {
+export function runWorktreePaths(givenDispatch: string): string[] {
   // One parser for the waybill: dispatch_info takes the last ## Dispatch
   // section, so ticket text quoting a waybill cannot redirect teardown.
   const dispatch = realpathLoose(givenDispatch);
@@ -5541,16 +5507,18 @@ function runWorktreePaths(givenDispatch: string): string[] {
     reviewFiles = [];
   }
   for (const entry of reviewFiles) {
-    if (!REVIEW_STATE_GLOB.test(entry)) continue;
-    // BASE lets a non-mapping state abort the whole lookup with a traceback;
-    // the port refuses the same teardown, quietly, with the same exit.
+    // Only the round records: findings lists, usage records and anything else
+    // that shares the folder are not state for this lookup.
+    if (!REVIEW_ROUND_FILE.test(entry)) continue;
     let state: any = null;
     try {
       state = JSON.parse(readFileSync(join(dispatch, "logs", entry), "utf8"));
     } catch {
       continue;
     }
-    if (state === null || typeof state !== "object" || Array.isArray(state)) throw hostError("", 2);
+    // A non-mapping state aborts the whole lookup, naming the record.
+    if (state === null || typeof state !== "object" || Array.isArray(state))
+      throw hostError(`run review record is not a mapping: ${join(dispatch, "logs", entry)}`, 2);
     // BASE iterates whatever .get returns: a non-list either raises
     // TypeError (None, a number), which the file skips, or yields items the
     // shape check below rejects (a string, a mapping). Only a list can add.
@@ -5567,16 +5535,20 @@ function runWorktreePaths(givenDispatch: string): string[] {
     }
   }
   try {
-    for (const line of pySplitLines(readFileSync(join(dispatch, "actions.jsonl"), "utf8"))) {
+    const actionLog = join(dispatch, "actions.jsonl");
+    for (const [lineIndex, line] of pySplitLines(readFileSync(actionLog, "utf8")).entries()) {
       let action: any = null;
       try {
         action = JSON.parse(line);
       } catch {
         continue;
       }
-      // As above: a non-mapping action line aborts the lookup, quietly.
+      // As above, a non-mapping action line refuses teardown and identifies its source.
       if (action === null || typeof action !== "object" || Array.isArray(action))
-        throw hostError("", 2);
+        throw hostError(
+          `run action log line is not a mapping: ${actionLog} line ${lineIndex + 1}`,
+          2,
+        );
       if (action.action !== "review-launch") continue;
       const detail = hasOwn(action, "detail") ? pyStrScalar(action.detail) : "";
       const lens = LENS_WORD.exec(detail);
@@ -5601,7 +5573,7 @@ async function stopRunCmd(args: string[]): Promise<void> {
   try {
     givenIsDir = !!given && statSync(given).isDirectory();
   } catch {}
-  if (!givenIsDir) die("usage: host.sh stop-run <dispatch>");
+  if (!givenIsDir) die("usage: run host stop-run <dispatch>");
   let dispatch = "";
   try {
     dispatch = realpathSync(given);
@@ -5646,11 +5618,11 @@ function runSpaceVerdict(infoText: string, panesText: string): string {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry))
       throw new Error("bad panes");
   }
-  if (tokensOf(ws).postmaster !== "opened") return "space was not opened by host.sh";
+  if (tokensOf(ws).postmaster !== "opened") return "space was not opened by run host";
   for (const entry of panes) {
     const tokens = tokensOf(entry);
     if (tokens.postmaster !== "launch" && tokens.postmaster !== "root")
-      return `pane ${pyStrScalar(entry.pane_id)} was not opened by host.sh`;
+      return `pane ${pyStrScalar(entry.pane_id)} was not opened by run host`;
     if (tokens.postmaster === "launch" && tokens.state !== "done")
       return `launch pane ${pyStrScalar(entry.pane_id)} is still running`;
   }
@@ -5791,7 +5763,7 @@ async function closeRunCmd(args: string[]): Promise<void> {
   try {
     givenIsDir = !!given && statSync(given).isDirectory();
   } catch {}
-  if (!givenIsDir) die("usage: host.sh close-run <dispatch>");
+  if (!givenIsDir) die("usage: run host close-run <dispatch>");
   let dispatch = "";
   try {
     dispatch = realpathSync(given);

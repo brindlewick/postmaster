@@ -2,8 +2,8 @@
 title: Combining models
 type: concept
 standing: claimed
-sources: [runs/2026-09-26-postmaster-36, trials/2026-09-29-synthesis-audit]
-updated: 2026-09-29
+sources: [runs/2026-09-26-postmaster-36, trials/2026-09-29-synthesis-audit, trials/2026-10-03-lane-audit]
+updated: 2026-10-04
 ---
 
 # Combining models
@@ -149,6 +149,11 @@ These have no claim yet, only a measurement waiting for runs.
   minutes: in eight runs with no restart, the slower lane took 4 to 48 minutes longer than the
   other, and the coachman's gate runs on lane branches came to 249 minutes over 14 runs
   [@trials/2026-09-29-synthesis-audit/results.md].
+  A second audit, three days later, reads tokens from the runs' own streams and times from their
+  markers: the slower workhorse made a run wait a median 18 minutes, and the coachman's tokens and
+  the review loop's hours dwarf the second lane's
+  [@trials/2026-10-03-lane-audit/results/numbers.md]. It is
+  [filed as a page of its own](several-lanes.md).
 
 ## Evidence
 
@@ -160,3 +165,15 @@ One trial over dispatched runs' records: the synthesis audit of 25 runs
 [@trials/2026-09-29-synthesis-audit/method.md]. It bears on H1 and on what combining models
 costs, and moves no standing, since it promotes no run. A recorded trial needs no page in
 `sources/`; its method describes it.
+
+A second trial, three days of runs, reads what the lanes added and cost
+[@trials/2026-10-03-lane-audit/method.md]. It bears on H1 and H2: the second workhorse's part
+was a fix in most real runs by the coachman's cards, and each fixture lane alone passed every
+hidden test, and the second reviewer found most of the severe findings the first missed. It moves
+no standing for the same reason. [Several lanes](several-lanes.md) holds its answer.
+
+Outside work on whether mixing models helps is read in
+[Mixing models for coding](mixing-models-for-coding.md): the papers and tools on all four claims, the
+older work on whether independently built versions fail independently, and the README's claims checked
+against these audits. It bears on H1 and H2, and on the open questions about vendor diversity and
+blinkers, and moves no standing.

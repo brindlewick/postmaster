@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { delimiter, join } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
+import { processCommandLine } from "./lib/processes.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import { isDir, meta, pin, TRAIL_NL_RE } from "./run-meta.ts";
 
@@ -60,7 +61,7 @@ const savedEnv: Record<string, string | undefined> = {
 // bun:test's types omit the hook timeout, though the runtime honors it.
 
 beforeAll(async () => {
-  const wrapper = join(import.meta.dir, "run-meta.sh");
+  const wrapper = join(import.meta.dir, "run");
   await withTempDir(async (raw: string): Promise<void> => {
     const tmp = realpathSync(raw);
     const tools = join(tmp, "tools");
@@ -97,7 +98,10 @@ beforeAll(async () => {
       args: string[],
       env?: Record<string, string | undefined>,
     ): { code: number; out: string } => {
-      const r = env === undefined ? run(wrapper, args) : run(wrapper, args, { env });
+      const r =
+        env === undefined
+          ? run(wrapper, ["run-meta", ...args])
+          : run(wrapper, ["run-meta", ...args], { env });
       return { code: r.code, out: r.out + r.err };
     };
     const spawnCli = (
@@ -106,7 +110,7 @@ beforeAll(async () => {
     ): Promise<{ code: number; out: string }> => {
       // Bun.spawn without env does not inherit this process's environment, so the
       // current environment always crosses explicitly.
-      const child: any = Bun.spawn([wrapper, ...args], {
+      const child: any = Bun.spawn([wrapper, "run-meta", ...args], {
         stdout: "pipe",
         stderr: "pipe",
         env: { ...process.env, ...(env ?? {}) },
@@ -190,7 +194,7 @@ beforeAll(async () => {
       const slowD = join(tmp, "slowrun");
       mkdirSync(slowD, { recursive: true });
       const t0 = Date.now();
-      const r = run(wrapper, [slowD, repo], {
+      const r = run(wrapper, ["run-meta", slowD, repo], {
         env: {
           ...process.env,
           PATH: `${bindir}${delimiter}${process.env.PATH ?? ""}`,
@@ -224,6 +228,8 @@ beforeAll(async () => {
       const t = cli(["path", d]);
       check("path prints the pin", t.code === 0 && sh(t.out) === livePin, t.out);
     }
+    // The dispatch records mode synthesis; the waybill carries it, as a real one does.
+    writeFileSync(join(d, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
     {
       const t = cli(["check", d]);
       check("check passes a pin that serves its commit", t.code === 0, t.out);
@@ -729,7 +735,7 @@ beforeAll(async () => {
     );
     writeFileSync(join(krel, "manifest.json"), '{"stage": "done"}\n');
     {
-      const relChild: any = Bun.spawn([wrapper, "release", krel], {
+      const relChild: any = Bun.spawn([wrapper, "run-meta", "release", krel], {
         stdout: "pipe",
         stderr: "pipe",
         env: { ...process.env, POSTMASTER_SCAN_HOLD_MS: "20000" },
@@ -739,12 +745,7 @@ beforeAll(async () => {
         const pg = run("pgrep", ["-f", "run-meta-scan"]);
         const pids = pg.out.trim() === "" ? [] : pg.out.trim().split("\n");
         for (const pid of pids) {
-          let cmd = "";
-          try {
-            cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-          } catch {
-            continue;
-          }
+          const cmd = processCommandLine(Number(pid));
           if (cmd.includes(tmp)) {
             try {
               process.kill(Number(pid), 9);
@@ -1220,6 +1221,7 @@ beforeAll(async () => {
         return "";
       }
     })();
+    writeFileSync(join(g1new, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
     const tG1 = cli(["check", g1new]);
     check(
       "a dispatch racing a release records a pin that checks out",
@@ -1442,6 +1444,8 @@ beforeAll(async () => {
       mkdirSync(dir, { recursive: true });
       const r = cli([dir, repo], { ...process.env, POSTMASTER_CONFIG: cfg });
       check(`dispatch with confine ${tag} writes run.json`, r.code === 0, r.out);
+      // The dispatch records mode synthesis; the waybill carries it, as a real one does.
+      writeFileSync(join(dir, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
       return dir;
     };
     const dOn = mkConfRun("on", 'confine = "on"\n');
@@ -1470,6 +1474,7 @@ beforeAll(async () => {
       const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
       edit(r);
       writeFileSync(join(dir, "run.json"), JSON.stringify(r));
+      writeFileSync(join(dir, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
       return dir;
     };
     {
@@ -1512,7 +1517,10 @@ beforeAll(async () => {
       delete (r.postmaster as Record<string, any>).checkout;
       edit(r);
       writeFileSync(join(dir, "run.json"), JSON.stringify(r));
-      writeFileSync(join(dir, "brief.md"), `## Dispatch\ntool: ${checkout}\n`);
+      writeFileSync(
+        join(dir, "brief.md"),
+        `## Dispatch\ntool: ${checkout}\n\n## Team\nmode: synthesis\n`,
+      );
       return dir;
     };
     {
@@ -1582,7 +1590,7 @@ describe("fixture effort records", () => {
         PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       };
       const original = join(tmp, "original");
-      const created = run(join(import.meta.dir, "fixture.sh"), ["new", original, "remove"], {
+      const created = run(join(import.meta.dir, "run"), ["fixture", "new", original, "remove"], {
         env,
       });
       expect(created.code).toBe(0);
@@ -1593,7 +1601,9 @@ describe("fixture effort records", () => {
       );
       const dispatch = join(moved, ".postmaster", "runs", "7");
       mkdirSync(dispatch, { recursive: true });
-      const fixtureRecord = run(join(import.meta.dir, "run-meta.sh"), [dispatch, moved], { env });
+      const fixtureRecord = run(join(import.meta.dir, "run"), ["run-meta", dispatch, moved], {
+        env,
+      });
       expect(fixtureRecord.code).toBe(0);
       expect(fixtureRecord.err).toContain("no lowest effort for unknown on agy; keeping high");
       const recorded = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8"));
@@ -1610,7 +1620,7 @@ describe("fixture effort records", () => {
       expect(cfg.team.coachman_legs.synthesis.effort).toBe("low");
       expect(cfg.team.coachman_legs.review.effort).toBe("low");
       expect(readFileSync(config).equals(before)).toBe(true);
-      const line = run(join(import.meta.dir, "run-meta.sh"), ["efforts", dispatch], { env });
+      const line = run(join(import.meta.dir, "run"), ["run-meta", "efforts", dispatch], { env });
       expect(line.code).toBe(0);
       expect(line.out.trim()).toContain("codex_lane=low");
       expect(line.out.trim()).toContain("coachman.synthesis=low");
@@ -1638,9 +1648,13 @@ describe("fixture effort records", () => {
       ).toBe(0);
       const ticketDispatch = join(ticketRepo, ".postmaster", "runs", "8");
       mkdirSync(ticketDispatch, { recursive: true });
-      const ticketRecord = run(join(import.meta.dir, "run-meta.sh"), [ticketDispatch, ticketRepo], {
-        env,
-      });
+      const ticketRecord = run(
+        join(import.meta.dir, "run"),
+        ["run-meta", ticketDispatch, ticketRepo],
+        {
+          env,
+        },
+      );
       expect(ticketRecord.code).toBe(0);
       const ticketCfg = JSON.parse(readFileSync(join(ticketDispatch, "run.json"), "utf8")).config;
       expect(ticketCfg.lanes.codex_lane.effort).toBe("max");
@@ -1648,14 +1662,18 @@ describe("fixture effort records", () => {
       expect(ticketCfg.team.coachman_legs.synthesis.effort).toBe("high");
       expect(ticketRecord.err).toBe("");
       expect(readFileSync(config).equals(before)).toBe(true);
-      const ticketLine = run(join(import.meta.dir, "run-meta.sh"), ["efforts", ticketDispatch], {
-        env,
-      });
+      const ticketLine = run(
+        join(import.meta.dir, "run"),
+        ["run-meta", "efforts", ticketDispatch],
+        {
+          env,
+        },
+      );
       expect(ticketLine.code).toBe(0);
       expect(ticketLine.out.trim()).toContain("codex_lane=max");
       expect(ticketLine.out.trim()).toContain("coachman.review=max");
     });
-  }, 60000);
+  });
 });
 
 describe("positive controls", () => {
@@ -2076,4 +2094,297 @@ describe("confinement mode recording", () => {
       "check passes an unpinned run without the object when its config resolves to off",
     );
   });
+});
+
+describe("dispatch mode", () => {
+  const wrapper = join(import.meta.dir, "run");
+
+  function machine(
+    tmp: string,
+    name: string,
+    teamTail = "",
+  ): {
+    env: Record<string, string>;
+    repo: string;
+    runsRoot: string;
+    dispatch: string;
+    config: string;
+  } {
+    const config = join(tmp, `${name}.toml`);
+    writeFileSync(
+      config,
+      '[lanes.one]\nharness = "bash"\nmodel = "m1"\n' +
+        '[lanes.two]\nharness = "bash"\nmodel = "m2"\n' +
+        '[team]\nworkhorses = ["one", "two"]\n' +
+        'coachman = { harness = "bash", model = "judge" }\n' +
+        'coachman_fallback = { harness = "bash", model = "spare" }\n' +
+        'postmaster = { harness = "bash", model = "pm" }\n' +
+        teamTail,
+    );
+    const repo = join(tmp, `${name}-repo`);
+    mkdirSync(repo, { recursive: true });
+    run("git", ["-C", repo, "init", "-q", "-b", "main"]);
+    run("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "first",
+    ]);
+    const runsRoot = join(tmp, `${name}-runs`);
+    const dispatch = join(runsRoot, "T1");
+    mkdirSync(dispatch, { recursive: true });
+    const env = {
+      ...(process.env as Record<string, string>),
+      POSTMASTER_CONFIG: config,
+      POSTMASTER_TOOL_PINS: join(tmp, `${name}-pins`),
+    };
+    return { env, repo, runsRoot, dispatch, config };
+  }
+
+  const recordOf = (dispatch: string): Record<string, any> =>
+    JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8")) as Record<string, any>;
+
+  const seedRun = (
+    root: string,
+    name: string,
+    written: string,
+    extra: Record<string, unknown>,
+  ): void => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "run.json"), `${JSON.stringify({ written, ...extra }, null, 2)}\n`);
+  };
+
+  test("a config with no team.mode records synthesis from the setting, and the mode verb prints the three", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "plain");
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("mode=synthesis");
+      expect(r.out).toContain("mode_source=setting");
+      expect(r.out).toContain("mode_setting=synthesis");
+      const rec = recordOf(m.dispatch);
+      expect(rec.mode).toBe("synthesis");
+      expect(rec.mode_source).toBe("setting");
+      expect(rec.mode_setting).toBe("synthesis");
+      const v = run(wrapper, ["run-meta", "mode", m.dispatch], { env: m.env });
+      expect(v.code).toBe(0);
+      expect(v.out).toBe("mode: synthesis\nmode source: setting\nmode setting: synthesis\n");
+    });
+  });
+
+  test("the setting single-thread is recorded as the mode, from the setting", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "st", 'mode = "single-thread"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("mode=single-thread");
+      const rec = recordOf(m.dispatch);
+      expect(rec.mode).toBe("single-thread");
+      expect(rec.mode_source).toBe("setting");
+      expect(rec.mode_setting).toBe("single-thread");
+    });
+  });
+
+  test("a mode the user names wins over the setting, and the record says so", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "win", 'mode = "synthesis"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo, "--mode", "single-thread"], {
+        env: m.env,
+      });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("mode=single-thread");
+      expect(r.out).toContain("mode_source=user");
+      expect(r.out).toContain("mode_setting=synthesis");
+      const rec = recordOf(m.dispatch);
+      expect(rec.mode).toBe("single-thread");
+      expect(rec.mode_source).toBe("user");
+      expect(rec.mode_setting).toBe("synthesis");
+      const v = run(wrapper, ["run-meta", "mode", m.dispatch], { env: m.env });
+      expect(v.code).toBe(0);
+      expect(v.out).toBe("mode: single-thread\nmode source: user\nmode setting: synthesis\n");
+    });
+  });
+
+  test("--mode two-lanes exits 1 naming synthesis and single-thread, and writes nothing", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "badmode");
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo, "--mode", "two-lanes"], {
+        env: m.env,
+      });
+      expect(r.code).toBe(1);
+      expect(r.out + r.err).toContain("synthesis");
+      expect(r.out + r.err).toContain("single-thread");
+      expect(existsSync(join(m.dispatch, "run.json"))).toBe(false);
+    });
+  });
+
+  test("alternate gives each dispatch the mode the project's latest run did not have", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      // (a) no run at all starts at single-thread
+      let m = machine(tmp, "alt-none", 'mode = "alternate"\n');
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("single-thread");
+      expect(recordOf(m.dispatch).mode_source).toBe("setting");
+      expect(recordOf(m.dispatch).mode_setting).toBe("alternate");
+
+      // (b) a latest run that records no mode is a synthesis run, so this one is single-thread
+      m = machine(tmp, "alt-old", 'mode = "alternate"\n');
+      seedRun(m.runsRoot, "T0", "2026-01-01T00:00:00Z", { coachman_contract: 2 });
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("single-thread");
+
+      // (c) a latest run that is single-thread (named by the user) flips to synthesis
+      m = machine(tmp, "alt-st", 'mode = "alternate"\n');
+      seedRun(m.runsRoot, "T0", "2026-01-01T00:00:00Z", {
+        mode: "single-thread",
+        mode_source: "user",
+      });
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("synthesis");
+
+      // (d) a latest run that is synthesis flips to single-thread
+      m = machine(tmp, "alt-syn", 'mode = "alternate"\n');
+      seedRun(m.runsRoot, "T0", "2026-01-01T00:00:00Z", { mode: "synthesis" });
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("single-thread");
+
+      // (e) the latest run is the one whose run.json was written last, whatever its stage
+      m = machine(tmp, "alt-last", 'mode = "alternate"\n');
+      seedRun(m.runsRoot, "T0", "2026-01-01T00:00:00Z", { mode: "single-thread" });
+      seedRun(m.runsRoot, "T1-old", "2026-02-01T00:00:00Z", { mode: "synthesis" });
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("single-thread");
+    });
+  }, 120000);
+
+  test("check compares the waybill's mode line with the record, and a run with neither passes", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "check");
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo, "--mode", "single-thread"], {
+        env: m.env,
+      });
+      expect(r.code).toBe(0);
+      const brief = join(m.dispatch, "brief.md");
+      const team = ["# Waybill: T1", "", "## Team", "mode: single-thread", ""].join("\n");
+      writeFileSync(brief, team);
+      expect(run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env }).code).toBe(0);
+
+      writeFileSync(brief, team.replace("mode: single-thread", "mode: synthesis"));
+      const mismatch = run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env });
+      expect(mismatch.code).toBe(1);
+      expect(mismatch.out + mismatch.err).toContain("synthesis");
+      expect(mismatch.out + mismatch.err).toContain("single-thread");
+
+      // A dispatch from before the change: no mode in run.json and none in the waybill.
+      const path = join(m.dispatch, "run.json");
+      const rec = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      delete rec.mode;
+      delete rec.mode_source;
+      delete rec.mode_setting;
+      writeFileSync(path, JSON.stringify(rec));
+      writeFileSync(brief, "# Waybill: T1\n\n## Team\nreviewers: one\n");
+      expect(run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env }).code).toBe(0);
+      const verb = run(wrapper, ["run-meta", "mode", m.dispatch], { env: m.env });
+      expect(verb.code).toBe(0);
+      expect(verb.out).toContain("mode: synthesis");
+      expect(verb.out).toContain("mode source: unrecorded");
+    });
+  });
+
+  test("check refuses a mode record with one side missing, naming the side that has one", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "onesided", 'mode = "synthesis"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo, "--mode", "single-thread"], {
+        env: m.env,
+      });
+      expect(r.code).toBe(0);
+      const brief = join(m.dispatch, "brief.md");
+
+      // The record names a mode but the waybill has no mode line.
+      writeFileSync(brief, "# Waybill: T1\n\n## Team\nreviewers: one\n");
+      const missingLine = run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env });
+      expect(missingLine.code).toBe(1);
+      expect(missingLine.out + missingLine.err).toContain("single-thread");
+      expect(missingLine.out + missingLine.err).toContain("no mode");
+
+      // The waybill names a mode but the record was written before the mode existed.
+      const path = join(m.dispatch, "run.json");
+      const rec = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      delete rec.mode;
+      delete rec.mode_source;
+      delete rec.mode_setting;
+      writeFileSync(path, JSON.stringify(rec));
+      writeFileSync(brief, "# Waybill: T1\n\n## Team\nmode: synthesis\nreviewers: one\n");
+      const missingRecord = run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env });
+      expect(missingRecord.code).toBe(1);
+      expect(missingRecord.out + missingRecord.err).toContain("synthesis");
+      expect(missingRecord.out + missingRecord.err).toContain("no mode");
+    });
+  });
+
+  test("check reads the generated Team section, not a quoted one in the ticket", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "quoted", 'mode = "synthesis"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(0);
+      const brief = join(m.dispatch, "brief.md");
+      writeFileSync(
+        brief,
+        "# Waybill: T1\n\n## Ticket\nabout the template:\n\n## Team\nmode: single-thread\n\n## Team\nmode: synthesis\nreviewers: one\n",
+      );
+      expect(run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env }).code).toBe(0);
+    });
+  });
+
+  test("the latest write wins whatever its stage", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "alt-stage", 'mode = "alternate"\n');
+      seedRun(m.runsRoot, "T0", "2026-01-01T00:00:00Z", { mode: "single-thread" });
+      writeFileSync(
+        join(m.runsRoot, "T0", "manifest.json"),
+        JSON.stringify({ stage: "done", leg: 1, base: "x", lanes: {} }),
+      );
+      seedRun(m.runsRoot, "T1-old", "2026-06-01T00:00:00Z", { mode: "synthesis" });
+      writeFileSync(
+        join(m.runsRoot, "T1-old", "manifest.json"),
+        JSON.stringify({ stage: "bootstrapped", leg: 1, base: "x", lanes: {} }),
+      );
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("single-thread");
+    });
+  }, 120000);
+
+  test("a user-named run counts as the latest under alternate", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "alt-user", 'mode = "alternate"\n');
+      const first = run(wrapper, ["run-meta", m.dispatch, m.repo, "--mode", "single-thread"], {
+        env: m.env,
+      });
+      expect(first.code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("single-thread");
+      expect(recordOf(m.dispatch).mode_source).toBe("user");
+      const second = join(m.runsRoot, "T2");
+      mkdirSync(second, { recursive: true });
+      expect(run(wrapper, ["run-meta", second, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(second).mode).toBe("synthesis");
+    });
+  }, 120000);
 });

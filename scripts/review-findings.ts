@@ -1,12 +1,13 @@
 // Normalize native bug-review reports and harvest Claude's forked task transcripts.
 //
-//   review-findings.sh normalize <lane> <scratch> <events> --run <dispatch> [--last <file>]
-//   review-findings.sh harvest <events> <logs-dir> --prefix <name>
+//   run review-findings normalize <lane> <scratch> <events> --run <dispatch> [--last <file>]
+//   run review-findings harvest <events> <logs-dir> --prefix <name>
 //
 //   exit 0  printed
 //   exit 1  usage; a report that cannot be read; a harvest that cannot be completed
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   BOUND_L,
   BOUND_R,
@@ -23,7 +24,7 @@ import {
 } from "./lib/text.ts";
 
 const USAGE =
-  "usage: review-findings.sh normalize <lane> <scratch> <events> --run <dispatch> [--last <file>] | harvest <events> <logs-dir> --prefix <name>";
+  "usage: run review-findings normalize <lane> <scratch> <events> --run <dispatch> [--last <file>] | harvest <events> <logs-dir> --prefix <name>";
 
 // --- failures ---------------------------------------------------------------------------
 // BASE raises ReportError; a ported method that returns it cannot also fail loudly, so the
@@ -1279,6 +1280,7 @@ export function harvest(
   logsDir: string,
   prefix: string,
   taskRoot: string | null = null,
+  sessionRoot: string | null = null,
 ): string[] {
   const wanted: string[] = [];
   for (const event of readEvents(eventsPath)) {
@@ -1295,9 +1297,31 @@ export function harvest(
   mkdirSync(logsDir, { recursive: true });
   const scrubbed = stripChars(prefix.replace(PREFIX_SANITIZE, "-"), ".-");
   const clean = scrubbed === "" ? "review" : scrubbed;
-  // The root is resolved before comparing: the task path always is, so an unresolved root
-  // under a symlinked /tmp would refuse its own files. The override exists for fixtures.
-  const root = taskRoot !== null ? pyResolve(taskRoot) : pyResolve(`/tmp/claude-${uid()}`);
+  // The roots are resolved before comparing: the task path always is, so an unresolved
+  // root under a symlinked /tmp would refuse its own files. Each root is a folder this
+  // system gives the user for Claude's task outputs: the shared one and, where the system
+  // gives each user a temporary folder of their own, that one too. The override exists
+  // for fixtures.
+  const roots =
+    taskRoot !== null
+      ? [pyResolve(taskRoot)]
+      : [
+          ...new Set([
+            pyResolve(`/tmp/claude-${uid()}`),
+            pyResolve(join(tmpdir(), `claude-${uid()}`)),
+          ]),
+        ];
+  // Claude Code 2.1.295 keeps a task's output as a link, named inside a task root, to the
+  // session's transcript in its projects folder. That folder is the one place a link under a
+  // task root may lead; a link to anywhere else, and a path named inside the projects folder
+  // with no link under a task root, are still refused.
+  const sessions = pyResolve(
+    sessionRoot ?? join(process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"), "projects"),
+  );
+  const within = (root: string, target: string): boolean => {
+    const rel = relative(root, target);
+    return !(rel === ".." || rel.startsWith("../") || isAbsolute(rel));
+  };
   const planned: Array<[string, string]> = [];
   wanted.forEach((path, n) => {
     const index = n + 1;
@@ -1307,9 +1331,12 @@ export function harvest(
     } catch {
       fail(`Claude task output named by task_notification is missing: ${path}`);
     }
-    const rel = relative(root, resolved);
-    if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
-      fail(`Claude task output is outside ${root}: ${path}`);
+    const named = join(realpathSync(dirname(path)), basename(path));
+    const inside =
+      roots.some((root) => within(root, resolved)) ||
+      (roots.some((root) => within(root, named)) && within(sessions, resolved));
+    if (!inside) {
+      fail(`Claude task output is outside ${roots[0]}: ${path}`);
     }
     let isFile = false;
     try {

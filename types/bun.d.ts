@@ -140,6 +140,7 @@ declare function clearImmediate(handle: number): void;
 declare function queueMicrotask(fn: () => void): void;
 
 declare const Bun: {
+  version: string;
   TOML: {
     parse(text: string): Record<string, unknown>;
   };
@@ -164,14 +165,19 @@ declare const Bun: {
       stderr?: "inherit" | "pipe" | "ignore" | null;
     },
   ): {
+    pid: number;
     stdout: ReadableStream<Uint8Array> | null;
     stderr: ReadableStream<Uint8Array> | null;
     stdin: WritableStream<Uint8Array> | null;
     exited: Promise<number>;
-    kill(code?: number): void;
+    kill(code?: number | string): void;
   };
   sleep(ms: number): Promise<void>;
   hash(data: string | Uint8Array): string;
+  serve(options: { port: number; fetch(req: ServeRequest): Response | Promise<Response> }): {
+    port: number;
+    stop(force?: boolean): void;
+  };
   spawnSync(options: {
     cmd: string[];
     cwd?: string;
@@ -557,6 +563,7 @@ declare module "node:os" {
   export function endianness(): "LE" | "BE";
   export function type(): string;
   export function release(): string;
+  export function machine(): string;
 }
 
 declare module "node:process" {
@@ -647,6 +654,7 @@ declare module "node:child_process" {
   ): string | Buffer;
   export interface ChildProcess {
     pid: number | undefined;
+    exitCode: number | null;
     stdout: NodeJS.ReadableStream | null;
     stderr: NodeJS.ReadableStream | null;
     stdin: NodeJS.WritableStream | null;
@@ -771,12 +779,24 @@ declare class TextEncoder {
 interface ReadableStream<R = unknown> {
   readonly locked: boolean;
   cancel(reason?: unknown): Promise<void>;
+  getReader(): {
+    read(): Promise<{ done: true; value?: undefined } | { done: false; value: R }>;
+  };
 }
 interface WritableStream<W = unknown> {
   readonly locked: boolean;
 }
 declare class Response {
-  constructor(body?: ReadableStream<Uint8Array> | Uint8Array | string | null);
+  constructor(
+    body?: ReadableStream<Uint8Array> | Uint8Array | string | null,
+    init?: { status?: number; headers?: Record<string, string> },
+  );
+  text(): Promise<string>;
+  static json(data: unknown, init?: { status?: number }): Response;
+}
+interface ServeRequest {
+  readonly method: string;
+  readonly url: string;
   text(): Promise<string>;
 }
 declare const crypto: {
@@ -841,4 +861,5 @@ declare module "bun:test" {
   export function afterAll(fn: () => unknown, timeout?: number): void;
   export function beforeEach(fn: () => unknown, timeout?: number): void;
   export function afterEach(fn: () => unknown, timeout?: number): void;
+  export function setDefaultTimeout(milliseconds: number): void;
 }

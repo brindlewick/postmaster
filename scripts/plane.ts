@@ -1,21 +1,25 @@
 // Plane work items as tickets, through Plane's REST API. One Plane project per target repo,
 // matched by the project identifier that prefixes every work item id (PM-12): the same prefix
-// scripts/discover-project.sh reads off the target's commit messages, so a project that has
+// scripts/run discover-project reads off the target's commit messages, so a project that has
 // shipped one ticket needs nothing configured.
 //
-//   plane.sh projects                                identifier, id and name of every project
-//   plane.sh create <IDENT> <title> <body-file>      new work item in the todo state; prints its id
-//   plane.sh read <IDENT-n> [--body]                 title, state, labels, body, comments; with
+//   run plane projects                                identifier, id and name of every project
+//   run plane create <IDENT> <title> <body-file>      new work item in the todo state; prints its id
+//   run plane read <IDENT-n> [--body]                 title, state, labels, body, comments; with
 //                                                    --body, the body alone
-//   plane.sh edit <IDENT-n> <body-file> <base-file>  replace its description; the title stays
-//   plane.sh state <IDENT-n> <state>                 todo | in-progress | blocked | done | cancelled
-//   plane.sh comment <IDENT-n> <actor> <text>        one comment, dated to the minute, actor first
-//   plane.sh list <IDENT> [state]                    one line per work item: id, state, title
+//   run plane edit <IDENT-n> <body-file> <base-file>  replace its description; the title stays
+//   run plane title <IDENT-n> <title>                change the work item's title
+//   run plane state <IDENT-n> <state>                 todo | in-progress | blocked | done | cancelled
+//   run plane label <IDENT-n> add|remove <label>      add or remove a label, creating it when
+//                                                    missing; a state change leaves `ready` alone
+//   run plane comment <IDENT-n> <actor> <text>        one comment, dated to the minute, actor first
+//   run plane list <IDENT> [state]                    one line per work item: id, state, title
 //
-// The instance and workspace come from [tracker] in ~/.postmaster/config.toml (url and
-// workspace; POSTMASTER_CONFIG overrides the path). The key is PLANE_API_KEY in the
-// environment, else in the file [tracker] env_file names (default ~/.postmaster/plane.env),
-// loaded first. The key never enters the config or this repo.
+// The instance and workspace come from the effective [tracker]: the project's own
+// settings over ~/.postmaster/config.toml (url and workspace; POSTMASTER_CONFIG
+// overrides the path). The key is PLANE_API_KEY in the environment, else in the file
+// [tracker] env_file names (default ~/.postmaster/plane.env), loaded first. The key
+// never enters the config or this repo.
 //
 // The flow's states map onto Plane's state groups: todo is the first state in the unstarted
 // group (backlog if none), in-progress is started, done is completed, cancelled is cancelled.
@@ -36,9 +40,15 @@
 //   exit 2  invalid state
 //   exit 4  the work item changed since the base was read
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tryTomlFile } from "./lib/data.ts";
-import { scriptsDir } from "./lib/paths.ts";
+import {
+  acceptanceStorePath,
+  effectiveConfigForProject,
+  globalConfigPath,
+  inspect,
+  isDie,
+} from "./lib/effective-config.ts";
 import { run } from "./lib/proc.ts";
 import {
   digitValue,
@@ -1011,37 +1021,65 @@ interface PlaneConfig {
 }
 
 function loadConfig(): PlaneConfig {
-  const configPath =
-    process.env.POSTMASTER_CONFIG || join(process.env.HOME ?? "", ".postmaster/config.toml");
-  if (!existsSync(configPath))
-    dieP(`no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
-  const cfg = tryTomlFile(configPath);
-  if (!cfg) dieP(`cannot read ${configPath}`);
-  const tracker = (cfg.tracker ?? {}) as Record<string, unknown>;
-  const envFileRaw = (tracker.env_file as string) || "~/.postmaster/plane.env";
-  const envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
-  const machineWorkspace = String(tracker.workspace ?? "");
+  const configPath = globalConfigPath();
   const toplevel = run("git", ["rev-parse", "--show-toplevel"]);
   const project =
     process.env.POSTMASTER_PROJECT || (toplevel.code === 0 ? toplevel.out.trim() : "");
+  let tracker: Record<string, unknown>;
+  let binding = "";
+  let source = configPath;
+  let projectEnvBase = "";
   if (project !== "") {
-    const insp = run(join(scriptsDir(import.meta), "project-settings.sh"), ["inspect", project]);
-    if (insp.code !== 0) {
-      if (insp.err.trim() !== "") console.error(insp.err.trim());
-      dieP("cannot read the project's tracker binding");
+    const resolved = effectiveConfigForProject(project, configPath);
+    if (resolved.notice !== null) console.error(resolved.notice);
+    if (resolved.config === null || resolved.error !== null) {
+      dieP(resolved.error ?? "cannot resolve project settings");
     }
-    let binding = "";
+    tracker = (resolved.config.tracker ?? {}) as Record<string, unknown>;
+    // A relative env_file the project's settings set resolves against the
+    // project root; one the global config sets reads as before.
+    const localTracker = resolved.local.tracker;
+    if (
+      resolved.projectFile !== null &&
+      localTracker !== null &&
+      typeof localTracker === "object" &&
+      !Array.isArray(localTracker) &&
+      typeof (localTracker as Record<string, unknown>).env_file === "string" &&
+      ((localTracker as Record<string, unknown>).env_file as string) !== ""
+    ) {
+      projectEnvBase = dirname(dirname(resolved.projectFile));
+    }
+    // The tracker's values came from the effective config: name the project
+    // file that carries them, not the global path, which may not hold them.
+    if (resolved.projectFile !== null) source = resolved.projectFile;
     try {
-      binding = (JSON.parse(insp.out).tracker ?? {}).binding ?? "";
+      const facts = inspect(project, { storePath: acceptanceStorePath(configPath) });
+      const bound = (facts.tracker as Record<string, unknown> | undefined)?.binding;
+      binding = typeof bound === "string" ? bound : "";
     } catch (e) {
-      console.error(`project settings gave no JSON: ${e instanceof Error ? e.message : e}`);
-      dieP("cannot read the project's tracker binding");
+      if (isDie(e)) {
+        console.error(`project-settings: ${e.message}`);
+        dieP("cannot read the project's tracker binding");
+      }
+      throw e;
     }
-    if (binding !== "" && binding !== machineWorkspace)
-      dieP(
-        `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${configPath}`,
-      );
+  } else {
+    if (!existsSync(configPath))
+      dieP(`no config at ${configPath} (POSTMASTER_CONFIG overrides the path)`);
+    const cfg = tryTomlFile(configPath);
+    if (!cfg) dieP(`cannot read ${configPath}`);
+    tracker = (cfg.tracker ?? {}) as Record<string, unknown>;
   }
+  const envFileRaw = (tracker.env_file as string) || "~/.postmaster/plane.env";
+  let envFile = envFileRaw.replace(/^~/u, process.env.HOME ?? "");
+  if (projectEnvBase !== "" && !envFile.startsWith("/")) {
+    envFile = join(projectEnvBase, envFile);
+  }
+  const machineWorkspace = String(tracker.workspace ?? "");
+  if (binding !== "" && binding !== machineWorkspace)
+    dieP(
+      `the project's Plane workspace binding '${binding}' does not match the machine workspace '${machineWorkspace}' in ${source}`,
+    );
   if (!process.env.PLANE_API_KEY && existsSync(envFile)) {
     const text = readFileSync(envFile, "utf8");
     for (const line of text.split("\n")) {
@@ -1058,7 +1096,7 @@ function loadConfig(): PlaneConfig {
   const WS = String(tracker.workspace ?? "");
   if (!BASE || !WS) {
     dieP(
-      `[tracker] url and workspace are needed in ${configPath} (skills/postmaster/trackers.md, plane)`,
+      `[tracker] url and workspace are needed in ${source} (skills/postmaster/trackers.md, plane)`,
     );
   }
   return { BASE, WS, KEY };
@@ -1213,7 +1251,7 @@ async function runCommands(): Promise<void> {
       console.log(`${p.identifier ?? ""}\t${p.id}\t${p.name ?? ""}`);
     }
   } else if (cmd === "create") {
-    if (args.length !== 3) dieP("usage: plane.sh create <IDENT> <title> <body-file>");
+    if (args.length !== 3) dieP("usage: run plane create <IDENT> <title> <body-file>");
     const [ident, title, bodyFile] = [args[0]!, args[1]!, args[2]!];
     const body = readFileP(bodyFile);
     const [outHtml, diff] = readback(body);
@@ -1229,7 +1267,7 @@ async function runCommands(): Promise<void> {
   } else if (cmd === "edit") {
     if (args.length !== 3 || !existsSync(args[1] ?? "")) {
       dieP(
-        "usage: plane.sh edit <IDENT-n> <body-file> <base-file> (edit takes no title and never changes one)",
+        "usage: run plane edit <IDENT-n> <body-file> <base-file> (edit takes no title and never changes one)",
       );
     }
     const body = readFileP(args[1]!);
@@ -1249,9 +1287,67 @@ async function runCommands(): Promise<void> {
       },
     );
     console.log(`${tid}: edited`);
+  } else if (cmd === "title") {
+    if (args.length !== 2) dieP("usage: run plane title <IDENT-n> <title>");
+    const [ident, item] = await itemFor(cfg, args[0]!);
+    const tid = `${ident}-${item.sequence_id}`;
+    await api(
+      cfg,
+      "PATCH",
+      `workspaces/${cfg.WS}/projects/${ref(item.project)}/work-items/${item.id}/`,
+      { name: args[1] },
+    );
+    console.log(`${tid}: title changed`);
+  } else if (cmd === "label") {
+    if (args.length !== 3 || (args[1] !== "add" && args[1] !== "remove"))
+      dieP("usage: run plane label <IDENT-n> add|remove <label>");
+    const verb = args[1] as "add" | "remove";
+    const name = args[2]!;
+    const [ident, item] = await itemFor(cfg, args[0]!);
+    const tid = `${ident}-${item.sequence_id}`;
+    const pid = String(ref(item.project));
+    const labels = await labelsOf(cfg, pid);
+    const current = (item.labels ?? []).map((l: unknown) => ref(l));
+    const named = labels
+      .filter((l: any) => pyLower(l.name) === pyLower(name))
+      .map((l: any) => l.id);
+    let labelId = named[0];
+    if (verb === "add") {
+      if (!labelId) {
+        const created = await api(cfg, "POST", `workspaces/${cfg.WS}/projects/${pid}/labels/`, {
+          name,
+        });
+        labelId = created.id;
+      }
+      const next = [...new Set([...current, labelId])].sort();
+      await api(cfg, "PATCH", `workspaces/${cfg.WS}/projects/${pid}/work-items/${item.id}/`, {
+        labels: next,
+      });
+    } else {
+      const drop = new Set(named);
+      const next = current.filter((l: unknown) => !drop.has(l));
+      await api(cfg, "PATCH", `workspaces/${cfg.WS}/projects/${pid}/work-items/${item.id}/`, {
+        labels: next,
+      });
+    }
+    console.log(`${tid}: label ${verb === "add" ? "added" : "removed"} ${name}`);
+  } else if (cmd === "has-label") {
+    if (args.length !== 2) dieP("usage: run plane has-label <IDENT-n> <label>");
+    const name = args[1]!;
+    const [, item] = await itemFor(cfg, args[0]!);
+    const pid = String(ref(item.project));
+    const labels = await labelsOf(cfg, pid);
+    const names: Record<string, string> = {};
+    for (const l of labels) names[l.id] = l.name;
+    // Exact membership: a label name may itself hold commas, so the
+    // comma-joined `labels:` line is display-only and never parsed back.
+    const has = (item.labels ?? []).some(
+      (l: unknown) => pyLower(names[String(ref(l))] ?? "") === pyLower(name),
+    );
+    console.log(has ? "present" : "absent");
   } else if (cmd === "read") {
     const rest = args.filter((a) => a !== "--body");
-    if (rest.length !== 1 || args.length > 2) dieP("usage: plane.sh read <IDENT-n> [--body]");
+    if (rest.length !== 1 || args.length > 2) dieP("usage: run plane read <IDENT-n> [--body]");
     const [ident, item] = await itemFor(cfg, rest[0]!);
     if (args.includes("--body")) {
       console.log(htmlToText(item.description_html));
@@ -1287,7 +1383,7 @@ async function runCommands(): Promise<void> {
       }
     }
   } else if (cmd === "state") {
-    if (args.length !== 2) dieP("usage: plane.sh state <IDENT-n> <state>");
+    if (args.length !== 2) dieP("usage: run plane state <IDENT-n> <state>");
     const newSt = args[1]!;
     if (!STATES.includes(newSt)) dieP(`invalid state ${newSt} (one of: ${STATES.join(", ")})`, 2);
     const [ident, item] = await itemFor(cfg, args[0]!);
@@ -1314,7 +1410,7 @@ async function runCommands(): Promise<void> {
     await api(cfg, "PATCH", `workspaces/${cfg.WS}/projects/${pid}/work-items/${item.id}/`, patch);
     console.log(`${ident}-${item.sequence_id}: ${newSt}`);
   } else if (cmd === "comment") {
-    if (args.length < 3) dieP("usage: plane.sh comment <IDENT-n> <actor> <text>");
+    if (args.length < 3) dieP("usage: run plane comment <IDENT-n> <actor> <text>");
     const [ident, item] = await itemFor(cfg, args[0]!);
     const actor = args[1]!;
     const text = args.slice(2).join(" ");
@@ -1327,7 +1423,7 @@ async function runCommands(): Promise<void> {
     });
     console.log(`${ident}-${item.sequence_id}: ${line}`);
   } else if (cmd === "list") {
-    if (args.length !== 1 && args.length !== 2) dieP("usage: plane.sh list <IDENT> [state]");
+    if (args.length !== 1 && args.length !== 2) dieP("usage: run plane list <IDENT> [state]");
     const want = args.length === 2 ? args[1] : null;
     if (want && !STATES.includes(want))
       dieP(`invalid state ${want} (one of: ${STATES.join(", ")})`, 2);
@@ -1344,7 +1440,7 @@ async function runCommands(): Promise<void> {
       }
     }
   } else {
-    dieP("usage: plane.sh projects|create|edit|read|state|comment|list ...");
+    dieP("usage: run plane projects|create|edit|title|read|state|label|comment|list ...");
   }
 }
 
@@ -1353,7 +1449,7 @@ const firstArg = process.argv[2];
 if (import.meta.main) {
   if (!firstArg) {
     try {
-      dieP("usage: plane.sh projects|create|edit|read|state|comment|list ...");
+      dieP("usage: run plane projects|create|edit|title|read|state|label|comment|list ...");
     } catch (e) {
       fatal(e);
     }
