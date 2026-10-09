@@ -317,6 +317,23 @@ function logTicketEdit(repo: string, id: string, what: string): void {
   if (r.code !== 0) die(`the ticket-edit line could not be written (${(r.out + r.err).trim()})`);
 }
 
+function stripOneNewline(s: string): string {
+  return s.endsWith("\n") ? s.slice(0, -1) : s;
+}
+
+function firstDifferingLine(
+  a: string,
+  b: string,
+): { line: number; aLine: string | undefined; bLine: string | undefined } {
+  const aLines = a.split("\n");
+  const bLines = b.split("\n");
+  const max = Math.max(aLines.length, bLines.length);
+  for (let i = 0; i < max; i++) {
+    if (aLines[i] !== bLines[i]) return { line: i + 1, aLine: aLines[i], bLine: bLines[i] };
+  }
+  return { line: max, aLine: aLines[max - 1], bLine: bLines[max - 1] };
+}
+
 function markAdapterTicket(
   repo: string,
   id: string,
@@ -339,6 +356,7 @@ function markAdapterTicket(
   const base = kind === "plane" ? [] : [repo];
   // The edit decision and base use the stored body: the display read carries
   // the comment trailer, which the adapters do not compare against.
+  let didWriteBody = false;
   if (draftFile && body !== stored) {
     const work = mkdtempSync(join(tmpdir(), "ticket-ready-"));
     try {
@@ -350,6 +368,7 @@ function markAdapterTicket(
       if (r.code !== 0)
         die(`the ${kind} adapter could not write the body (${(r.out + r.err).trim()})`);
       logTicketEdit(repo, id, "body updated");
+      didWriteBody = true;
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
@@ -360,30 +379,57 @@ function markAdapterTicket(
       die(`the ${kind} adapter could not write the title (${(r.out + r.err).trim()})`);
     logTicketEdit(repo, id, "title updated");
   }
-  labelViaAdapter(repo, id, kind, "add");
-  logTicketEdit(repo, id, "label add ready");
-  logLedgerNote(repo, id, turnpikes);
-  removeClerkRecord(repo, id);
-  // Bind the marker to the stored text as the check will read it, not to the
-  // draft bytes, so storage normalization cannot break the comparison.
-  writeQueue(repo, id, title, bodyViaAdapter(repo, id, kind));
-  // An edit that landed between the write and the binding read would bind as
-  // signed. Verify the stored text still matches the signed bytes with the
-  // adapter's own comparison, and roll the mark back (label and marker) on
-  // mismatch; a body the adapter refuses to compare fails the same way, and
-  // retrying converges.
-  const signed = draftFile ? body : stored;
-  const confirm = storedMatches(repo, id, kind, signed);
-  if (confirm !== null) {
-    const baseArgs = kind === "plane" ? [] : [repo];
-    const back = runScript(`${kind}`, [...baseArgs, "label", id, "remove", "ready"]);
-    removeQueue(repo, id);
-    if (back.code === 0) logTicketEdit(repo, id, "label remove ready (mark rolled back)");
-    die(
-      back.code === 0
-        ? `the ticket changed while it was being marked (${confirm}); run mark again`
-        : `the ticket changed while it was being marked (${confirm}); the ready label could not be removed (${(back.out + back.err).trim()}): remove it and run mark again`,
-    );
+  if (kind === "github") {
+    // Read back before the label goes on, and compare without writing
+    // anything: a check that writes can change what it checks, and on GitHub
+    // it does. A failed read or a mismatch leaves neither the label nor the
+    // marker, so there is nothing to roll back.
+    const freshBodyRaw = bodyViaAdapter(repo, id, kind);
+    const freshLive = readViaAdapter(repo, id, kind);
+    const signedBody = draftFile ? body : stored;
+    const diffs: string[] = [];
+    if (didWriteBody) {
+      const freshStored = stripOneNewline(freshBodyRaw);
+      if (freshStored !== signedBody) {
+        const d = firstDifferingLine(signedBody, freshStored);
+        const aDisp = d.aLine === undefined ? "(no line)" : JSON.stringify(d.aLine);
+        const bDisp = d.bLine === undefined ? "(no line)" : JSON.stringify(d.bLine);
+        diffs.push(`the body differs at line ${d.line} (signed ${aDisp} vs stored ${bDisp})`);
+      }
+    } else if (freshBodyRaw !== stored) {
+      die("the ticket changed while it was being marked; run mark again");
+    }
+    if (freshLive.title !== title) {
+      diffs.push(
+        `the title differs (signed ${JSON.stringify(title)} vs stored ${JSON.stringify(freshLive.title)})`,
+      );
+    }
+    if (diffs.length > 0) {
+      die(`the ticket changed while it was being marked: ${diffs.join("; ")}; run mark again`);
+    }
+    labelViaAdapter(repo, id, kind, "add");
+    logTicketEdit(repo, id, "label add ready");
+    logLedgerNote(repo, id, turnpikes);
+    removeClerkRecord(repo, id);
+    // Bind the marker to the bytes just verified, as the check will read
+    // them, not to the draft bytes.
+    writeQueue(repo, id, freshLive.title, freshBodyRaw);
+  } else {
+    // Bind and confirm with the adapter's own comparison before the label
+    // goes on, so a mismatch or read failure leaves nothing to undo. An edit
+    // that landed between the write and the binding read fails the confirm,
+    // and retrying converges.
+    const boundBody = bodyViaAdapter(repo, id, kind);
+    const signed = draftFile ? body : stored;
+    const confirm = storedMatches(repo, id, kind, signed);
+    if (confirm !== null) {
+      die(`the ticket changed while it was being marked (${confirm}); run mark again`);
+    }
+    labelViaAdapter(repo, id, kind, "add");
+    logTicketEdit(repo, id, "label add ready");
+    logLedgerNote(repo, id, turnpikes);
+    removeClerkRecord(repo, id);
+    writeQueue(repo, id, title, boundBody);
   }
   console.log(`ticket-ready: ${id} marked ready and queued`);
   return 0;
