@@ -26,15 +26,28 @@
 // the new text off again. The check --body form takes the same --project,
 // --id and --title the marking took, so it verifies that binding; a title
 // passed differently reads as a changed ticket. consume drops the marker when
-// the postmaster dispatches, and unmark drops the mark with it.
+// the postmaster dispatches, and unmark drops the mark with it. A marking with
+// a clerk session recorded arms that session's close: once the clerk's turn
+// ends, the session's tab closes and its record drops.
 //
 // Exit 0 the ticket is ready, or the verb did its work; 2 the ticket is not
 // ready, or the marking was refused; 1 anything else (an unreadable ticket,
 // an unknown tracker, usage).
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { clerkSessionPath } from "./clerk.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
@@ -295,14 +308,51 @@ function readyViaAdapter(repo: string, id: string, kind: string): boolean {
   return r.out.trim() === "present";
 }
 
-function removeClerkRecord(repo: string, id: string): void {
-  // The clerk's session ends with the marking; a missing record is fine.
-  rmSync(
-    join(repo, ".postmaster", "runs", "postmaster", "clerks", `${encodeURIComponent(id)}.json`),
-    {
-      force: true,
-    },
-  );
+function armClerkClose(repo: string, id: string): boolean {
+  // The clerk marks its own ticket from inside its session, so the session
+  // cannot close yet: keep its record, marked closing, and start the closer
+  // detached. It waits for the turn to end, closes that one session, and drops
+  // the record. A missing record, or none naming a session, arms nothing.
+  let record: Record<string, unknown> = {};
+  try {
+    record = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  if (typeof record.handle !== "string" || !record.handle) return false;
+  let log = -1;
+  try {
+    log = openSync(
+      join(dirname(clerkSessionPath(repo, id)), `${encodeURIComponent(id)}.close.log`),
+      "a",
+    );
+  } catch {
+    console.error("ticket-ready: could not open the clerk close log; close the session by hand");
+    return false;
+  }
+  try {
+    const child = spawn(join(HERE, "run"), ["host", "_clerk-close", repo, id], {
+      detached: true,
+      stdio: ["ignore", log, log],
+    });
+    child.unref();
+  } catch {
+    console.error("ticket-ready: could not start the clerk closer; close the session by hand");
+    try {
+      closeSync(log);
+    } catch {}
+    return false;
+  }
+  try {
+    closeSync(log);
+  } catch {}
+  try {
+    writeFileSync(
+      clerkSessionPath(repo, id),
+      `${JSON.stringify({ ...record, closing: new Date().toISOString() })}\n`,
+    );
+  } catch {}
+  return true;
 }
 
 function logLedgerNote(repo: string, id: string, turnpikes: string): void {
@@ -379,6 +429,7 @@ function markAdapterTicket(
       die(`the ${kind} adapter could not write the title (${(r.out + r.err).trim()})`);
     logTicketEdit(repo, id, "title updated");
   }
+  let armed = false;
   if (kind === "github") {
     // Read back before the label goes on, and compare without writing
     // anything: a check that writes can change what it checks, and on GitHub
@@ -411,7 +462,7 @@ function markAdapterTicket(
     labelViaAdapter(repo, id, kind, "add");
     logTicketEdit(repo, id, "label add ready");
     logLedgerNote(repo, id, turnpikes);
-    removeClerkRecord(repo, id);
+    armed = armClerkClose(repo, id);
     // Bind the marker to the bytes just verified, as the check will read
     // them, not to the draft bytes.
     writeQueue(repo, id, freshLive.title, freshBodyRaw);
@@ -429,10 +480,11 @@ function markAdapterTicket(
     labelViaAdapter(repo, id, kind, "add");
     logTicketEdit(repo, id, "label add ready");
     logLedgerNote(repo, id, turnpikes);
-    removeClerkRecord(repo, id);
+    armed = armClerkClose(repo, id);
     writeQueue(repo, id, title, boundBody);
   }
   console.log(`ticket-ready: ${id} marked ready and queued`);
+  if (armed) console.log(`ticket-ready: its clerk session closes when its turn ends`);
   return 0;
 }
 
@@ -552,9 +604,10 @@ function main(argv: string[]): number {
     }
     if (!turnpikes) die(`checked ${id} but ticket-check printed no turnpikes line`);
     logLedgerNote(repo, id, turnpikes);
-    removeClerkRecord(repo, id);
+    const armed = armClerkClose(repo, id);
     writeQueue(repo, id, title, unsignedBody(body));
     console.log(`ticket-ready: ${id} marked ready and queued`);
+    if (armed) console.log(`ticket-ready: its clerk session closes when its turn ends`);
     return 0;
   }
   if (
