@@ -162,7 +162,10 @@ function formHarnessArgv(form: string, envFile: string): string[] {
  * control puts the harness in its own foreground group; -c supplies the
  * form, so stdin stays a pipe nothing reads. Exported so the suite pins the
  * mac shape where no mac runs. */
-function ptyInvocation(platform: string, form: string): {
+function ptyInvocation(
+  platform: string,
+  form: string,
+): {
   args: string[];
   input: string | null;
 } {
