@@ -85,13 +85,14 @@ describe("the prompt names its repo and surface and mandates the sections", () =
     try {
       const out = promptOrThrow(repo, "cli");
       expect(out).toContain(repo);
+      // LOWER: lowered for an ASCII keyword match
       expect(out.toLowerCase()).toContain("command line");
-      const lower = out.toLowerCase();
+      const lower = out.toLowerCase(); // LOWER: lowered for an ASCII keyword match
       for (const stem of ["launch", "health check", "drive", "evidence", "cleanup", "helper"]) {
         expect(lower).toContain(stem);
       }
-      expect(out).toMatch(/three to five/i);
-      expect(out).toMatch(/hand-?over/i);
+      expect(out).toMatch(/three to five/iu);
+      expect(out).toMatch(/hand-?over/iu);
       expect(out).toContain("pstack");
       expect(out).toContain("23e4138");
     } finally {

@@ -38,7 +38,8 @@ export function commitAll(repo: string, message: string): void {
 
 /** Lowercase alphanumeric words; case and punctuation carry no copying signal. */
 export function words(text: string): string[] {
-  return text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  // LOWER: lowered for an ASCII word match
+  return text.toLowerCase().match(/[a-z0-9]+/gu) ?? [];
 }
 
 /** Every run of n words, joined by one space. */
@@ -59,7 +60,7 @@ export function sharedRuns(a: string, b: string, n: number): string[] {
 
 /** The first piece holding at least minWords words; throws when none does. */
 export function firstSentence(text: string, minWords: number): string {
-  for (const piece of text.split(/[.?!\n]+/)) {
+  for (const piece of text.split(/[.?!\n]+/u)) {
     if (words(piece).length >= minWords) return piece.trim();
   }
   throw new Error(`no sentence holds ${minWords} words`);
