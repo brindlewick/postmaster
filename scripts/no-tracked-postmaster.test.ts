@@ -35,6 +35,22 @@ function commitAll(repo: string, message: string): void {
   git(repo, "commit", "-q", "-m", message);
 }
 
+function withEnv<T>(vars: Record<string, string>, fn: () => T): T {
+  const saved = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(vars)) {
+    saved.set(key, process.env[key]);
+    process.env[key] = value;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 describe("temp fixtures", () => {
   test("no .postmaster/ directory passes", () => {
     const r = withTempDir((dir) => {
@@ -116,6 +132,48 @@ describe("temp fixtures", () => {
     const r = withTempDir((dir) => check(dir));
     expect(r.code).toBe(2);
     expect(r.err).toContain("cannot find the repository");
+  });
+});
+
+describe("inherited git environment", () => {
+  function dirtyPlusDecoy(dir: string): { repo: string; decoy: string } {
+    const repo = join(dir, "repo");
+    const decoy = join(dir, "decoy");
+    initRepo(repo);
+    initRepo(decoy);
+    writeFile(repo, ".postmaster/probe.toml", "probe = true\n");
+    writeFile(repo, "README.md", "hi\n");
+    writeFile(decoy, "README.md", "clean\n");
+    commitAll(repo, "probe");
+    commitAll(decoy, "clean");
+    return { repo, decoy };
+  }
+
+  test("GIT_DIR at a clean repo does not hide a tracked file", () => {
+    const r = withTempDir((dir) => {
+      const { repo, decoy } = dirtyPlusDecoy(dir);
+      return withEnv({ GIT_DIR: join(decoy, ".git") }, () => check(repo));
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(".postmaster/probe.toml");
+  });
+
+  test("GIT_WORK_TREE at a clean repo does not hide a tracked file", () => {
+    const r = withTempDir((dir) => {
+      const { repo, decoy } = dirtyPlusDecoy(dir);
+      return withEnv({ GIT_WORK_TREE: decoy }, () => check(repo));
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(".postmaster/probe.toml");
+  });
+
+  test("GIT_INDEX_FILE at a clean index does not hide a tracked file", () => {
+    const r = withTempDir((dir) => {
+      const { repo, decoy } = dirtyPlusDecoy(dir);
+      return withEnv({ GIT_INDEX_FILE: join(decoy, ".git", "index") }, () => check(repo));
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(".postmaster/probe.toml");
   });
 });
 

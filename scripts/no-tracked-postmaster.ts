@@ -22,8 +22,20 @@ interface CheckResult {
   err: string;
 }
 
+// Inherited directory overrides make git honor them over -C, so every git
+// subprocess here runs without them.
+const UNSET_GIT = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+  GIT_NAMESPACE: undefined,
+};
+
 export function check(root: string): CheckResult {
-  const top = run("git", ["-C", root, "rev-parse", "--show-toplevel"]);
+  const top = run("git", ["-C", root, "rev-parse", "--show-toplevel"], { env: UNSET_GIT });
   if (top.code !== 0) {
     const detail = top.err.trim() || top.out.trim() || `exit ${top.code}`;
     return {
@@ -36,7 +48,9 @@ export function check(root: string): CheckResult {
   if (dir === "") {
     return { code: 2, out: "", err: "no-tracked-postmaster: cannot find the repository\n" };
   }
-  const listed = run("git", ["-C", dir, "ls-files", "-z", "--", ".postmaster"]);
+  const listed = run("git", ["-C", dir, "ls-files", "-z", "--", ".postmaster"], {
+    env: UNSET_GIT,
+  });
   if (listed.code !== 0) {
     const detail = listed.err.trim() || listed.out.trim() || `exit ${listed.code}`;
     return { code: 2, out: "", err: `no-tracked-postmaster: git ls-files failed: ${detail}\n` };
