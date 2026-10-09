@@ -865,35 +865,39 @@ describe("checkMultiVerifiers", () => {
     expect(checkBranch({ "README.md": "# app\n" }, goodVerifiers(), ["cli", "web"])).not.toThrow();
   });
 
-  test("a missing index, README, features index or page fails", () => {
-    const cases: [string, (f: Record<string, string>) => void][] = [
-      ["index", (f) => delete f["verifier/README.md"]],
-      ["README", (f) => delete f["verifier/cli/README.md"]],
-      ["features index", (f) => delete f["verifier/cli/features/README.md"]],
-      ["page", (f) => delete f["verifier/cli/features/c.md"]],
-    ];
-    for (const [label, drop] of cases) {
-      const files = goodVerifiers();
-      drop(files);
-      let threw = false;
-      try {
-        checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])();
-      } catch {
-        threw = true;
-      }
-      if (!threw) throw new Error(`case ${label} did not throw`);
-    }
+  test("a missing index fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/README.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing verifier README fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/cli/README.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing features index fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/cli/features/README.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
+  });
+
+  test("a missing feature page fails", () => {
+    const files = goodVerifiers();
+    delete files["verifier/cli/features/c.md"];
+    expect(checkBranch({ "README.md": "# app\n" }, files, ["cli", "web"])).toThrow();
   });
 
   test("a missing upkeep line and a wrong index entry fail", () => {
     const noUpkeep = goodVerifiers();
     noUpkeep["verifier/cli/README.md"] = "# cli\n\nDrives it.\n";
-    expect(checkBranch({ "README.md": "# app\n" }, noUpkeep, ["cli", "web"])).toThrow(/upkeep/);
+    expect(checkBranch({ "README.md": "# app\n" }, noUpkeep, ["cli", "web"])).toThrow(/upkeep/u);
     const wrongIndex = goodVerifiers();
     wrongIndex["verifier/README.md"] =
       "# Verifiers\n\n- [cli](verifier/cli-extra/): command line.\n- [web](web/) verifies the web pages.\n";
     expect(checkBranch({ "README.md": "# app\n" }, wrongIndex, ["cli", "web"])).toThrow(
-      /names no command line/,
+      /names no command line/u,
     );
   });
 
@@ -901,7 +905,7 @@ describe("checkMultiVerifiers", () => {
     const stray = goodVerifiers();
     stray["verifier/library/README.md"] = "# library\n";
     expect(checkBranch({ "README.md": "# app\n" }, stray, ["cli", "web"])).toThrow(
-      /unlisted library/,
+      /unlisted library/u,
     );
     expect(
       checkBranch(
@@ -916,7 +920,7 @@ describe("checkMultiVerifiers", () => {
     const top = goodVerifiers();
     top["verifier-cli/README.md"] = "# stray\n";
     expect(checkBranch({ "README.md": "# app\n" }, top, ["cli", "web"])).toThrow(
-      /outside verifier/,
+      /outside verifier/u,
     );
     const nested = goodVerifiers();
     nested["verify-app/extra.md"] = "stray\n";
@@ -925,7 +929,7 @@ describe("checkMultiVerifiers", () => {
         "cli",
         "web",
       ]),
-    ).toThrow(/outside verifier/);
+    ).toThrow(/outside verifier/u);
   });
 
   test("an unlistable comparison fails instead of passing", () => {
@@ -935,7 +939,7 @@ describe("checkMultiVerifiers", () => {
       initRepo(repo);
       const { base } = seedMultiBranch(repo, { "README.md": "# app\n" }, goodVerifiers());
       expect(() => checkMultiVerifiers(repo, "nope", base, ["cli", "web"])).toThrow(
-        /cannot be compared/,
+        /cannot be compared/u,
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });

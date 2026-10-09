@@ -212,11 +212,12 @@ export function hasUpkeepLine(text: string): boolean {
 export function indexNames(text: string, kind: Surface): boolean {
   const prose = PROSE[kind];
   return text.split("\n").some((line) => {
+    // LOWER: lowered for an ASCII keyword match
     const lower = line.toLowerCase();
     if (!lower.includes(prose)) return false;
     // A full verifier/<kind>/ path bounded past the kind, so verifier/cli-extra/
     // never reads as the cli verifier, or a relative folder link [cli](cli/).
-    return new RegExp(`verifier/${kind}(?![A-Za-z0-9_-])|\\]\\(\\s*${kind}/`, "u").test(lower);
+    return new RegExp(`verifier/${kind}(?![A-Za-z0-9_-])|\\]\\( *${kind}/`, "u").test(lower);
   });
 }
 
