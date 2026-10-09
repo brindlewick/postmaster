@@ -1,12 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./proc.ts";
 import { packageSettingsDiffer, parseSwitchOff, scanComments } from "./switch-offs.ts";

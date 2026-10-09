@@ -112,7 +112,7 @@ const JS_PLUGINS = [
  * `.mts` and `.cts` the tools read `<T>x` as an assertion, and JSX would
  * swallow the comments after one. */
 function parserOptions(path: string): BabelOptions {
-  if (/\.tsx$/u.test(path)) return { plugins: [...TSX_PLUGINS], ...parserCommon() };
+  if (path.endsWith(".tsx")) return { plugins: [...TSX_PLUGINS], ...parserCommon() };
   if (/\.(?:ts|mts|cts)$/u.test(path)) return { plugins: [...TS_PLUGINS], ...parserCommon() };
   return { plugins: [...JS_PLUGINS], ...parserCommon() };
 }
@@ -347,7 +347,7 @@ function biomeDirective(match: RegExpExecArray, line: string): SwitchDirective |
   };
 }
 
-const noMarks = (entry: string): string => pyTrim(entry.replace(/^[\/* \t]+/u, ""));
+const noMarks = (entry: string): string => pyTrim(entry.replace(/^[/* \t]+/u, ""));
 
 /** The directives in a `//` comment: at most one, since one line leads with
  * one directive. TypeScript honors extra slashes after the opener (`///`
@@ -722,26 +722,17 @@ function blobAt(repo: string, rev: string, path: string): string | null {
  * tools read the target's content under the link's name. A link that dangles,
  * leaves the tree or chains to another link fails loud: scanning the link's
  * own text would report over content no tool sees. */
-function resolveLink(
-  repo: string,
-  rev: string,
-  path: string,
-  modes: Map<string, string>,
-): string {
+function resolveLink(repo: string, rev: string, path: string, modes: Map<string, string>): string {
   if (modes.get(path) !== "120000") return path;
   const link = blobAt(repo, rev, path);
   if (link === null) throw new Error(`cannot read ${path} at ${rev}: refusing to report over it`);
   const target = link.replace(/\r?\n$/u, "");
   if (target.startsWith("/")) {
-    throw new Error(
-      `cannot resolve symlink ${path} at ${rev}: target ${target} leaves the tree`,
-    );
+    throw new Error(`cannot resolve symlink ${path} at ${rev}: target ${target} leaves the tree`);
   }
   const resolved = posix.normalize(posix.join(posix.dirname(path), target));
   if (resolved === ".." || resolved.startsWith("../")) {
-    throw new Error(
-      `cannot resolve symlink ${path} at ${rev}: target ${target} leaves the tree`,
-    );
+    throw new Error(`cannot resolve symlink ${path} at ${rev}: target ${target} leaves the tree`);
   }
   const mode = modes.get(resolved);
   if (mode === undefined) {
@@ -750,9 +741,7 @@ function resolveLink(
     );
   }
   if (mode === "120000") {
-    throw new Error(
-      `cannot resolve symlink ${path} at ${rev}: target ${target} is itself a link`,
-    );
+    throw new Error(`cannot resolve symlink ${path} at ${rev}: target ${target} is itself a link`);
   }
   return resolved;
 }
