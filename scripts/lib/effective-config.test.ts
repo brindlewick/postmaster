@@ -737,3 +737,27 @@ describe("Review round 2 regressions", () => {
     expect(((cfg.lanes as Rec).a as Rec).model).toBe("m-a");
   }, 30000);
 });
+
+describe("Review round 4 regressions", () => {
+  test("a committed case-variant directory counts as tracked", () => {
+    const { repo, config } = scratch();
+    // On a case-insensitive filesystem a committed .POSTMASTER/settings.toml
+    // lands inside a pre-existing .postmaster/ directory; Linux holds both
+    // spellings side by side, so this pins the macOS-correct outcome: the
+    // on-disk file waits for acceptance.
+    mkdirSync(join(repo, ".POSTMASTER"), { recursive: true });
+    writeFileSync(join(repo, ".POSTMASTER", "settings.toml"), '[lanes.luna]\nmodel = "gpt-evil"\n');
+    git(repo, ["add", ".POSTMASTER/settings.toml"]);
+    git(repo, ["commit", "-qm", "upper"]);
+    writeSettings(repo, '[lanes.luna]\nmodel = "gpt-other"\n');
+    const env = envFor(config);
+    const inspect = runCli(["project-settings", "inspect", repo], env);
+    expect(inspect.code).toBe(0);
+    expect((JSON.parse(inspect.out) as Rec).local_acceptance).toBe("pending");
+    expect(inspect.err).toContain("waits for acceptance");
+    const effective = runCli(["project-settings", "effective", repo], env);
+    expect((((JSON.parse(effective.out) as Rec).lanes as Rec).luna as Rec).model).toBe(
+      "gpt-5.6-luna",
+    );
+  }, 60000);
+});
