@@ -664,7 +664,7 @@ function fileSwitches(file: string, text: string): SwitchEntry[] {
         ...(e?.closes.map((c) => c.raw) ?? []),
         ...(end === undefined ? ["to end of file"] : []),
       ];
-      const stop = end === undefined ? code.length : Math.max(d.line, end.line - 1);
+      const stop = end === undefined ? code.length : Math.max(d.line, end.line);
       covered = code.slice(d.line - 1, stop).filter((entry) => entry !== "");
     }
     const span = [...covered, ...tail].join("\n");
