@@ -257,7 +257,8 @@ in the shared file; in the person's file a key itself stays in its env file, nev
 
    ```sh
    <tool>/scripts/run host run "postmaster" "$TARGET_ROOT" --out "$RUNS/postmaster/events.jsonl" \
-     --err "$RUNS/postmaster/postmaster.err" --marker "$RUNS/postmaster/.exited" -- \
+     --err "$RUNS/postmaster/postmaster.err" --marker "$RUNS/postmaster/.exited" \
+     --project "$TARGET_ROOT" -- \
      <tool>/scripts/run launch launch postmaster "$TARGET_ROOT" "$RUNS/postmaster/brief.md" --project "$TARGET_ROOT"
    ```
 
