@@ -334,44 +334,40 @@ describe("negative controls", () => {
     expect(out.includes("no journey report at")).toBe(true);
   });
 
-  test.skipIf(foldSkip)(
-    "step matching folds as BASE's norm does, ß/İ/ς alike",
-    () => {
-      const baseVj = join(tmp, "base-verify-journey.sh");
-      writeFileSync(baseVj, baseShown.out);
-      writeFileSync(
-        join(tmp, "fold-ticket.md"),
-        "## User journey\n1. Visit the STRASSE kiosk.\n2. Read the ςummary on DBΣ.\n3. Tap İleri.\n",
-        "utf8",
-      );
-      report(
-        join(tmp, "fold-report.md"),
-        "Visit the Straße kiosk",
-        "did",
-        "shots/1.png",
-        "Read the σummary on DBσ",
-        "did",
-        "shots/1.png",
-        "Tap İleri",
-        "did",
-        "shots/1.png",
-      );
-      const args = (bin: string): string[] => [
-        bin,
-        wt,
-        "--ticket",
-        join(tmp, "fold-ticket.md"),
-        "--report",
-        join(tmp, "fold-report.md"),
-      ];
-      const base = run("bash", args(baseVj));
-      const port = run(SELF, ["verify-journey", ...args(SELF).slice(1)]);
-      const walked = (r: { code: number; out: string; err: string }): boolean =>
-        r.code === 0 && `${r.out}${r.err}`.includes("all 3 steps walked");
-      expect(walked(base) && walked(port)).toBe(true);
-    },
-    60000,
-  );
+  test.skipIf(foldSkip)("step matching folds as BASE's norm does, ß/İ/ς alike", () => {
+    const baseVj = join(tmp, "base-verify-journey.sh");
+    writeFileSync(baseVj, baseShown.out);
+    writeFileSync(
+      join(tmp, "fold-ticket.md"),
+      "## User journey\n1. Visit the STRASSE kiosk.\n2. Read the ςummary on DBΣ.\n3. Tap İleri.\n",
+      "utf8",
+    );
+    report(
+      join(tmp, "fold-report.md"),
+      "Visit the Straße kiosk",
+      "did",
+      "shots/1.png",
+      "Read the σummary on DBσ",
+      "did",
+      "shots/1.png",
+      "Tap İleri",
+      "did",
+      "shots/1.png",
+    );
+    const args = (bin: string): string[] => [
+      bin,
+      wt,
+      "--ticket",
+      join(tmp, "fold-ticket.md"),
+      "--report",
+      join(tmp, "fold-report.md"),
+    ];
+    const base = run("bash", args(baseVj));
+    const port = run(SELF, ["verify-journey", ...args(SELF).slice(1)]);
+    const walked = (r: { code: number; out: string; err: string }): boolean =>
+      r.code === 0 && `${r.out}${r.err}`.includes("all 3 steps walked");
+    expect(walked(base) && walked(port)).toBe(true);
+  });
 
   test.skipIf(spacedDone)(
     "the self-test passes from a path with a space",

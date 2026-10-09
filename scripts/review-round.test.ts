@@ -16,7 +16,7 @@ import {
 import { join } from "node:path";
 import { run, withTempDir } from "./lib/proc.ts";
 import { bootId, processState } from "./lib/processes.ts";
-import { ARG_SPLIT_RE, monotonic } from "./review-round.ts";
+import { ARG_SPLIT_RE, monotonic, reachCheckMissing } from "./review-round.ts";
 
 const self = join(import.meta.dir, "run");
 
@@ -825,5 +825,123 @@ describe("negative controls", () => {
   }
   test("reviewers on several lines, one given twice, are each waited on once", () => {
     assertControl("reviewers on several lines, one given twice, are each waited on once");
+  });
+});
+
+// Teardown waits for the round's reach check: the round's own teardown, which names no reviewers,
+// does not run before a reach check named for a round that took its reach snapshot. These need no
+// sequence, only a fresh run.
+const pointLine = (point: string): string =>
+  JSON.stringify({
+    ts: "2026-10-09T00:00:00Z",
+    actor: "coachman",
+    action: "reach",
+    target: point,
+    detail: JSON.stringify({ kind: "point", point, result: "clean" }),
+  });
+
+interface Torn {
+  code: number;
+  out: string;
+  actions: string;
+  runLog: string;
+}
+
+/** Start round 1 of a fresh run with one reviewer, then `review-round teardown` it, naming it or not. */
+function teardown(snapshot: boolean, actions: string[], named: boolean): Torn {
+  return withTempDir((tmp) => {
+    const repo = join(tmp, "repo");
+    const dispatch = join(repo, ".postmaster", "runs", "T-1");
+    mkdirSync(dispatch, { recursive: true });
+    run("git", ["init", "-q", "-b", "main", repo]);
+    run(self, ["review-round", "start", dispatch, "1"]);
+    const statePath = join(dispatch, "logs", "review-r1.json");
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    writeFileSync(statePath, JSON.stringify({ ...state, reviewers: [["bug", "luna"]] }));
+    if (snapshot) {
+      mkdirSync(join(dispatch, "reach"), { recursive: true });
+      writeFileSync(join(dispatch, "reach", "before-r1.json"), "{}\n");
+    }
+    if (actions.length > 0)
+      writeFileSync(join(dispatch, "actions.jsonl"), `${actions.join("\n")}\n`);
+    const r = run(self, [
+      "review-round",
+      "teardown",
+      dispatch,
+      "1",
+      repo,
+      ...(named ? ["bug:luna"] : []),
+    ]);
+    const read = (name: string): string => {
+      try {
+        return readFileSync(join(dispatch, name), "utf8");
+      } catch {
+        return "";
+      }
+    };
+    return {
+      code: r.code,
+      out: r.out + r.err,
+      actions: read("actions.jsonl"),
+      runLog: read("run-log.md"),
+    };
+  });
+}
+
+describe("reachCheckMissing", () => {
+  test("it waits only for the round's own teardown of a round with no point of its own", () => {
+    expect(reachCheckMissing(true, [], "1")).toBe(true);
+    expect(reachCheckMissing(true, ["r2", "card"], "1")).toBe(true);
+    expect(reachCheckMissing(true, ["r1"], "1")).toBe(false);
+    expect(reachCheckMissing(true, ["workhorses", "r1", "r2"], "2")).toBe(false);
+    expect(reachCheckMissing(false, [], "1")).toBe(false);
+    expect(reachCheckMissing(false, ["r1"], "1")).toBe(false);
+  });
+});
+
+describe("teardown and the round's reach check", () => {
+  test("a round with a reach snapshot and no reach check is not torn down, and says why", () => {
+    const t = teardown(true, [], false);
+    expect(t.code).toBe(1);
+    expect(t.out).toContain("no reach check r1 is recorded: nothing was removed");
+    expect(t.actions).toContain("r1: teardown waits for the reach check");
+    expect(t.runLog).not.toContain("round 1: removed");
+  });
+
+  test("with the round's reach check recorded, the same teardown goes on", () => {
+    const t = teardown(true, [pointLine("r1")], false);
+    expect(t.code).toBe(0);
+    expect(t.out).not.toContain("no reach check");
+    expect(t.runLog).toContain("round 1: removed 0 of 1 scratches, 1 already gone");
+  });
+
+  test("a check recorded for another round does not stand in for this one", () => {
+    const t = teardown(true, [pointLine("r2"), pointLine("card")], false);
+    expect(t.code).toBe(1);
+    expect(t.out).toContain("no reach check r1 is recorded");
+  });
+
+  test("a round that took no reach snapshot is torn down as before", () => {
+    const t = teardown(false, [], false);
+    expect(t.code).toBe(0);
+    expect(t.runLog).toContain("round 1: removed 0 of 1 scratches, 1 already gone");
+  });
+
+  test("a scratch an interrupted round left behind is cleaned up by name, with no check", () => {
+    const t = teardown(true, [], true);
+    expect(t.code).toBe(0);
+    expect(t.out).toContain("no scratch at");
+    expect(t.out).not.toContain("no reach check");
+  });
+
+  test("an unreadable reach record stops the teardown and is named", () => {
+    const t = teardown(
+      true,
+      [JSON.stringify({ ts: "2026-10-09T00:00:00Z", action: "reach", detail: "not json" })],
+      false,
+    );
+    expect(t.code).toBe(1);
+    expect(t.out).toContain("cannot read the reach record to teardown round 1");
+    expect(t.runLog).not.toContain("round 1: removed");
   });
 });

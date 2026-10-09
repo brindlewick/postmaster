@@ -127,7 +127,6 @@ describe("portable process state", () => {
         }
         expect(withProcRoot(root, () => processState(childPid))).toBe("absent");
       },
-      10000,
     );
   }
 

@@ -461,7 +461,7 @@ describe("timeouts", () => {
     expect(rc).toBe(1);
     expect(lines.some((l) => l.includes("(timed out after 1s)"))).toBe(true);
     expect(lines.some((l) => l.includes("got none, it timed out"))).toBe(true);
-  }, 30000);
+  });
 });
 
 describe("#! line splitting", () => {
@@ -516,19 +516,11 @@ describe("#! line splitting", () => {
     expect(mismatches).toEqual([]);
   });
 
-  test.skipIf(!hasEcho)(
-    "a quoted #! program splits as shlex splits, and runs",
-    () => {
-      checkExample("quoted", join(tmp, "quoted.md"), 0, "1 of 1");
-    },
-    30000,
-  );
+  test.skipIf(!hasEcho)("a quoted #! program splits as shlex splits, and runs", () => {
+    checkExample("quoted", join(tmp, "quoted.md"), 0, "1 of 1");
+  });
 
-  test.skipIf(!hasEcho)(
-    "an unbalanced #! quote fails as BASE's shlex raises",
-    () => {
-      checkExample("unbalanced", join(tmp, "unbalanced.md"), 1);
-    },
-    30000,
-  );
+  test.skipIf(!hasEcho)("an unbalanced #! quote fails as BASE's shlex raises", () => {
+    checkExample("unbalanced", join(tmp, "unbalanced.md"), 1);
+  });
 });

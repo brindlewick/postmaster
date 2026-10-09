@@ -1683,7 +1683,7 @@ describe("fixture effort records", () => {
       expect(ticketLine.out.trim()).toContain("codex_lane=max");
       expect(ticketLine.out.trim()).toContain("coachman.review=max");
     });
-  }, 60000);
+  });
 });
 
 describe("positive controls", () => {
@@ -2193,7 +2193,7 @@ describe("dispatch mode", () => {
       expect(v.code).toBe(0);
       expect(v.out).toBe("mode: synthesis\nmode source: setting\nmode setting: synthesis\n");
     });
-  }, 60000);
+  });
 
   test("the setting single-thread is recorded as the mode, from the setting", () => {
     withTempDir((raw) => {
@@ -2207,7 +2207,7 @@ describe("dispatch mode", () => {
       expect(rec.mode_source).toBe("setting");
       expect(rec.mode_setting).toBe("single-thread");
     });
-  }, 60000);
+  });
 
   test("a mode the user names wins over the setting, and the record says so", () => {
     withTempDir((raw) => {
@@ -2228,7 +2228,7 @@ describe("dispatch mode", () => {
       expect(v.code).toBe(0);
       expect(v.out).toBe("mode: single-thread\nmode source: user\nmode setting: synthesis\n");
     });
-  }, 60000);
+  });
 
   test("--mode two-lanes exits 1 naming synthesis and single-thread, and writes nothing", () => {
     withTempDir((raw) => {
@@ -2242,7 +2242,7 @@ describe("dispatch mode", () => {
       expect(r.out + r.err).toContain("single-thread");
       expect(existsSync(join(m.dispatch, "run.json"))).toBe(false);
     });
-  }, 60000);
+  });
 
   test("alternate gives each dispatch the mode the project's latest run did not have", () => {
     withTempDir((raw) => {
@@ -2317,7 +2317,7 @@ describe("dispatch mode", () => {
       expect(verb.out).toContain("mode: synthesis");
       expect(verb.out).toContain("mode source: unrecorded");
     });
-  }, 60000);
+  });
 
   test("check refuses a mode record with one side missing, naming the side that has one", () => {
     withTempDir((raw) => {
@@ -2349,7 +2349,7 @@ describe("dispatch mode", () => {
       expect(missingRecord.out + missingRecord.err).toContain("synthesis");
       expect(missingRecord.out + missingRecord.err).toContain("no mode");
     });
-  }, 60000);
+  });
 
   test("check reads the generated Team section, not a quoted one in the ticket", () => {
     withTempDir((raw) => {
@@ -2364,7 +2364,7 @@ describe("dispatch mode", () => {
       );
       expect(run(wrapper, ["run-meta", "check", m.dispatch], { env: m.env }).code).toBe(0);
     });
-  }, 60000);
+  });
 
   test("the latest write wins whatever its stage", () => {
     withTempDir((raw) => {
