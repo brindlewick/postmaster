@@ -126,7 +126,7 @@ by files in its own dispatch directory.
 | `checkpoint-<n>.md` + `.checkpoint-<n>-ready` | a checkpoint card is complete; informational in autonomous mode, a stop in consult mode |
 | `handoff-<n>.md` + `.leg-<n>-done` | the leg is finished and the next may start |
 
-**It never waits for an answer in-process.** On an escalation or the three-round cap it writes
+**It never waits for an answer in-process.** On an escalation it writes
 the file and exits. The postmaster answers by resuming the coachman's thread with the ruling as
 the prompt, per the coachman harness's resume form, appending to the same stream.
 
@@ -1054,7 +1054,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    be stopped: escalate. Harvest the others, and treat each timed-out lane as a review lane
    killed mid-run (hard rules): DEGRADED on the checkpoint card, with `timeout` as its cause,
    and back in the next round. A round in which no lane actually reviewed under a gating lens
-   is never the last: that lens runs again in the next round, which counts toward the cap.
+   is never the last: that lens runs again in the next round.
    Exit 4 is a timeout whose records could not all be written, a fault in a control: stop the
    leg and escalate (Tool faults). Exit 1 collects nothing, and the output says why; unless the
    round was started again, re-run it whole.
@@ -1105,7 +1105,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    stop. The check logs a `degrade` line for each reviewer whose verdict it voids. That verdict
    never counts as clean; still inspect that reviewer's findings, and launch the reviewer again
    if another round runs. An unexplained change to a run branch or tracked synthesis file voids
-   every reviewer and requires another round, counting toward the three-round cap. A move of
+   every reviewer, whose degrade lines keep the loop from ending on that round. A move of
    the run branch or synthesis worktree whose commits are exactly the `apply` actions the
    coachman logged, in order, reads as explained rather than unexplained: log every fix
    commit with `log-action apply`. Restore saves
@@ -1141,34 +1141,33 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    Every style finding is deferred in the hand-off, reaches the ship card's Style residue, and
    is sorted at aftercare (stage 4). The next review round runs the project checks once on the new snapshot.
 5. **Run the review loop by its logged decision.** After applying, call `<tool>/scripts/run review-decide
-   <dispatch> <round>`, which reads the round's `finding` and `apply` lines and prints whether
-   another round runs or the loop ends: round 2 runs whenever round 1 applied a fix; after that,
-   round `r+1` runs only when round `r` logged a verified P1 or P2 finding. Follow its printed
-   `RUN`, `STOP` or `CAP` decision; do not count findings by hand. A style finding never
-   keeps the loop going. Round `r+1` runs the gating lenses alone, on the fixed diff, with its
-   own markers, each brief the lens has updated with the fixes delta and every applied finding
-   as known context, so they closure-check each fix AND hunt new holes the fixes introduced.
+   <dispatch> <round>`, which reads the round's `finding`, `apply`, `review-launch` and `degrade`
+   lines and prints whether another round runs, the loop ends, or the loop stops for a ruling.
+   Follow its printed decision: `RUN` starts the next round, `STOP` ends the loop, and `RULING`
+   stops the loop for a ruling with the residue, as below; do not count findings by hand. The next
+   round runs the gating lenses alone, on the fixed diff, with its own markers, each brief the lens
+   has updated with the fixes delta and every applied finding as known context, so they closure-check
+   each fix AND hunt new holes the fixes introduced.
    The bug lens has no brief to update and its forms take no known context; a skill that
    reports an applied finding again is dropped by the coachman's dedup. A fix of a
    P1 or P2 finding that does not verify closed is logged as a `finding` of its own severity in
    the round that checked it, and a P3 fix that does not verify closed as a P3 `finding` there.
    A round in which no lane actually reviewed under a gating lens is never the last
-   (step 2): that lens runs again in the next round regardless of the decision.
+   (step 2): that lens runs again in the next round, and the decision keeps
+   such a round from ending the loop.
    A loop with no gating lens is round 1 alone, and applies nothing: a verified gating
    finding in it, a bug or security defect the style lens reported, is escalated with the card
    instead of fixed, which stops the leg in either `CHECKPOINT_MODE`, and a ruling that asks for
    the fix has it applied, the checkpoint rewritten with its state `applied on user word, not
-   re-reviewed`, and the gate re-run, with the card listing it under `## Not re-reviewed`. The
-   cap of 3 rounds for the whole loop, round 1 included, stays as a backstop: when round 3 logs
-   a verified P1 or P2 finding, the loop stops and escalates with the residue, including any
-   fixes that have not been re-reviewed, and your read on why it is not converging; this and the
-   escalation above are `CHECKPOINT_MODE`'s only mid-flow stops in autonomous mode. Past the cap,
-   each further round — including one ordered because no lane reviewed — needs its own ruling
-   (step 6); the script decides nothing past 3. Style
+   re-reviewed`, and the gate re-run, with the card listing it under `## Not re-reviewed`. When
+   the decision is `RULING`, the loop stops and escalates with the residue, including any
+   fixes that have not been re-reviewed, the decision's line, and your read on why it is not
+   converging; this and the escalation above are `CHECKPOINT_MODE`'s only mid-flow stops in
+   autonomous mode. After a ruling to go on, the rounds that follow are decided by the same rule. Style
    does not run again: a style lane DEGRADED in round 1 stays DEGRADED, and the card says how
    many lanes the style lens rested on.
 
-   **ESCALATE ON A REPEATED CLASS, not only on the round cap.** If the same class of defect is
+   **ESCALATE ON A REPEATED CLASS, whatever the decision says.** If the same class of defect is
    found in three consecutive rounds, whichever lens found it, each round closing the sites it
    can name while the next finds another of the same kind, stop and escalate at that point,
    whatever the severity. Three instances of one thing is a design signal: the fix is to remove
@@ -1193,8 +1192,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    Autonomous mode: for contract 2 continue to stage 3 below in this leg; for a legacy run
    write the leg's hand-off and end it. Consult mode: escalate on the card and wait for the resume.
    A ruling that asks for a change is applied; in a loop with a gating lens it is followed by
-   another round, counted toward the cap, and the card is written and escalated again, and a
-   round past the cap runs only when the ruling says so. Any other ruling, or a change applied in
+   another round, and the card is written and escalated again, and a round after a stop for a
+   ruling runs only when the ruling says so. Any other ruling, or a change applied in
    a loop with no gating lens, ends the legacy leg with its hand-off or continues contract 2 to
    stage 3 below.
 
@@ -1211,6 +1210,19 @@ of this thread, `open` exits 0, and this stage starts from the top. A walled rev
 `<tool>/scripts/run walls show <dispatch>` line goes on the card with the lane outcomes.
 
 Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
+
+List the branch's switch-offs before anything else here: run
+`<tool>/scripts/run landing switch-offs --repo <repo> --default <default-branch>
+--ticket <ticket-branch> --dispatch <dispatch>` before the gate below, and after any code
+change the run makes. Exit 0, the branch is clear. Exit 2, the entries wait on the user's
+word and already carry their reasons: remove what the run should not switch off, keep what
+it should, and paste the list on the card as below. Exit 3 names the entries missing their
+reasons: give each its reason, or remove what it should not switch off and rerun the gate
+and this call. Exit 4 is the user's recorded refusal of a listed entry: remove the entry,
+never argue it into the card. Any other exit is an input fault: stop, fix the inputs and
+re-run. This call is the same check the postmaster runs before it lands the run; its first
+line is the status, and everything after it is the `## Switch-offs` section the card
+carries.
 
 1. **Verify the final HEAD.** Run `<tool>/scripts/run verify run <synthesis-wt> <dispatch>` after
    the last code change; the gate must
@@ -1249,7 +1261,9 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    anywhere in the card; a card quoting `<!--`, in a commit subject or finding title,
    escapes it, for example as `&lt;!--` (the leg's checkpoint is
    `<dispatch>/checkpoint-review.md` after a review leg, `<dispatch>/checkpoint-1.md`
-   when this leg is synthesis); browser suite and QA when
+   when this leg is synthesis); then the `## Switch-offs` section from the call above,
+   pasted after the block as its own section, never retyped, so the card shows the
+   branch's list exactly as the check printed it; browser suite and QA when
    present; the journey report path where a
    check's source names `web-journey`; every ticket turnpike with its
    rounds and result from its checkpoint record, or `none`; the Style residue

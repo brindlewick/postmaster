@@ -118,7 +118,7 @@ describe("portable process state", () => {
         await Bun.sleep(50);
       }
       expect(withProcRoot(root, () => processState(childPid))).toBe("absent");
-    }, 10000);
+    });
   }
 
   test("portable start times always use the C locale", () => {

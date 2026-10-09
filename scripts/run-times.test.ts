@@ -75,37 +75,37 @@ describe("a full run, two legs, with a wait between them", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("dispatched                 2026-01-01 12:00:00   2m 00s     1m 00s");
-  }, 10000);
+  });
 
   test("the planning stage times the review", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("planning                   2026-01-01 12:05:00   20m 00s    0s");
-  }, 10000);
+  });
 
   test("a stage inside one leg has no waiting", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("workhorses-running         2026-01-01 12:25:00   10m 00s    0s");
-  }, 10000);
+  });
 
   test("a stage across the leg boundary counts the gap", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("checkpoint-1               2026-01-01 12:50:00   6m 00s     3m 00s");
-  }, 10000);
+  });
 
   test("a terminal stage is a moment, not a span", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("done                       2026-01-01 13:10:00   -          -");
-  }, 10000);
+  });
 
   test("the total adds up", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("total                                            1h 10m     4m 00s");
-  }, 10000);
+  });
 });
 
 describe("a dispatch in the same second as the first stage", () => {
@@ -121,7 +121,7 @@ describe("a dispatch in the same second as the first stage", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("dispatched                 2026-01-01 12:00:00   0s");
-  }, 10000);
+  });
 });
 
 describe("a run still in progress", () => {
@@ -137,7 +137,7 @@ describe("a run still in progress", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(0);
     expect(out).toContain("bootstrapped (open)        2026-01-01 12:02:00   7m 00s     -");
-  }, 10000);
+  });
 });
 
 describe("negative controls", () => {
@@ -146,12 +146,12 @@ describe("negative controls", () => {
     const { rc, out } = runTimes();
     expect(rc).toBe(3);
     expect(out).toContain("no stage changes logged");
-  }, 10000);
+  });
 
   test("an unreadable log is refused", () => {
     writeFileSync(join(tmp, "actions.jsonl"), "not json\n");
     const { rc, out } = runTimes();
     expect(rc).toBe(1);
     expect(out).toContain("is not a log line");
-  }, 10000);
+  });
 });

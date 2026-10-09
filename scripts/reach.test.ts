@@ -379,7 +379,7 @@ describe("C3-C4: main checkout reach", () => {
       expect(result.out).not.toContain("?? probe/");
     }
     expect(git(layout.repo, "rev-parse", "refs/remotes/origin/main")).toBe(remoteBefore);
-  }, 30000);
+  });
 
   test("C4a a branch other than the default is reported", () => {
     const layout = makeLayout();
