@@ -961,10 +961,7 @@ function settingsChanges(repo: string, base: string, head: string): SettingsEntr
       return settingsKind(path) !== null;
     }),
   );
-  const candidates = [
-    ...changed.filter((path) => settingsKind(path) !== null),
-    ...aliases,
-  ].sort();
+  const candidates = [...changed.filter((path) => settingsKind(path) !== null), ...aliases].sort();
   const result: SettingsEntry[] = [];
   for (const path of candidates) {
     const kind = settingsKind(path)!;
