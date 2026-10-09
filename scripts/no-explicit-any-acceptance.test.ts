@@ -1,7 +1,8 @@
 // Tests beside scripts/no-explicit-any-acceptance.ts: fixture controls plus the live-tree
 // step. Each control plants its own tree, so tests pass alone and in order. The stub
 // runner answers the lint runs from canned outputs, reading the probe file's presence to
-// tell the planted run from the calm one. The type-only controls run real git in a
+// tell the planted run from the calm one and the count control from the clean count.
+// The type-only controls run real git in a
 // planted repository and stub only the lint runs. The usage controls spawn the wrapper;
 // every other control calls accept() directly.
 import { afterAll, describe, expect, test } from "bun:test";
@@ -68,15 +69,21 @@ function cleanConfig(): unknown {
   return { rules: { [RULE]: "error" }, ignorePatterns: ["fixtures/**"] };
 }
 
-function stub(canned: { flagged: RunResult; clean: RunResult; zero: RunResult }): Runner {
+function stub(canned: {
+  flagged: RunResult;
+  clean: RunResult;
+  zero: RunResult;
+  control: RunResult;
+}): Runner {
   return (cmd: string[], cwd: string): RunResult => {
-    if (cmd.includes("-f")) return canned.zero;
-    if (existsSync(join(cwd, "scripts", "zz-probe.ts"))) return canned.flagged;
+    const planted = existsSync(join(cwd, "scripts", "zz-probe.ts"));
+    if (cmd.includes("-f")) return planted ? canned.control : canned.zero;
+    if (planted) return canned.flagged;
     return canned.clean;
   };
 }
 
-const GOOD = { flagged: FLAGGED, clean: CLEAN, zero: ZERO };
+const GOOD = { flagged: FLAGGED, clean: CLEAN, zero: ZERO, control: ONE };
 
 describe("a clean tree", () => {
   test("passes with reasoned suppressions under the cap", () => {
@@ -129,6 +136,68 @@ describe("the rule's setting", () => {
     const r = accept(dir, stub(GOOD));
     expect(r.code).toBe(1);
     expect(r.out).toContain("overrides[0]");
+  });
+
+  test("an overrides entry lowering it to warn fails", () => {
+    const dir = fresh();
+    plant(
+      dir,
+      {
+        rules: { [RULE]: "error" },
+        ignorePatterns: ["fixtures/**"],
+        overrides: [{ files: ["x.ts"], rules: { [RULE]: "warn" } }],
+      },
+      CHECK,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("overrides[0]");
+  });
+
+  test("an overrides entry setting it to 1 fails", () => {
+    const dir = fresh();
+    plant(
+      dir,
+      {
+        rules: { [RULE]: "error" },
+        ignorePatterns: ["fixtures/**"],
+        overrides: [{ files: ["x.ts"], rules: { [RULE]: 1 } }],
+      },
+      CHECK,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("overrides[0]");
+  });
+
+  test("an overrides entry keeping it at error passes", () => {
+    const dir = fresh();
+    plant(
+      dir,
+      {
+        rules: { [RULE]: "error" },
+        ignorePatterns: ["fixtures/**"],
+        overrides: [{ files: ["x.ts"], rules: { [RULE]: "error" } }],
+      },
+      CHECK,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(0);
+  });
+
+  test("an overrides entry for another rule passes", () => {
+    const dir = fresh();
+    plant(
+      dir,
+      {
+        rules: { [RULE]: "error" },
+        ignorePatterns: ["fixtures/**"],
+        overrides: [{ files: ["x.ts"], rules: { "no-debugger": "off" } }],
+      },
+      CHECK,
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(0);
   });
 
   test("changed ignorePatterns fail", () => {
@@ -219,7 +288,7 @@ describe("the lint runs", () => {
   test("a probe the gate ignores fails", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), CHECK);
-    const r = accept(dir, stub({ flagged: CLEAN, clean: CLEAN, zero: ZERO }));
+    const r = accept(dir, stub({ flagged: CLEAN, clean: CLEAN, zero: ZERO, control: ONE }));
     expect(r.code).toBe(1);
     expect(r.out).toContain("probe");
   });
@@ -227,7 +296,7 @@ describe("the lint runs", () => {
   test("a nonzero count fails naming the count", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), CHECK);
-    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: MANY }));
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: MANY, control: ONE }));
     expect(r.code).toBe(1);
     expect(r.out).toContain("181 problems");
   });
@@ -235,7 +304,7 @@ describe("the lint runs", () => {
   test("a singular count fails too", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), CHECK);
-    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: ONE }));
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: ONE, control: ONE }));
     expect(r.code).toBe(1);
     expect(r.out).toContain("1 problem");
   });
@@ -243,8 +312,16 @@ describe("the lint runs", () => {
   test("a count run that never starts exits 2", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), CHECK);
-    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: DEAD }));
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: DEAD, control: ONE }));
     expect(r.code).toBe(2);
+  });
+
+  test("a probe the count misses fails", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), CHECK);
+    const r = accept(dir, stub({ flagged: FLAGGED, clean: CLEAN, zero: ZERO, control: ZERO }));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("count");
   });
 });
 

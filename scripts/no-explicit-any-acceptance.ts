@@ -5,9 +5,10 @@
 //   run no-explicit-any-acceptance [--base <commit>] [repo-root]
 //           default root: the repo this script lives in
 //
-//   exit 0  the rule is on, the gate refuses a planted probe, no use remains, at most
-//           five reasoned suppressions stand, and with --base every test file changed
-//           since the base is the same program with its types stripped
+//   exit 0  the rule is on, no use remains, the gate and the count command flag a
+//           planted probe, at most five reasoned suppressions stand, and with --base
+//           every test file changed since the base is the same program with its
+//           types stripped
 //   exit 1  findings, one per line on stdout: <file>: <what fails>
 //   exit 2  usage, an unreadable tree, a probe left behind, or a run that never started
 //
@@ -44,6 +45,9 @@ const RULE = "typescript/no-explicit-any";
 const RULE_RENDERED = `${RULE.replace("/", "(")})`;
 const PROBE_REL = "scripts/zz-probe.ts";
 const PROBE_SRC = "export const z = (x: any): number => x;\n";
+// The count invocation, shared by the clean count and its planted control so
+// the two are provably the same command.
+const COUNT_ARGS = ["bunx", "oxlint", "-A", "all", "-D", RULE, "-f", "unix"];
 const MAX_SUPPRESS = 5;
 const WANT_IGNORE = '["fixtures/**"]';
 // The matcher is built from the constant so this file holds no line the walk below
@@ -116,8 +120,12 @@ function lintConfigFindings(value: unknown): string[] {
           continue;
         }
         const setting: unknown = erules[RULE];
-        if (setting === "off" || setting === 0) {
-          out.push(`.oxlintrc.json: overrides[${i}] turns ${RULE} off`);
+        // Anything but error neuters the gate for those files: it fails on no
+        // warning. An entry that does not name the rule is left alone.
+        if (setting !== undefined && setting !== "error" && setting !== 2) {
+          out.push(
+            `.oxlintrc.json: overrides[${i}] sets ${RULE} to ${JSON.stringify(setting) ?? "missing"}, want "error"`,
+          );
         }
       }
     }
@@ -267,7 +275,7 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   for (const dir of ["scripts", "lint", "types"]) walk(join(root, dir), root, hits);
   hits.sort((a, b) => (a.loc < b.loc ? -1 : a.loc > b.loc ? 1 : 0));
   findings.push(...suppressionFindings(hits));
-  const counted = run(["bunx", "oxlint", "-A", "all", "-D", RULE, "-f", "unix"], root);
+  const counted = run([...COUNT_ARGS], root);
   if (!counted.ran) {
     return { code: 2, out: "", err: `${me}: the count run never started: ${counted.err}` };
   }
@@ -290,6 +298,7 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
     return { code: 2, out: "", err: `${me}: cannot plant the probe: ${String(e)}\n` };
   }
   const flagged = run(["bunx", "oxlint"], root);
+  const control = run([...COUNT_ARGS], root);
   let leftover = false;
   try {
     rmSync(probe);
@@ -313,6 +322,16 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   ) {
     findings.push(
       `probe: the gate exits ${flagged.code} on the planted file without naming ${RULE} at ${PROBE_REL}:1`,
+    );
+  }
+  if (!control.ran) {
+    return { code: 2, out: "", err: `${me}: the count control never started: ${control.err}` };
+  }
+  const mc = /([0-9]+) problems?/u.exec(control.out);
+  const nc = mc === null ? 0 : Number(mc[1]);
+  if (nc === 0) {
+    findings.push(
+      "count: the planted probe reads 0 problems through the count command, want nonzero",
     );
   }
   const calm = run(["bunx", "oxlint"], root);
