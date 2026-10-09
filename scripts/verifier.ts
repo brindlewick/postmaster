@@ -208,7 +208,8 @@ export function hasUpkeepLine(text: string): boolean {
 export function indexNames(text: string, kind: Surface): boolean {
   // LOWER: lowered for an ASCII keyword match
   const lower = text.toLowerCase();
-  return lower.includes(`verifier/${kind}`) && lower.includes(PROSE[kind]);
+  const folder = lower.includes(`verifier/${kind}`) || lower.includes(`${kind}/`);
+  return folder && lower.includes(PROSE[kind]);
 }
 
 /** The kinds as prose for the multi header: "command line, web pages". */

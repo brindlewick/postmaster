@@ -646,9 +646,15 @@ describe("indexNames", () => {
     expect(indexNames("- WEB (verifier/web/): Web Pages", "web")).toBe(true);
   });
 
+  test("a relative folder link reads named", () => {
+    expect(indexNames("- [cli](cli/) verifies the command line.", "cli")).toBe(true);
+    expect(indexNames("- [web](web/) verifies the web pages.", "web")).toBe(true);
+  });
+
   test("a missing folder or prose reads unnamed", () => {
     expect(indexNames("- cli: command line", "cli")).toBe(false);
     expect(indexNames("- cli (verifier/cli/)", "cli")).toBe(false);
+    expect(indexNames("- [cli](cli/)", "cli")).toBe(false);
     expect(indexNames("", "cli")).toBe(false);
   });
 });
