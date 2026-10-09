@@ -93,7 +93,7 @@ export function parseArgs(argv: string[]): Parsed {
       i++;
     } else if (flag === "--timeout") {
       const value = rest[i + 1];
-      if (value === undefined || !/^[0-9]{1,9}$/.test(value) || Number(value) <= 0) {
+      if (value === undefined || !/^[0-9]{1,9}$/u.test(value) || Number(value) <= 0) {
         return { ok: false, error: `bad timeout: ${value ?? "none"}` };
       }
       timeout = Number(value);
@@ -120,7 +120,7 @@ export function renderPrompt(template: string, vars: PromptVars): string {
     .replaceAll("{{SURFACE}}", vars.surface)
     .replaceAll("{{SURFACE_PROSE}}", vars.surfaceProse)
     .replaceAll("{{VERIFY_DIR}}", vars.verifyDir);
-  const left = out.match(/{{[A-Z_]+}}/);
+  const left = out.match(/\{\{[A-Z_]+\}\}/u);
   if (left !== null) throw new Error(`unknown placeholder in the prompt template: ${left[0]}`);
   return out;
 }
@@ -128,9 +128,9 @@ export function renderPrompt(template: string, vars: PromptVars): string {
 /** The verifier folder for a repo: verify- plus its slugged base name. */
 export function verifyDirName(repoPath: string): string {
   const slug = basename(repoPath)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .toLowerCase() // LOWER: lowered for an ASCII slug
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
   return slug === "" ? "verify-app" : `verify-${slug}`;
 }
 
