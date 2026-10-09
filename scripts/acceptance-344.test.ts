@@ -8,19 +8,20 @@
 // and proof sit in the run record. Every case drives git or scripts/run as a
 // subprocess.
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PSTACK_SKILL, firstSentence, sharedRuns } from "./acceptance-323.ts";
+import { firstSentence, PSTACK_SKILL, sharedRuns } from "./acceptance-323.ts";
+import type { Sandbox } from "./acceptance-344.ts";
 import {
-  RUN,
   makeEnv,
   makeSandbox,
   promptOrThrow,
+  RUN,
   summaryLine,
   writeStubSession,
   writeStubTmux,
 } from "./acceptance-344.ts";
-import type { Sandbox } from "./acceptance-344.ts";
 import { run } from "./lib/proc.ts";
 
 /** The #323 shape both renderings keep: repo, surface prose, sections, handover, credit. */
@@ -143,6 +144,44 @@ describe("usage", () => {
   });
 });
 
+describe("stub confinement", () => {
+  test("the session stub refuses a cwd outside its sandbox", () => {
+    const sandbox = makeSandbox();
+    const outside = mkdtempSync(join(tmpdir(), "acceptance-344-outside-"));
+    try {
+      writeStubSession(sandbox.bin);
+      const r = run(join(sandbox.bin, "claude"), [], {
+        cwd: outside,
+        env: { ORACLE_ROOT: sandbox.dir },
+      });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("refuses");
+      expect(existsSync(join(outside, "HANDOVER.md"))).toBe(false);
+    } finally {
+      rmSync(sandbox.dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("the tmux stub refuses session work outside its sandbox", () => {
+    const sandbox = makeSandbox();
+    const outside = mkdtempSync(join(tmpdir(), "acceptance-344-outside-"));
+    try {
+      const log = join(sandbox.dir, "tmux.log");
+      writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
+      const r = run(join(sandbox.bin, "tmux"), ["new-session", "-n", "x", "-c", outside], {
+        env: { ORACLE_ROOT: sandbox.dir, ORACLE_SESSION_WORK: "1" },
+      });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("refuses");
+      expect(existsSync(join(outside, "HANDOVER.md"))).toBe(false);
+    } finally {
+      rmSync(sandbox.dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("make with no host: the headless fallback", () => {
   test("runs headless to a handover with the headless prompt", () => {
     const sandbox = makeSandbox();
@@ -171,15 +210,35 @@ describe("make with no host: the headless fallback", () => {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
   });
+
+  test("runs headless with no global config either, since the form is only for spawn", () => {
+    const sandbox = makeSandbox();
+    try {
+      writeStubSession(sandbox.bin);
+      const env = makeEnv(sandbox, {
+        POSTMASTER_HOST: "none",
+        POSTMASTER_CONFIG: join(sandbox.dir, "missing.toml"),
+      });
+      const r = run(
+        RUN,
+        ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "120"],
+        { env },
+      );
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("branch verify-cli");
+      const promptFile = summaryLine(r.out, "prompt");
+      expect(promptFile).not.toBe("");
+      expect(readFileSync(promptFile, "utf8")).toMatch(/unasked questions/iu);
+    } finally {
+      rmSync(sandbox.dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("make with a host: the interactive open", () => {
   function coachmanConfig(sandbox: Sandbox): string {
     const path = join(sandbox.dir, "config.toml");
-    writeFileSync(
-      path,
-      '[team]\ncoachman = { harness = "muse", model = "probe-model" }\n',
-    );
+    writeFileSync(path, '[team]\ncoachman = { harness = "muse", model = "probe-model" }\n');
     return path;
   }
 
@@ -187,7 +246,7 @@ describe("make with a host: the interactive open", () => {
     const sandbox = makeSandbox();
     try {
       const log = join(sandbox.dir, "tmux.log");
-      writeStubTmux(sandbox.bin, log);
+      writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
       const env = makeEnv(sandbox, {
         POSTMASTER_HOST: "tmux",
         POSTMASTER_CONFIG: coachmanConfig(sandbox),
@@ -224,7 +283,7 @@ describe("make with a host: the interactive open", () => {
     const sandbox = makeSandbox();
     try {
       const log = join(sandbox.dir, "tmux.log");
-      writeStubTmux(sandbox.bin, log);
+      writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
       const env = makeEnv(sandbox, {
         POSTMASTER_HOST: "tmux",
         POSTMASTER_CONFIG: coachmanConfig(sandbox),
@@ -246,11 +305,33 @@ describe("make with a host: the interactive open", () => {
     }
   });
 
+  test("no interactive form with a host stops the make instead of going headless", () => {
+    const sandbox = makeSandbox();
+    try {
+      const log = join(sandbox.dir, "tmux.log");
+      writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
+      const env = makeEnv(sandbox, {
+        POSTMASTER_HOST: "tmux",
+        POSTMASTER_CONFIG: join(sandbox.dir, "missing.toml"),
+      });
+      const r = run(
+        RUN,
+        ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "30"],
+        { env },
+      );
+      expect(r.code).toBe(1);
+      expect(r.err).toMatch(/no interactive command/iu);
+      expect(existsSync(log)).toBe(false);
+    } finally {
+      rmSync(sandbox.dir, { recursive: true, force: true });
+    }
+  });
+
   test("a spawn that fails stops the make and cleans up", () => {
     const sandbox = makeSandbox();
     try {
       const log = join(sandbox.dir, "tmux.log");
-      writeStubTmux(sandbox.bin, log);
+      writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
       const env = makeEnv(sandbox, {
         POSTMASTER_HOST: "tmux",
         POSTMASTER_CONFIG: coachmanConfig(sandbox),

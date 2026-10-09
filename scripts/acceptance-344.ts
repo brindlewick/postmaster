@@ -50,57 +50,97 @@ export function makeSandbox(): Sandbox {
   // carries a minimal brief pointing at its own repo.
   writeFileSync(
     join(dispatch, "brief.md"),
-    ["# Waybill: oracle", "", "## Dispatch", "name: #0, oracle", `synthesis worktree: ${repo}`, ""].join(
-      "\n",
-    ),
+    [
+      "# Waybill: oracle",
+      "",
+      "## Dispatch",
+      "name: #0, oracle",
+      `synthesis worktree: ${repo}`,
+      "",
+    ].join("\n"),
   );
   return { dir, repo, bin, dispatch };
 }
 
 /** Hermetic env for a make run: forced host, stub PATH first, temp state dirs. */
-export function makeEnv(sandbox: Sandbox, extra: Record<string, string | undefined>): Record<string, string | undefined> {
+export function makeEnv(
+  sandbox: Sandbox,
+  extra: Record<string, string | undefined>,
+): Record<string, string | undefined> {
   return {
     PATH: `${sandbox.bin}:${process.env.PATH ?? ""}`,
     POSTMASTER_HARNESS_DATA: join(sandbox.dir, "harness-data"),
     POSTMASTER_HOST_STATE: join(sandbox.dir, "host-state"),
     POSTMASTER_ATTEMPT_PHASE: join(sandbox.dir, "attempt.phase"),
+    ORACLE_ROOT: sandbox.dir,
     ...extra,
   };
+}
+
+// A stub works only inside its sandbox: a session stub that writes outside it
+// once committed to the ticket branch instead, so both stubs refuse.
+function rootGuard(target: string): string[] {
+  return [
+    'if [ -z "${ORACLE_ROOT:-}" ]; then echo "stub refuses: ORACLE_ROOT is unset" >&2; exit 1; fi',
+    `TARGET=${target}`,
+    'case "$TARGET" in',
+    '  "${ORACLE_ROOT}"/*) ;;',
+    '  *) echo "stub refuses: $TARGET is outside $ORACLE_ROOT" >&2; exit 1 ;;',
+    "esac",
+  ];
 }
 
 /** A stub `claude` that plays a finished headless session in its cwd. */
 export function writeStubSession(bin: string): void {
   const path = join(bin, "claude");
-  writeFileSync(path, `#!/bin/sh\nset -eu\n${SESSION_WORK}\n`);
+  writeFileSync(
+    path,
+    ["#!/bin/sh", "set -eu", ...rootGuard('"$PWD"'), SESSION_WORK, ""].join("\n"),
+  );
   chmodSync(path, 0o755);
 }
 
 /**
- * A stub `tmux` that logs every call, fakes list-windows, has-session and
- * set-option, and answers new-session with a window id. With ORACLE_SESSION_WORK=1
- * it also plays a finished session in the new window's -c directory; with
- * ORACLE_TMUX_FAIL_NEW=1 the spawn fails. Every call appends one line to the log.
+ * A stub `tmux` that logs every call, records each spawned window's name in the
+ * state file, and lists it back in whichever list-windows shape the caller
+ * asked for, so send finds its window. has-session always misses, so every
+ * spawn takes the new-session branch and answers @1. With ORACLE_SESSION_WORK=1
+ * new-session also plays a finished session in the window's -c directory; with
+ * ORACLE_TMUX_FAIL_NEW=1 the spawn fails before anything is recorded. Every
+ * call appends one line to the log.
  */
-export function writeStubTmux(bin: string, log: string): void {
+export function writeStubTmux(bin: string, log: string, state: string): void {
   const path = join(bin, "tmux");
   writeFileSync(
     path,
     [
       "#!/bin/sh",
       `LOG=${JSON.stringify(log)}`,
+      `STATE=${JSON.stringify(state)}`,
       'echo "tmux $*" >> "$LOG"',
-      'cmd=${1:-}',
-      "case \"$cmd\" in",
-      "  list-windows) exit 0 ;;",
+      "cmd=${1:-}",
+      'case "$cmd" in',
+      "  list-windows)",
+      '    if [ -f "$STATE" ]; then',
+      '      if printf "%s\\n" "$*" | grep -q "window_id"; then',
+      '        while IFS= read -r h; do printf "@1\\t%s\\n" "$h"; done < "$STATE"',
+      "      else",
+      '        cat "$STATE"',
+      "      fi",
+      "    fi",
+      "    exit 0 ;;",
       "  has-session) exit 1 ;;",
       "  new-session)",
       '    if [ "${ORACLE_TMUX_FAIL_NEW:-}" = "1" ]; then echo boom >&2; exit 1; fi',
       "    prev=''",
       '    for a in "$@"; do',
       '      if [ "$prev" = "-c" ]; then cwd=$a; fi',
+      '      if [ "$prev" = "-n" ]; then name=$a; fi',
       "      prev=$a",
       "    done",
+      '    printf "%s\\n" "$name" >> "$STATE"',
       '    if [ "${ORACLE_SESSION_WORK:-}" = "1" ]; then',
+      ...rootGuard('"$cwd"').map((line) => `    ${line}`),
       '      ( cd "$cwd"',
       ...SESSION_WORK.split("\n").map((line) => `        ${line}`),
       "      )",
