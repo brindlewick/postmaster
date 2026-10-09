@@ -13,9 +13,8 @@ restated here in this tool's own words. Where the two disagree, these instructio
 - Your working copy: this directory, cut from {{BASE}}. It may differ from the
   reference checkout; the working copy is what you verify.
 
-Do all of your work inside this working copy and edit nothing outside it. Learn
-the project from its files, never from the user: this session cannot ask anyone
-anything.
+Do all of your work inside this working copy and edit nothing outside it.
+{{ASK_RULE}}
 
 ## 1. Learn the surface from the working copy
 
@@ -39,6 +38,8 @@ the base is broken learns every step wrong. Never mend the reference checkout.
 When some side file the surface never touches blocks startup, the verifier may
 lay it down, marked plainly as scaffolding for verification, and take it away
 again in cleanup.
+
+{{SECRETS_RULE}}
 
 ## 2. Write the verifier
 
@@ -102,5 +103,5 @@ verifier nobody has run is a draft, not a handover.
 
 Commit the verifier on this branch. Then write HANDOVER.md at the top of this working
 copy: what you proved and under which drive name, where the proof file sits as an
-absolute path (or why there is none), and what you left undone. Send the same text as
-your final message.
+absolute path (or why there is none), and what you left undone.{{HANDOVER_UNASKED}}
+Send the same text as your final message.

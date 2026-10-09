@@ -2,7 +2,7 @@
 // detection and the wall scan. The live session stays out; acceptance-323 covers the
 // command boundary as a subprocess.
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
@@ -15,6 +15,7 @@ import {
   failureOutcome,
   handoverFresh,
   isSurface,
+  modeBlocks,
   parseArgs,
   pickBranch,
   pickWorktree,
@@ -25,8 +26,11 @@ import {
   repoTop,
   roleHarness,
   scrubGitEnv,
+  sendText,
   surfaceProse,
+  verifierHandle,
   verifyDirName,
+  waitForHandover,
   wallInStream,
 } from "./verifier.ts";
 
@@ -41,7 +45,7 @@ describe("parseArgs", () => {
   test("prompt takes a repo and a surface", () => {
     expect(parseArgs(["prompt", "/r", "cli"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surface: "cli" },
+      req: { cmd: "prompt", repo: "/r", surface: "cli", headless: false },
     });
   });
 
@@ -61,8 +65,16 @@ describe("parseArgs", () => {
     });
   });
 
-  test("prompt takes no flags", () => {
-    expect(parseArgs(["prompt", "/r", "cli", "--run", "/d"])).toEqual({
+  test("prompt takes --headless and refuses any other flag", () => {
+    expect(parseArgs(["prompt", "/r", "cli", "--headless"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surface: "cli", headless: true },
+    });
+    expect(parseArgs(["prompt", "/r", "cli", "--fresh"])).toEqual({
+      ok: false,
+      error: "unknown flag for prompt: --fresh",
+    });
+    expect(parseArgs(["prompt", "/r", "cli", "--headless", "--headless"])).toEqual({
       ok: false,
       error: "prompt takes a repo and a surface",
     });
@@ -112,14 +124,20 @@ describe("surfaces", () => {
 
 describe("renderPrompt", () => {
   test("fills every placeholder", () => {
-    const out = renderPrompt("{{REPO}} {{SURFACE}} {{SURFACE_PROSE}} {{VERIFY_DIR}} {{BASE}}", {
-      repo: "/r",
-      surface: "cli",
-      surfaceProse: "command line",
-      verifyDir: "verify-app",
-      base: "origin/main",
-    });
-    expect(out).toBe("/r cli command line verify-app origin/main");
+    const out = renderPrompt(
+      "{{REPO}} {{SURFACE}} {{SURFACE_PROSE}} {{VERIFY_DIR}} {{BASE}} {{ASK_RULE}} {{SECRETS_RULE}} {{HANDOVER_UNASKED}}",
+      {
+        repo: "/r",
+        surface: "cli",
+        surfaceProse: "command line",
+        verifyDir: "verify-app",
+        base: "origin/main",
+        askRule: "ask",
+        secretsRule: "secrets",
+        handoverUnasked: "unasked",
+      },
+    );
+    expect(out).toBe("/r cli command line verify-app origin/main ask secrets unasked");
   });
 
   test("dollar patterns in a value copy literally", () => {
@@ -129,6 +147,9 @@ describe("renderPrompt", () => {
       surfaceProse: "command line",
       verifyDir: "verify-$&-'",
       base: "main",
+      askRule: "ask",
+      secretsRule: "secrets",
+      handoverUnasked: "",
     });
     expect(out).toBe("/x/app$$x verify-$&-'");
   });
@@ -140,6 +161,9 @@ describe("renderPrompt", () => {
       surfaceProse: "command line",
       verifyDir: "verify-app",
       base: "origin/main",
+      askRule: "ask",
+      secretsRule: "secrets",
+      handoverUnasked: "",
     });
     expect(out).toBe("/x/{{BASE}}-app origin/main");
     const unknown = renderPrompt("{{REPO}}", {
@@ -148,6 +172,9 @@ describe("renderPrompt", () => {
       surfaceProse: "command line",
       verifyDir: "verify-app",
       base: "main",
+      askRule: "ask",
+      secretsRule: "secrets",
+      handoverUnasked: "",
     });
     expect(unknown).toBe("/x/{{NAME}}-app");
   });
@@ -160,8 +187,27 @@ describe("renderPrompt", () => {
         surfaceProse: "command line",
         verifyDir: "verify-app",
         base: "main",
+        askRule: "ask",
+        secretsRule: "secrets",
+        handoverUnasked: "",
       }),
     ).toThrow("unknown placeholder in the prompt template: {{NOPE}}");
+  });
+});
+
+describe("modeBlocks", () => {
+  test("the interactive session asks and names secret files", () => {
+    const blocks = modeBlocks(false);
+    expect(blocks.askRule).toContain("ask the user only what you cannot observe");
+    expect(blocks.secretsRule).toContain("name of the file that holds it");
+    expect(blocks.handoverUnasked).toBe("");
+  });
+
+  test("the headless session cannot ask and lists what it could not", () => {
+    const blocks = modeBlocks(true);
+    expect(blocks.askRule).toContain("cannot ask anyone anything");
+    expect(blocks.secretsRule).toContain("Never invent a value");
+    expect(blocks.handoverUnasked).toContain("Unasked questions");
   });
 });
 
@@ -183,6 +229,19 @@ describe("naming", () => {
     expect(pickWorktree("/x/app", "cli", (p) => p === "/x/app-verify-cli")).toBe(
       "/x/app-verify-cli-2",
     );
+  });
+
+  test("the handle names the repo and the branch", () => {
+    expect(verifierHandle("/x/app", "verify-cli")).toBe("verifier-app-verify-cli");
+    expect(verifierHandle("/x/app", "verify-cli-2")).toBe("verifier-app-verify-cli-2");
+  });
+});
+
+describe("sendText", () => {
+  test("points the session at its instructions file", () => {
+    const text = sendText("/d/logs/verifier-verify-cli-prompt.txt");
+    expect(text).toContain("/d/logs/verifier-verify-cli-prompt.txt");
+    expect(text.endsWith("\n")).toBe(true);
   });
 });
 
@@ -378,6 +437,106 @@ describe("handoverFresh", () => {
     expect(handoverFresh(2000, 1000)).toBe(true);
     expect(handoverFresh(1000, 1000)).toBe(true);
     expect(handoverFresh(999, 1000)).toBe(false);
+  });
+});
+
+describe("waitForHandover", () => {
+  test("a fresh handover already there returns at once, with no sleep", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+      const naps: number[] = [];
+      expect(
+        waitForHandover(
+          wt,
+          0,
+          60,
+          (ms) => {
+            naps.push(ms);
+          },
+          () => 1000,
+        ),
+      ).toBe(true);
+      expect(naps).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("no handover sleeps in short naps until the timeout, then gives up", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        0,
+        12,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 5000, 2000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a stale handover never counts, however long the wait", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "HANDOVER.md"), "old\n");
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        999999999999999,
+        6,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 1000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a handover landing mid-wait ends the wait", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        0,
+        60,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+        },
+        () => now,
+      );
+      expect(ok).toBe(true);
+      expect(naps).toEqual([5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
