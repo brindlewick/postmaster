@@ -61,6 +61,25 @@ export function surfaceProse(surface: string): string {
   return PROSE[surface];
 }
 
+/** Discovery check names accepted as surfaces, with the kind each denotes. */
+const DISCOVERY_SURFACES: Record<string, Surface> = {
+  "cli-examples": "cli",
+  "browser-suite": "web",
+  "web-journey": "web",
+  "library-tests": "library",
+};
+
+/** The surface kind a name denotes, in either vocabulary, or null. */
+export function surfaceKind(name: string): Surface | null {
+  if (isSurface(name)) return name;
+  return DISCOVERY_SURFACES[name] ?? null;
+}
+
+/** Distinct kinds in canonical cli, web, library order. */
+export function orderKinds(kinds: Surface[]): Surface[] {
+  return SURFACES.filter((k) => kinds.includes(k));
+}
+
 export interface ParsedPrompt {
   cmd: "prompt";
   repo: string;
@@ -124,6 +143,19 @@ export interface PromptVars {
   surfaceProse: string;
   verifyDir: string;
   base: string;
+  handoverRule?: string;
+}
+
+/** Fill a template from explicit names and values. A leftover placeholder throws. */
+export function renderTemplate(template: string, vars: Record<string, string>): string {
+  // One pass, each value through a replacer function: an inserted value is
+  // never rescanned, so $ patterns and placeholder-shaped text in a value
+  // copy literally instead of expanding or throwing.
+  return template.replace(/\{\{[A-Z_]+\}\}/gu, (m) => {
+    const v: string | undefined = vars[m.slice(2, -2)];
+    if (v === undefined) throw new Error(`unknown placeholder in the prompt template: ${m}`);
+    return v;
+  });
 }
 
 /** Fill the template's placeholders. A placeholder left over is a bug, and throws. */
@@ -135,14 +167,59 @@ export function renderPrompt(template: string, vars: PromptVars): string {
     VERIFY_DIR: vars.verifyDir,
     BASE: vars.base,
   };
-  // One pass, each value through a replacer function: an inserted value is
-  // never rescanned, so $ patterns and placeholder-shaped text in a value
-  // copy literally instead of expanding or throwing.
-  return template.replace(/\{\{[A-Z_]+\}\}/gu, (m) => {
-    const v: string | undefined = known[m.slice(2, -2)];
-    if (v === undefined) throw new Error(`unknown placeholder in the prompt template: ${m}`);
-    return v;
-  });
+  if (vars.handoverRule !== undefined) known.HANDOVER_RULE = vars.handoverRule;
+  return renderTemplate(template, known);
+}
+
+/** The upkeep line every verifier carries where an agent reads first. */
+export const UPKEEP_LINE =
+  "A change which adds, changes or removes a feature updates that feature's page in the same change.";
+
+/** The upkeep line is present, ignoring case and whitespace runs. */
+export function hasUpkeepLine(text: string): boolean {
+  // LOWER: lowered for an ASCII keyword match
+  const lower = (s: string): string => s.toLowerCase();
+  // ASCII: widening to Unicode whitespace only folds more runs, never splits a match
+  const flat = (s: string): string => s.replace(/\s+/gu, " ");
+  return flat(lower(text)).includes(flat(lower(UPKEEP_LINE)));
+}
+
+/** The index names the kind's folder and its surface prose. */
+export function indexNames(text: string, kind: Surface): boolean {
+  // LOWER: lowered for an ASCII keyword match
+  const lower = text.toLowerCase();
+  return lower.includes(`verifier/${kind}`) && lower.includes(PROSE[kind]);
+}
+
+/** The kinds as prose for the multi header: "command line, web pages". */
+export function proseList(kinds: Surface[]): string {
+  return kinds.map((k) => PROSE[k]).join(", ");
+}
+
+/** One mapping line per kind for the multi header. */
+export function dirLines(kinds: Surface[]): string {
+  return kinds.map((k) => `- the ${PROSE[k]} (${k}) verifier goes in verifier/${k}/`).join("\n");
+}
+
+/** The no-verifier sentence for the kinds left out, or "" when none are. */
+export function unlistedSentence(kinds: Surface[]): string {
+  const left = SURFACES.filter((k) => !kinds.includes(k)).map((k) => `the ${PROSE[k]}`);
+  if (left.length === 0) return "";
+  const last = left.slice(-1).join("");
+  const names = left.length === 1 ? last : `${left.slice(0, -1).join(", ")} and ${last}`;
+  const it = left.length === 1 ? "it" : "them";
+  return `- Make no verifier for ${names}. If you notice ${it} while you work, leave ${it} out.`;
+}
+
+/** The per-surface sections, numbered, separated by rules. */
+export function joinBodies(bodies: { kind: Surface; text: string }[]): string {
+  const total = bodies.length;
+  return bodies
+    .map(
+      (b, n) =>
+        `---\n\n**Verifier ${n + 1} of ${total}: ${PROSE[b.kind]} (${b.kind}).**\n\n${b.text}`,
+    )
+    .join("\n\n");
 }
 
 /** The verifier folder for a repo: verify- plus its slugged base name. */
@@ -266,6 +343,34 @@ export function committedFeaturePages(repo: string, branch: string, vdir: string
   return r.out.split("\0").filter((l) => l !== "" && l !== index && l.endsWith(".md"));
 }
 
+/** A committed blob's text, or null when the branch has no such file. */
+export function branchFileText(repo: string, branch: string, path: string): string | null {
+  const r = git(repo, ["show", `${branch}:${path}`]);
+  return r.code === 0 ? r.out : null;
+}
+
+/** Committed paths under a directory on the branch, or null when unlistable. */
+export function committedUnder(repo: string, branch: string, dir: string): string[] | null {
+  // -z: NUL-separated and never quoted, so non-ASCII names count as written.
+  const r = git(repo, ["ls-tree", "-z", "-r", "--name-only", branch, "--", `${dir}/`]);
+  if (r.code !== 0) return null;
+  return r.out.split("\0").filter((l) => l !== "");
+}
+
+/** Top-level names on a ref, or null when the ref cannot be listed. */
+export function topLevelNames(repo: string, ref: string): string[] | null {
+  // -z: NUL-separated and never quoted, so non-ASCII names list as written.
+  const r = git(repo, ["ls-tree", "-z", "--name-only", ref]);
+  if (r.code !== 0) return null;
+  return r.out.split("\0").filter((l) => l !== "");
+}
+
+/** Added top-level names starting with verify-: verifier files outside verifier/. */
+export function addedVerifyNames(branchTop: string[], baseTop: string[]): string[] {
+  const before = new Set(baseTop);
+  return branchTop.filter((n) => n.startsWith("verify-") && !before.has(n));
+}
+
 /** The base the session's branch is cut from: origin's head, main, master, or HEAD. */
 export function defaultBase(repo: string): string | null {
   const sym = git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
@@ -347,6 +452,10 @@ function readTemplate(): string {
   return readFileSync(join(scriptsDir(import.meta), "verifier-prompt.md"), "utf8");
 }
 
+/** The handover paragraph for one verifier: the #323 sentences, byte for byte. */
+const SINGLE_HANDOVER_RULE =
+  "Then write HANDOVER.md at the top of this working\ncopy: what you proved and under which drive name, where the proof file sits as an\nabsolute path (or why there is none), and what you left undone. Send the same text as\nyour final message.";
+
 function runPrompt(req: ParsedPrompt): number {
   const repo = resolve(req.repo);
   if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
@@ -359,6 +468,7 @@ function runPrompt(req: ParsedPrompt): number {
     surfaceProse: surfaceProse(req.surface),
     verifyDir: verifyDirName(repo),
     base,
+    handoverRule: SINGLE_HANDOVER_RULE,
   });
   process.stdout.write(out);
   return 0;
@@ -633,6 +743,7 @@ function runMakeLaunches(
       surfaceProse: surfaceProse(req.surface),
       verifyDir: vdir,
       base,
+      handoverRule: SINGLE_HANDOVER_RULE,
     }),
   );
   const named = run(RUN, ["host", "name", dispatch, "role", `verifier-${req.surface}`]);

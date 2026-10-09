@@ -8,24 +8,38 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
+  UPKEEP_LINE,
+  addedVerifyNames,
+  branchFileText,
   branchHasPath,
   commitsPastBase,
   committedFeaturePages,
+  committedUnder,
   defaultBase,
+  dirLines,
   failureOutcome,
   handoverFresh,
+  hasUpkeepLine,
+  indexNames,
   isSurface,
+  joinBodies,
+  orderKinds,
   parseArgs,
   pickBranch,
   pickWorktree,
+  proseList,
   pruneWorktrees,
   remoteFromSymbolicRef,
   removeProvisioning,
   renderPrompt,
+  renderTemplate,
   repoTop,
   roleHarness,
   scrubGitEnv,
+  surfaceKind,
   surfaceProse,
+  topLevelNames,
+  unlistedSentence,
   verifyDirName,
   wallInStream,
 } from "./verifier.ts";
@@ -544,5 +558,183 @@ describe("roleHarness", () => {
     expect(roleHarness({ team: {} }, "coachman_fallback", "synthesis")).toBe(null);
     expect(roleHarness(null, "coachman", "synthesis")).toBe(null);
     expect(roleHarness(config, "postmaster", "synthesis")).toBe(null);
+  });
+});
+
+describe("surfaceKind", () => {
+  test("both vocabularies denote their kind, the rest denote none", () => {
+    expect(surfaceKind("cli")).toBe("cli");
+    expect(surfaceKind("web")).toBe("web");
+    expect(surfaceKind("library")).toBe("library");
+    expect(surfaceKind("cli-examples")).toBe("cli");
+    expect(surfaceKind("browser-suite")).toBe("web");
+    expect(surfaceKind("web-journey")).toBe("web");
+    expect(surfaceKind("library-tests")).toBe("library");
+    expect(surfaceKind("telegraph")).toBe(null);
+    expect(surfaceKind("")).toBe(null);
+  });
+});
+
+describe("orderKinds", () => {
+  test("dedups to canonical cli, web, library order", () => {
+    expect(orderKinds(["web", "cli"])).toEqual(["cli", "web"]);
+    expect(orderKinds(["library", "library", "cli"])).toEqual(["cli", "library"]);
+    expect(orderKinds([])).toEqual([]);
+  });
+});
+
+describe("renderTemplate", () => {
+  test("fills from explicit names and refuses leftovers", () => {
+    expect(renderTemplate("{{A}} and {{B}}", { A: "x", B: "y" })).toBe("x and y");
+    expect(() => renderTemplate("{{A}} {{NOPE}}", { A: "x" })).toThrow(
+      "unknown placeholder in the prompt template: {{NOPE}}",
+    );
+  });
+
+  test("a value copies literally, never rescanned", () => {
+    expect(renderTemplate("{{A}}", { A: "$& {{B}}" })).toBe("$& {{B}}");
+  });
+});
+
+describe("hasUpkeepLine", () => {
+  test("the line reads present exact, wrapped and mixed-case", () => {
+    expect(hasUpkeepLine(`intro\n${UPKEEP_LINE}\nrest`)).toBe(true);
+    expect(hasUpkeepLine(UPKEEP_LINE.replace(/ /gu, "\n"))).toBe(true);
+    expect(
+      hasUpkeepLine(
+        "A CHANGE which adds, changes or removes a feature updates that feature's page in the same change.",
+      ),
+    ).toBe(true);
+  });
+
+  test("a paraphrase and an empty page read absent", () => {
+    expect(hasUpkeepLine("Keep the pages current when features change.")).toBe(false);
+    expect(hasUpkeepLine("")).toBe(false);
+  });
+});
+
+describe("indexNames", () => {
+  test("folder and prose together read named", () => {
+    expect(indexNames("- cli (verifier/cli/): command line", "cli")).toBe(true);
+    expect(indexNames("- WEB (verifier/web/): Web Pages", "web")).toBe(true);
+  });
+
+  test("a missing folder or prose reads unnamed", () => {
+    expect(indexNames("- cli: command line", "cli")).toBe(false);
+    expect(indexNames("- cli (verifier/cli/)", "cli")).toBe(false);
+    expect(indexNames("", "cli")).toBe(false);
+  });
+});
+
+describe("proseList", () => {
+  test("joins the prose with commas", () => {
+    expect(proseList(["cli", "web"])).toBe("command line, web pages");
+    expect(proseList(["library"])).toBe("library interface");
+  });
+});
+
+describe("dirLines", () => {
+  test("one mapping line per kind", () => {
+    expect(dirLines(["cli", "web"])).toBe(
+      "- the command line (cli) verifier goes in verifier/cli/\n- the web pages (web) verifier goes in verifier/web/",
+    );
+  });
+});
+
+describe("unlistedSentence", () => {
+  test("none left out leaves no sentence", () => {
+    expect(unlistedSentence(["cli", "web", "library"])).toBe("");
+  });
+
+  test("one left out is named", () => {
+    expect(unlistedSentence(["cli", "web"])).toBe(
+      "- Make no verifier for the library interface. If you notice it while you work, leave it out.",
+    );
+  });
+
+  test("two left out share the sentence", () => {
+    expect(unlistedSentence(["web"])).toBe(
+      "- Make no verifier for the command line and the library interface. If you notice them while you work, leave them out.",
+    );
+  });
+});
+
+describe("joinBodies", () => {
+  test("numbers each body and separates with rules", () => {
+    expect(
+      joinBodies([
+        { kind: "cli", text: "CLI BODY" },
+        { kind: "web", text: "WEB BODY" },
+      ]),
+    ).toBe(
+      "---\n\n**Verifier 1 of 2: command line (cli).**\n\nCLI BODY\n\n---\n\n**Verifier 2 of 2: web pages (web).**\n\nWEB BODY",
+    );
+  });
+});
+
+describe("branchFileText", () => {
+  test("a committed file reads its text, the rest read null", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "note.md", "hi");
+      commitAll(repo, "first");
+      expect(branchFileText(repo, "main", "note.md")).toBe("hi");
+      expect(branchFileText(repo, "main", "missing.md")).toBe(null);
+      expect(branchFileText(repo, "nope", "note.md")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("committedUnder", () => {
+  test("lists committed paths under a dir, none for a missing dir", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "v\n");
+      writeRepoFile(repo, "verifier/cli-notes.md", "n\n");
+      commitAll(repo, "first");
+      expect(committedUnder(repo, "main", "verifier/cli")?.sort()).toEqual([
+        "verifier/cli/README.md",
+      ]);
+      expect(committedUnder(repo, "main", "verifier/web")).toEqual([]);
+      expect(committedUnder(repo, "nope", "verifier/cli")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("topLevelNames", () => {
+  test("lists the top level, null for a bad ref", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "v\n");
+      commitAll(repo, "first");
+      expect(topLevelNames(repo, "main")?.sort()).toEqual(["README.md", "verifier"]);
+      expect(topLevelNames(repo, "nope")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("addedVerifyNames", () => {
+  test("flags added verify-* names, besides verifier/ and pre-existing ones", () => {
+    expect(addedVerifyNames(["README.md", "verifier", "verify-old"], ["README.md"])).toEqual([
+      "verify-old",
+    ]);
+    expect(addedVerifyNames(["verifier", "verify-notes.md"], ["verifier"])).toEqual([
+      "verify-notes.md",
+    ]);
+    expect(addedVerifyNames(["README.md", "verify-old"], ["README.md", "verify-old"])).toEqual([]);
   });
 });
