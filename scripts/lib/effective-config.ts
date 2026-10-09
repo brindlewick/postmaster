@@ -985,7 +985,8 @@ export const mergeTables = (base: unknown, override: unknown): unknown => {
 
 // The person's file minus its legacy project facts: [project] and [roles] stay facts
 // for inspect, and tracker.binding stays the project's binding, so none of them merge
-// into the config.
+// into the config. A tracker table left empty by the binding's removal goes too,
+// so what remains is exactly the file's real machine settings.
 const stripLegacy = (local: Rec): Rec => {
   const out: Rec = { ...local };
   delete out.project;
@@ -993,7 +994,8 @@ const stripLegacy = (local: Rec): Rec => {
   if (isRec(out.tracker)) {
     const tracker: Rec = { ...(out.tracker as Rec) };
     delete tracker.binding;
-    out.tracker = tracker;
+    if (Object.keys(tracker).length === 0) delete out.tracker;
+    else out.tracker = tracker;
   }
   return out;
 };
@@ -1114,10 +1116,9 @@ export const effectiveConfigForProject = (repo: string, configPath?: string): Ef
         throw e;
       }
     }
+    const stripped = stripLegacy(profiles.local);
     const usable =
-      profiles.hasLocal &&
-      profiles.acceptance !== "pending" &&
-      Object.keys(profiles.local).length > 0;
+      profiles.hasLocal && profiles.acceptance !== "pending" && Object.keys(stripped).length > 0;
     if (global === null && !usable) {
       return failed(
         `no config at ${globalPath} (POSTMASTER_CONFIG overrides the path)`,
@@ -1125,7 +1126,6 @@ export const effectiveConfigForProject = (repo: string, configPath?: string): Ef
         globalPath,
       );
     }
-    const stripped = stripLegacy(profiles.local);
     const merged = asTable(mergeTables(deepCopy(global ?? {}), stripped), "machine config");
     const explicitTeam = isRec(stripped.team) ? (stripped.team as Rec) : {};
     const roles = asTable(
