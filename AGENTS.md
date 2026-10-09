@@ -42,8 +42,8 @@ quality, not about the runs in flight. [Why](wiki/concepts/fixture-runs.md).
 ## When a session opens in this repo, do this
 
 No slash command, and no wizard for the user to run. The user opens their agent in this
-folder and says hi. Any first message starts the flow: choose a target, set the machine
-up if it is not, launch the postmaster. Work out where the user is and pick up from there.
+folder and says hi. Any first message starts the flow: choose a target, check it is set up,
+launch the postmaster. Work out where the user is and pick up from there.
 
 **1. Which project are we working on?**
 
@@ -73,18 +73,19 @@ prompt to create one; the normal case is nothing written.
 **The target may be this repo.** Developing postmaster with postmaster is supported; see
 the section above for the two things that differ.
 
-**2. Is this machine set up?**
+**2. Is this project set up?**
 
 ```sh
-cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+scripts/run check-setup <chosen>  # 0 set up · 1 not set up, naming what is missing
 scripts/run link-skills --check  # names missing or blocked links; read its exit status
 ```
 
-Include both results when you say whether the machine is set up. The link check is read-only.
-If the config is present but the check names missing or blocked links, report them and offer
+Include both results when you say whether the project is set up. The link check is read-only.
+The pass goes on only after the check says the project is set up.
+If the project is set up but the check names missing or blocked links, report them and offer
 the install step below on the user's word.
 
-If it is missing, set it up now, in conversation, with the target already chosen. You
+If it is not set up, set it up now, in conversation, with the target already chosen. You
 conduct it: probe first, ask one thing at a time, verify each answer, then have the script
 write the config. Do not guess an answer, and do not hand the user a script to run instead.
 

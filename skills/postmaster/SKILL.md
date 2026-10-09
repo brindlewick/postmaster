@@ -74,27 +74,29 @@ Adjust the search roots to the machine. `~/Code` is one convention, not a rule.
 ## Then: establish the preconditions yourself
 
 You are reached two ways, and they arrive in different states. A session opened in this repo
-comes through `AGENTS.md`, which may already have chosen a target and set the machine up.
+comes through `AGENTS.md`, which may already have chosen a target and checked it is set up.
 Someone typing `/postmaster` arrives cold. **Assume neither. Check.** The target is chosen
-above; what remains is the machine:
+above; what remains is whether it is set up:
 
 ```sh
-cat ~/.postmaster/config.toml 2>/dev/null || echo "NOT SET UP"
+<tool>/scripts/run check-setup "$TARGET"  # 0 set up · 1 not set up, naming what is missing
 <tool>/scripts/run link-skills --check
 ```
 
-Report the link check with the config status. It names every missing or blocked link and
+Report the link check with the setup verdict. It names every missing or blocked link and
 prints the install command, `<tool>/scripts/run link-skills`; the check never installs or
-changes anything. Keep installation on the user's word. When links are missing and the config
-is present, offer that command; for a missing config, follow the setup section of
+changes anything. Keep installation on the user's word. When links are missing and the project
+is set up, offer that command; for a project that is not set up, follow the setup section of
 `<tool>/AGENTS.md`.
 
-**No config: stop and set the machine up**, in conversation, per the setup section of
+**Not set up: stop and set the project up**, in conversation, per the setup section of
 `<tool>/AGENTS.md`; each path there is relative to `<tool>`. Every later step reads the
-config for the team, the tracker and the merge word, and without it the launch card cannot
-be filled. Come back here when it is written.
+settings for the team, the tracker and the merge word, and without them the launch card cannot
+be filled. Come back here when the check says the project is set up.
 
-**Config present:** carry on below.
+The pass goes on only after the check says the project is set up.
+
+**Set up:** carry on below.
 
 Say which of these you found, in one line, before going on — including any
 missing skill links.
