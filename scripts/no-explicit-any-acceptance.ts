@@ -182,7 +182,10 @@ function walk(dir: string, root: string, hits: Hit[]): void {
     for (const [i, line] of text.split("\n").entries()) {
       if (!SUPPRESS.test(line)) continue;
       const tail = line.slice(line.indexOf(RULE) + RULE.length);
-      hits.push({ loc: `${relative(root, full)}:${i + 1}`, reasoned: / -- \S/u.test(tail) });
+      hits.push({
+        loc: `${relative(root, full)}:${i + 1}`,
+        reasoned: / -- [^\p{White_Space}]/u.test(tail),
+      });
     }
   }
 }
@@ -271,7 +274,7 @@ export function accept(root: string, run: Runner = spawnRunner, base?: string): 
   }
   // At zero the count run prints nothing and exits 0; the "N problems" line only
   // appears when N is not zero, singular for one.
-  const m = /(\d+) problems?/u.exec(counted.out);
+  const m = /([0-9]+) problems?/u.exec(counted.out);
   const n = m === null ? 0 : Number(m[1]);
   if (counted.code !== 0 || n !== 0) {
     findings.push(
