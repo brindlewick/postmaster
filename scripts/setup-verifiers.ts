@@ -16,7 +16,9 @@
 // It refuses a fixture copy, which is never offered verifiers and never waits for one,
 // a project that already holds verifiers, and anything but the top of a git repository,
 // writing nothing. It also refuses a target off its default branch or with uncommitted
-// changes, before any session starts, since the local landing needs both. With a session host the session waits in its tab without a limit,
+// changes, before any session starts, since the local landing needs both. It logs the
+// session dispatch before make runs, so an interrupted setup still records what it
+// started. With a session host the session waits in its tab without a limit,
 // watched by the user; with none it gets an hour for each surface kind offered, then
 // setup goes on without verifiers. Landing is always local on the launch-card yes: the
 // yes is the merge word, and scaffolding the user just approved merges directly, since
@@ -29,8 +31,8 @@
 //   exit 2  usage: bad arguments, a fixture copy, verifiers already held, a path that is
 //           not the top of a git repository, a target off its default branch or with
 //           uncommitted changes, no dispatch, no effective config, a host that cannot
-//           be detected, a make call that misused its own command, or a verdict that
-//           could not be logged
+//           be detected, a make call that misused its own command, or an audit line
+//           that could not be written
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -210,14 +212,14 @@ export function setupConfig(resolved: EffectiveResult): Rec {
 }
 
 /**
- * Log the setup verdict to the run's actions and the project ledger. False
- * when the audit line could not be written: an unlogged verdict stops setup
- * rather than go on unrecorded.
+ * Log a setup note to the run's actions and the project ledger. False when
+ * the audit line could not be written: an unlogged note stops setup rather
+ * than go on unrecorded.
  */
-export function logVerdict(dispatch: string, note: string): boolean {
+export function logVerdict(dispatch: string, note: string, what = "verdict"): boolean {
   const logged = run(RUN, ["log-action", dispatch, "postmaster", "note", "setup-verifiers", note]);
   if (logged.code !== 0) {
-    console.error(`setup-verifiers: the verdict was not logged: ${logged.err.trim() || "exit 1"}`);
+    console.error(`setup-verifiers: the ${what} was not logged: ${logged.err.trim() || "exit 1"}`);
     return false;
   }
   return true;
@@ -298,6 +300,14 @@ function main(argv: string[]): number {
     "--timeout",
     String(timeout),
   ];
+  if (
+    !logVerdict(
+      dispatch,
+      `dispatching verifier session for kinds ${parsed.req.kinds.join(",")}`,
+      "dispatch",
+    )
+  )
+    return 2;
   const make = run(RUN, makeArgs);
   transcript("make", makeArgs, make.code, make.out, make.err);
   if (make.code === 2) {
