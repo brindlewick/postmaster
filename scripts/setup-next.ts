@@ -17,7 +17,7 @@
 // state: rerunning this command still says global, so the runbook goes to
 // the project step without rerunning. POSTMASTER_CONFIG overrides the
 // global config path, as check-setup reads it.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { check } from "./check-setup.ts";
 import {
@@ -25,6 +25,7 @@ import {
   parseTomlStrict,
   repoTopLevel,
   settingsIgnored,
+  strictRead,
 } from "./lib/effective-config.ts";
 
 const USAGE = "usage: run setup-next <project>";
@@ -37,7 +38,7 @@ function usage(): never {
 /** strictGlobal <path>: the global config parses the way the readers read it. */
 function strictGlobal(path: string): boolean {
   try {
-    parseTomlStrict(readFileSync(path, "utf8"), "global config");
+    parseTomlStrict(strictRead(path), "global config");
     return true;
   } catch {
     return false;

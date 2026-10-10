@@ -213,6 +213,29 @@ describe("missing profiles and ensure", () => {
     const kept = readFileSync(join(star, ".postmaster", ".gitignore"), "utf8");
     expect(kept).toBe("*\n");
   });
+
+  test("ensure restores a record git exposes through a glob negation, and stays stable", () => {
+    const gr = at("gitignore-truth");
+    mkdirSync(gr, { recursive: true });
+    expect(git(["init", "-q", gr])).toBe(0);
+    write(join(gr, ".postmaster", ".gitignore"), "*\n!*.toml\n");
+    expect(git(["-C", gr, "check-ignore", "-q", ".postmaster/project.toml"])).toBe(1);
+    ensureIgnore(gr);
+    expect(git(["-C", gr, "check-ignore", "-q", ".postmaster/project.toml"])).toBe(0);
+    const once = readFileSync(join(gr, ".postmaster", ".gitignore"), "utf8");
+    expect(once).toBe("*\n!*.toml\nproject.toml\n");
+    ensureIgnore(gr);
+    expect(readFileSync(join(gr, ".postmaster", ".gitignore"), "utf8")).toBe(once);
+  });
+
+  test("ensure leaves a plain star cover byte-identical", () => {
+    const gr = at("gitignore-star");
+    mkdirSync(gr, { recursive: true });
+    expect(git(["init", "-q", gr])).toBe(0);
+    write(join(gr, ".postmaster", ".gitignore"), "*\n");
+    ensureIgnore(gr);
+    expect(readFileSync(join(gr, ".postmaster", ".gitignore"), "utf8")).toBe("*\n");
+  });
 });
 
 describe("shared and local profiles", () => {

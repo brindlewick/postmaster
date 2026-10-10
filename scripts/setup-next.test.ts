@@ -40,6 +40,39 @@ describe("setup-next", () => {
     });
   });
 
+  test("a global config with bad bytes routes to the global step", () => {
+    withTempDir((dir) => {
+      const repo = join(dir, "proj");
+      mkdirSync(repo, { recursive: true });
+      run("git", ["init", "-q", repo]);
+      const config = join(dir, "config.toml");
+      writeFileSync(
+        config,
+        Buffer.concat([
+          Buffer.from('projects_roots = ["~/Code"]\n# bad: ', "utf8"),
+          new Uint8Array([0xff, 0xfe]),
+          Buffer.from("\n", "utf8"),
+        ]),
+      );
+      const r = setupNext(repo, config);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("next=global");
+    });
+  });
+
+  test("the same global config with valid bytes still routes to the project step", () => {
+    withTempDir((dir) => {
+      const repo = join(dir, "proj");
+      mkdirSync(repo, { recursive: true });
+      run("git", ["init", "-q", repo]);
+      const config = join(dir, "config.toml");
+      writeFileSync(config, 'projects_roots = ["~/Code"]\n# ok\n', "utf8");
+      const r = setupNext(repo, config);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("next=project");
+    });
+  });
+
   test("an unusable .postmaster still reports its verdict and route", () => {
     withTempDir((dir) => {
       const repo = join(dir, "proj");

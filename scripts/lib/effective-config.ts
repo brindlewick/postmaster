@@ -1358,8 +1358,14 @@ export const ensureIgnore = (repo: string, quiet = false): void => {
   const effective = effectiveRules(existing);
   // Append each record rule no covering rule holds; a target already
   // ignored, by a star or by an earlier line, is left alone. No rule added
-  // here ever ignores the person's settings file.
-  const missing = IGNORE_RECORDS.filter((rule) => !coveredBy(effective, rule));
+  // here ever ignores the person's settings file. Git is the truth where
+  // the matcher cannot read a rule: a glob negation can expose a target
+  // the matcher calls covered. A git that fails reads as covered, so a
+  // directory git cannot see never grows duplicates.
+  const missing = IGNORE_RECORDS.filter(
+    (rule) =>
+      !coveredBy(effective, rule) || gitIgnores(repo, join(settingsDir(repo), rule)) === false,
+  );
   if (missing.length > 0) {
     let prefix = existing;
     if (prefix !== "" && !prefix.endsWith("\n")) prefix += "\n";
@@ -1369,18 +1375,21 @@ export const ensureIgnore = (repo: string, quiet = false): void => {
   if (!quiet) console.log(`project-settings: ensured ${ignore}`);
 };
 
-/** settingsIgnored <repo>: whether git ignores the person's settings file. A path
- * git cannot place, or a git that fails, reads as not ignored. */
-export const settingsIgnored = (repo: string): boolean => {
+/** gitIgnores <repo> <path>: whether git ignores a path: true, false, or null
+ * when git itself fails. */
+const gitIgnores = (repo: string, path: string): boolean | null => {
   const env: Record<string, string | undefined> = {};
   for (const k of GIT_ENV_KEYS) env[k] = undefined;
-  const r = run(
-    "git",
-    ["-C", repo, "check-ignore", "-q", join(settingsDir(repo), "settings.toml")],
-    { env },
-  );
-  return r.code === 0;
+  const r = run("git", ["-C", repo, "check-ignore", "-q", path], { env });
+  if (r.code === 0) return true;
+  if (r.code === 1) return false;
+  return null;
 };
+
+/** settingsIgnored <repo>: whether git ignores the person's settings file. A path
+ * git cannot place, or a git that fails, reads as not ignored. */
+export const settingsIgnored = (repo: string): boolean =>
+  gitIgnores(repo, join(settingsDir(repo), "settings.toml")) ?? false;
 
 /** ignoreSettings <repo>: ignore the person's settings file, on the user's yes.
  * Setup asks; this applies. Idempotent: a literal already last, or a file

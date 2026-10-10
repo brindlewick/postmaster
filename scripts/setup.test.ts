@@ -807,6 +807,43 @@ review_link = ""
     expect(tracker.workspace).toBe("ws");
   });
 
+  test("an unrelated update succeeds when the project overrides a plane global with local", () => {
+    const planeNoWs = join(tmp, `proj-${projCounter}.planenows.toml`);
+    writeFileSync(
+      planeNoWs,
+      'projects_roots = ["~/Code"]\nconfine = "off"\n[lanes.alpha]\nharness = "claude"\nmodel = "m-a"\n[lanes.beta]\nharness = "codex"\nmodel = "m-b"\n[tracker]\nkind = "plane"\n',
+      "utf8",
+    );
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "settings.toml"), '[tracker]\nkind = "local"\n', "utf8");
+    const r = runProject(s.repo, planeNoWs, "confine=on\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const data = settingsData(s.repo);
+    expect(data.confine).toBe("on");
+    expect(tableOf(data.tracker).kind).toBe("local");
+  });
+
+  test("a merged plane kind with no workspace anywhere still dies", () => {
+    const planeNoWs = join(tmp, `proj-${projCounter}.planenows.toml`);
+    writeFileSync(
+      planeNoWs,
+      'projects_roots = ["~/Code"]\nconfine = "off"\n[lanes.alpha]\nharness = "claude"\nmodel = "m-a"\n[lanes.beta]\nharness = "codex"\nmodel = "m-b"\n[tracker]\nkind = "plane"\n',
+      "utf8",
+    );
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    const before = "[team]\nmax_runs = 5\n";
+    writeFileSync(join(dir, "settings.toml"), before, "utf8");
+    const r = runProject(s.repo, planeNoWs, "confine=on\noverwrite=yes");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("workspace slug is needed");
+    expect(settingsOf(s.repo)).toBe(before);
+    expect(existsSync(join(dir, ".gitignore"))).toBe(false);
+  });
+
   test("a dry run with only ignore_settings=yes writes nothing", () => {
     const s = stageProject();
     const first = runProject(s.repo, s.config, "tracker=local");

@@ -510,6 +510,8 @@ if (PROJECT !== "") {
 }
 const EXISTING_LANES = recOf(EXISTING.lanes);
 const EXISTING_TRACKER = recOf(EXISTING.tracker);
+const EXISTING_TRACKER_KIND =
+  typeof EXISTING_TRACKER.kind === "string" ? EXISTING_TRACKER.kind : "";
 const EXISTING_TRACKER_WS =
   typeof EXISTING_TRACKER.workspace === "string" ? EXISTING_TRACKER.workspace : "";
 
@@ -844,7 +846,8 @@ let PURL = "",
   PWS = "",
   PENV = "",
   OTHER = "";
-const MERGED_KIND = TK !== "" ? TK : MACHINE_TRACKER_KIND;
+const MERGED_KIND =
+  TK !== "" ? TK : EXISTING_TRACKER_KIND !== "" ? EXISTING_TRACKER_KIND : MACHINE_TRACKER_KIND;
 if (TK === "plane" || (PROJECT !== "" && (ANSWERS !== "" || MERGED_KIND === "plane"))) {
   PURL = ask(
     "  Plane API origin (https://api.plane.so for cloud; a self-hosted instance is its own)",
