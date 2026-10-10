@@ -361,18 +361,21 @@ describe("C4: the postmaster checks the premises without the notes", () => {
     writeFileSync(join(dispatch, "run.json"), JSON.stringify({ config: { team } }), "utf8");
     writeFileSync(join(dispatch, "manifest.json"), JSON.stringify({}), "utf8");
     writeFileSync(join(dispatch, "brief.md"), "# Waybill: x\n", "utf8");
-    const actions: string[] = [];
+    // The premises line goes through log-action as the flow writes it: a
+    // hand-written line passes the score while the script refuses the actor.
+    writeFileSync(join(dispatch, "actions.jsonl"), "\n", "utf8");
     if (premisesActor !== null) {
-      actions.push(
-        JSON.stringify({
-          actor: premisesActor,
-          action: "premises",
-          target: "abc1234",
-          detail: "base=abc1234 result=same",
-        }),
-      );
+      const logged = run(RUN, [
+        "log-action",
+        dispatch,
+        premisesActor,
+        "premises",
+        "abc1234",
+        "base=abc1234",
+        "result=same",
+      ]);
+      if (logged.code !== 0) throw new Error(`log-action failed: ${logged.err}`);
     }
-    writeFileSync(join(dispatch, "actions.jsonl"), `${actions.join("\n")}\n`, "utf8");
     const repo = join(tmp, `score-repo-${name}`);
     mkdirSync(repo, { recursive: true });
     const r = run("git", ["init", "-q", "-b", "main", repo]);
