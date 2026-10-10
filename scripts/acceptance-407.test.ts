@@ -406,12 +406,12 @@ describe("C4: the postmaster checks the premises without the notes", () => {
 
   test("held-back with a postmaster premises line scores its premises item", () => {
     const { dispatch, repo } = scoreDispatch("held-post", "held-back", "postmaster");
-    expect(premisesLine(dispatch, repo)).toMatch(/^ok\s+premises-order/u);
+    expect(premisesLine(dispatch, repo)).toMatch(/^ok +premises-order/u);
   });
 
   test("given with a coachman premises line scores its premises item", () => {
     const { dispatch, repo } = scoreDispatch("given-coach", "given", "coachman");
-    expect(premisesLine(dispatch, repo)).toMatch(/^ok\s+premises-order/u);
+    expect(premisesLine(dispatch, repo)).toMatch(/^ok +premises-order/u);
   });
 
   test("held-back with no premises line fails its premises item", () => {

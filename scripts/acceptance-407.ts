@@ -135,7 +135,7 @@ export function scratchApp(dir: string): string {
 /** The criterion count from ticket-check's machine line, or -1 when it refuses the ticket. */
 export function criterionCount(ticketFile: string, project: string): number {
   const r = ticketCheckBody(ticketFile, project);
-  const m = /^well-formed, (\d+) acceptance criteria$/mu.exec(r.out);
+  const m = /^well-formed, ([0-9]+) acceptance criteria$/mu.exec(r.out);
   return m ? Number(m[1]) : -1;
 }
 
