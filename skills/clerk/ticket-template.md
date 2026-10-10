@@ -109,7 +109,7 @@ default
   the umbrella decisions that bind it.
 - **Keeping more than five** is the user's word: a decision marked `(given by the user)` that says
   how many criteria it keeps and why, cited by a technical note such as `The parts check warns that
-  this ticket has 7 criteria; the user kept them. (D9)`. The parts check still warns.
+  this ticket has 7 criteria, and the user kept them. (D9)`. The parts check still warns.
 - **Checks** are labelled with the id of the criterion they show: `C1` for the first criterion,
   `C2` for the second, in order, one for each. The lanes organise their work and their evidence
   around them, and the lane summary check requires one piece of evidence per criterion. A check
