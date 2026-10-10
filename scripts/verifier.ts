@@ -4,7 +4,8 @@
 // The session is interactive: it opens in a tab of its own where the user watches
 // and answers it, asking only what the project does not show and taking secrets by
 // file name (#344). Land what a session made only when the project's own checks pass
-// with it in place (#325).
+// with it in place (#325). An upkeep pass drives a project's verifiers again and
+// reports each claim that no longer holds and each it could not check (#318).
 //
 //   run verifier prompt <repo> <surface>... [--headless]
 //   run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
@@ -12,6 +13,9 @@
 //     [--folder <dir>] [--timeout <seconds>]
 //   run verifier land <repo> <branch> --run <dispatch> --handover <file>
 //     [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>]
+//   run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>] [--folder <dir>]
+//   run verifier upkeep-prompt <repo> [--headless] [--folder <dir>]
+//   run verifier upkeep-report <repo> --run <dispatch> --report <file> [--folder <dir>]
 //
 //   surface    one or more of cli, web, library, cli-examples, browser-suite,
 //              web-journey, library-tests. cli-examples is the command line,
@@ -38,27 +42,49 @@
 //              --no-ff under the merge authority from the run, pull-request pushes and
 //              opens one pull request, never merging. Prints the verdict plus one
 //              merge:, waiting:, pull-request: or error: line, each logged as printed
+//   upkeep     run an upkeep pass over the repo's verifiers at its current commit: the
+//              same session as make in a second mode, on its own upkeep branch, opened
+//              through the same interactive form with the same model and time limit,
+//              reporting only. Prints one stale: line per claim that no longer holds,
+//              with what the pass found instead, one unchecked: line per claim it
+//              could not check, and a summary; exits 1 when any claim is stale or
+//              unchecked
+//   upkeep-prompt  print the pass's instructions, the interactive form, or with
+//              --headless the no-host form, which lists each question it could not
+//              ask in UPKEEP.md instead of asking
+//   upkeep-report  read a finished UPKEEP.md, refuse it unless it drives every
+//              feature page, and print the same stale, unchecked and summary lines
+//              upkeep prints, logged as printed
 //   --handover the session's HANDOVER.md, with one ## Verifier: section per verifier
 //              carrying a Folder: line and a Proof: line (the proof file's absolute
 //              path alone, or none with the reason). Proven means the file exists
-//   --folder   the verifiers' folder, relative to the repo top (default verify-<slug>)
+//   --report   the pass's UPKEEP.md, with one ## Feature: section per feature page
+//              carrying an Outcome: line, one ## Claim: section per stale or
+//              unchecked claim, and the unasked questions where the pass ran headless
+//   --folder   the verifiers' folder, relative to the repo top (default verify-<slug>;
+//              the pass takes verifier/ when the repo holds its index there)
 //   --landing  local or pull-request (default pull-request with an origin remote)
-//   --timeout  seconds to wait for the session (make), or to run the project's checks
-//              for (check, land); past it the branch lands nothing (default 3600 each,
+//   --timeout  seconds to wait for the session (make, upkeep), or to run the project's
+//              checks for (check, land); past it the branch lands nothing and the
+//              waiting ends with the tab session left open (default 3600 each,
 //              at most 9 digits)
 //
 //   exit 0  prompt printed; make: HANDOVER.md validated, the interactive session
 //           left open in its tab, the headless one ended with no wall;
-//           check: the branch lands; land: merged, or the pull request waits for the word
+//           check: the branch lands; land: merged, or the pull request waits for the word;
+//           upkeep, upkeep-report: every claim holds
 //   exit 1  make failed: the launch would not start, the session was still running at the
 //           limit, both roles walled, the handover, commit, verifier, upkeep line or
 //           index entry is missing, a verifier was made for an unlisted surface,
 //           verifier files landed outside the folder, or the action was not logged;
 //           check, land: the branch lands nothing, or the landing failed after it
-//           was accepted
+//           was accepted;
+//           upkeep, upkeep-report: a claim is stale or unchecked, the report is missing
+//           or malformed, or the pass failed as make fails
 //   exit 2  usage: an unknown command or surface, a missing argument, a bad flag or
 //           timeout, a path that is not a git repository or not its top, a repo holding
-//           no commit, no run at the dispatch, or a branch that is not a verifier branch
+//           no commit or no verifiers, no run at the dispatch, or a branch that is not
+//           a verifier branch
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -84,6 +110,9 @@ const USAGE = `usage: run verifier prompt <repo> <surface>... [--headless]
          [--folder <dir>] [--timeout <seconds>]
        run verifier land <repo> <branch> --run <dispatch> --handover <file>
          [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>]
+       run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>] [--folder <dir>]
+       run verifier upkeep-prompt <repo> [--headless] [--folder <dir>]
+       run verifier upkeep-report <repo> --run <dispatch> --report <file> [--folder <dir>]
 
        each surface is cli, web, library, cli-examples, browser-suite, web-journey or library-tests;
        landing is local or pull-request`;
@@ -172,8 +201,41 @@ export interface ParsedLand {
   landing: string | null;
 }
 
+export interface ParsedUpkeep {
+  cmd: "upkeep";
+  repo: string;
+  dispatch: string;
+  timeout: number;
+  folder: string | null;
+}
+
+export interface ParsedUpkeepPrompt {
+  cmd: "upkeep-prompt";
+  repo: string;
+  headless: boolean;
+  folder: string | null;
+}
+
+export interface ParsedUpkeepReport {
+  cmd: "upkeep-report";
+  repo: string;
+  dispatch: string;
+  report: string;
+  folder: string | null;
+}
+
 export type Parsed =
-  | { ok: true; req: ParsedPrompt | ParsedMake | ParsedCheck | ParsedLand }
+  | {
+      ok: true;
+      req:
+        | ParsedPrompt
+        | ParsedMake
+        | ParsedCheck
+        | ParsedLand
+        | ParsedUpkeep
+        | ParsedUpkeepPrompt
+        | ParsedUpkeepReport;
+    }
   | { ok: false; error: string };
 
 function parseTimeoutText(
@@ -185,13 +247,77 @@ function parseTimeoutText(
   return { ok: true, timeout: Number(value) };
 }
 
+/** The upkeep commands' flags: upkeep and upkeep-report take --run, prompt takes --headless. */
+function parseUpkeepArgs(
+  cmd: "upkeep" | "upkeep-prompt" | "upkeep-report",
+  repo: string | undefined,
+  rest: string[],
+): Parsed {
+  if (repo === undefined) return { ok: false, error: `${cmd} takes a repo` };
+  let dispatch: string | null = null;
+  let report: string | null = null;
+  let folder: string | null = null;
+  let headless = false;
+  let timeout = DEFAULT_TIMEOUT;
+  for (let j = 0; j < rest.length; j++) {
+    const flag = rest[j] as string;
+    if (flag === "--run") {
+      if (cmd === "upkeep-prompt") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
+      const value = rest[j + 1];
+      if (value === undefined) return { ok: false, error: `${cmd} needs --run <dispatch>` };
+      dispatch = value;
+      j++;
+    } else if (flag === "--report") {
+      if (cmd !== "upkeep-report") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
+      const value = rest[j + 1];
+      if (value === undefined) return { ok: false, error: `${cmd} needs --report <file>` };
+      report = value;
+      j++;
+    } else if (flag === "--folder") {
+      const value = rest[j + 1];
+      if (value === undefined) return { ok: false, error: `${cmd} needs --folder <dir>` };
+      const normalized = normalizeFolder(value);
+      if (!normalized.ok) return normalized;
+      folder = normalized.folder;
+      j++;
+    } else if (flag === "--timeout") {
+      if (cmd !== "upkeep") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
+      const parsed = parseTimeoutText(rest[j + 1]);
+      if (!parsed.ok) return parsed;
+      timeout = parsed.timeout;
+      j++;
+    } else if (flag === "--headless") {
+      if (cmd !== "upkeep-prompt") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
+      headless = true;
+    } else {
+      return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
+    }
+  }
+  if (cmd === "upkeep-prompt") return { ok: true, req: { cmd, repo, headless, folder } };
+  if (dispatch === null) return { ok: false, error: `${cmd} needs --run <dispatch>` };
+  if (cmd === "upkeep") return { ok: true, req: { cmd, repo, dispatch, timeout, folder } };
+  if (report === null) return { ok: false, error: `${cmd} needs --report <file>` };
+  return { ok: true, req: { cmd, repo, dispatch, report, folder } };
+}
+
 export function parseArgs(argv: string[]): Parsed {
   const cmd = argv[0];
   if (cmd === undefined) return { ok: false, error: "no command" };
-  if (cmd !== "prompt" && cmd !== "make" && cmd !== "check" && cmd !== "land") {
+  if (
+    cmd !== "prompt" &&
+    cmd !== "make" &&
+    cmd !== "check" &&
+    cmd !== "land" &&
+    cmd !== "upkeep" &&
+    cmd !== "upkeep-prompt" &&
+    cmd !== "upkeep-report"
+  ) {
     return { ok: false, error: `unknown command: ${cmd}` };
   }
   const repo = argv[1];
+  if (cmd === "upkeep" || cmd === "upkeep-prompt" || cmd === "upkeep-report") {
+    return parseUpkeepArgs(cmd, repo, argv.slice(2));
+  }
   if (cmd === "prompt" || cmd === "make") {
     if (repo === undefined) return { ok: false, error: `${cmd} takes a repo and a surface` };
     const names: string[] = [];
@@ -400,6 +526,11 @@ export const HEADLESS_HANDOVER_UNASKED =
   " It also carries an Unasked questions section: each question you could not ask, with what it would " +
   "have needed — the file, the value's purpose, the step it blocked.";
 
+/** The upkeep report's extra sections with no host; the interactive report needs none. */
+export const UPKEEP_HEADLESS_UNASKED =
+  " It also carries in UPKEEP.md one `## Unasked:` section per question you could not ask, each with " +
+  "a `Needed:` line saying what answering it would have taken — the file, the value's purpose, the step it blocked.";
+
 /** The template's mode blocks: the interactive session's, or the headless one's. */
 export function modeBlocks(headless: boolean): {
   askRule: string;
@@ -460,9 +591,8 @@ export function verifyDirName(repoPath: string): string {
   return slug === "" ? "verify-app" : `verify-${slug}`;
 }
 
-/** The session's branch: verify-<surface>, numbered past branches taken. */
-export function pickBranch(taken: (name: string) => boolean, surface: string): string {
-  const stem = `verify-${surface}`;
+/** A stem numbered past names taken: the stem itself, then stem-2, stem-3. */
+function numbered(stem: string, taken: (name: string) => boolean): string {
   let name = stem;
   let n = 2;
   while (taken(name)) {
@@ -472,20 +602,28 @@ export function pickBranch(taken: (name: string) => boolean, surface: string): s
   return name;
 }
 
+/** The session's branch: verify-<surface>, numbered past branches taken. */
+export function pickBranch(taken: (name: string) => boolean, surface: string): string {
+  return numbered(`verify-${surface}`, taken);
+}
+
 /** The session's worktree: a sibling of the repo, numbered past paths taken. */
 export function pickWorktree(
   repo: string,
   surface: string,
   exists: (p: string) => boolean,
 ): string {
-  const stem = join(dirname(repo), `${basename(repo)}-verify-${surface}`);
-  let wt = stem;
-  let n = 2;
-  while (exists(wt)) {
-    wt = `${stem}-${n}`;
-    n++;
-  }
-  return wt;
+  return numbered(join(dirname(repo), `${basename(repo)}-verify-${surface}`), exists);
+}
+
+/** The upkeep pass's branch: upkeep, numbered past branches taken. */
+export function pickUpkeepBranch(taken: (name: string) => boolean): string {
+  return numbered("upkeep", taken);
+}
+
+/** The upkeep pass's worktree: a sibling of the repo, numbered past paths taken. */
+export function pickUpkeepWorktree(repo: string, exists: (p: string) => boolean): string {
+  return numbered(join(dirname(repo), `${basename(repo)}-upkeep`), exists);
 }
 
 /**
@@ -506,6 +644,18 @@ export function verifierHandle(repo: string, branch: string): string {
 export function sendText(promptFile: string): string {
   return (
     "You are making a verifier for one surface of a project. " +
+    `Read your instructions at ${promptFile}, then follow them. ` +
+    "This directory is your working copy.\n"
+  );
+}
+
+/**
+ * The short first message the upkeep tab gets, clerk-style: the full
+ * instructions live in the prompt file, and the session reads them there.
+ */
+export function upkeepSendText(promptFile: string): string {
+  return (
+    "You are running an upkeep pass over this project's verifiers. " +
     `Read your instructions at ${promptFile}, then follow them. ` +
     "This directory is your working copy.\n"
   );
@@ -573,6 +723,38 @@ export function branchHasPath(repo: string, branch: string, path: string): boole
   return r.code === 0 && r.out.trim() !== "";
 }
 
+/**
+ * The verifiers' folder: the explicit one, else verifier/ when the current
+ * commit holds its index, else the single verifier's folder when it holds the
+ * front page. Null when the commit holds no verifiers either way.
+ */
+export function detectFolder(repo: string, explicit: string | null): string | null {
+  if (explicit !== null) return explicit;
+  if (branchHasPath(repo, "HEAD", "verifier/README.md")) return "verifier";
+  const single = verifyDirName(repo);
+  if (branchHasPath(repo, "HEAD", `${single}/README.md`)) return single;
+  return null;
+}
+
+/** A feature page: a markdown file in a features/ folder, besides its index. */
+export function isFeaturePage(folder: string, path: string): boolean {
+  if (!path.startsWith(`${folder}/`) || !path.endsWith(".md")) return false;
+  const segs = path.slice(folder.length + 1).split("/");
+  if (segs.length < 2 || segs[segs.length - 2] !== "features") return false;
+  return segs[segs.length - 1] !== "README.md";
+}
+
+/** The folder's feature pages at the current commit, sorted, or null when unreadable. */
+export function featurePages(repo: string, folder: string): string[] | null {
+  // -z: NUL-separated and never quoted, so non-ASCII names list as written.
+  const r = git(repo, ["ls-tree", "-r", "--name-only", "-z", "HEAD", "--", folder]);
+  if (r.code !== 0) return null;
+  return r.out
+    .split("\0")
+    .filter((p) => p !== "" && isFeaturePage(folder, p))
+    .sort();
+}
+
 /** The handover was written after the cut, so this session made it. */
 export function handoverFresh(handoverMtimeMs: number, cutMs: number): boolean {
   return handoverMtimeMs >= cutMs;
@@ -590,9 +772,33 @@ function handoverMtimeMs(path: string): number | null {
 export const HANDOVER_NAP_SECONDS = 5;
 
 /**
- * True once the worktree holds a HANDOVER.md this session wrote. An interactive
- * session has no marker, so its arrival is the completion signal; the prompt
- * orders the commit before it. The clock and the sleep are injected for tests.
+ * True once the worktree holds a file this session wrote. An interactive
+ * session has no marker, so the file's arrival is the completion signal. The
+ * clock and the sleep are injected for tests.
+ */
+export function waitForFile(
+  wt: string,
+  file: string,
+  cutMs: number,
+  timeoutSec: number,
+  sleepMs: (ms: number) => void = (ms) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  },
+  nowMs: () => number = Date.now,
+): boolean {
+  const deadline = nowMs() + timeoutSec * 1000;
+  for (;;) {
+    const written = handoverMtimeMs(join(wt, file));
+    if (written !== null && handoverFresh(written, cutMs)) return true;
+    const left = deadline - nowMs();
+    if (left <= 0) return false;
+    sleepMs(Math.min(left, HANDOVER_NAP_SECONDS * 1000));
+  }
+}
+
+/**
+ * True once the worktree holds a HANDOVER.md this session wrote. The prompt
+ * orders the commit before it.
  */
 export function waitForHandover(
   wt: string,
@@ -603,14 +809,7 @@ export function waitForHandover(
   },
   nowMs: () => number = Date.now,
 ): boolean {
-  const deadline = nowMs() + timeoutSec * 1000;
-  for (;;) {
-    const written = handoverMtimeMs(join(wt, "HANDOVER.md"));
-    if (written !== null && handoverFresh(written, cutMs)) return true;
-    const left = deadline - nowMs();
-    if (left <= 0) return false;
-    sleepMs(Math.min(left, HANDOVER_NAP_SECONDS * 1000));
-  }
+  return waitForFile(wt, "HANDOVER.md", cutMs, timeoutSec, sleepMs, nowMs);
 }
 
 /** Markdown pages committed under the verifier's features folder, besides its index. */
@@ -809,6 +1008,340 @@ export function classifyEntries(
         : `proof ${e.proof} missing`;
     return { ...e, proven: false, failReason };
   });
+}
+
+export type UpkeepOutcome = "clean" | "changed" | "blocked";
+export type UpkeepClaimVerdict = "stale" | "unchecked";
+
+export interface UpkeepVerifier {
+  name: string;
+  folder: string;
+}
+
+export interface UpkeepFeature {
+  page: string;
+  outcome: UpkeepOutcome;
+}
+
+export interface UpkeepClaim {
+  name: string;
+  page: string;
+  verdict: UpkeepClaimVerdict;
+  stated: string;
+  /** What the drive showed instead; stale claims only. */
+  found: string | null;
+  /** Why the claim could not be checked; unchecked claims only. */
+  because: string | null;
+}
+
+export interface UpkeepUnasked {
+  question: string;
+  needed: string;
+}
+
+export interface UpkeepReport {
+  verifiers: UpkeepVerifier[];
+  features: UpkeepFeature[];
+  claims: UpkeepClaim[];
+  unasked: UpkeepUnasked[];
+}
+
+type UpkeepSection =
+  | { kind: "verifier"; name: string; folder: string | null }
+  | {
+      kind: "feature";
+      page: string;
+      outcome: string | null;
+    }
+  | {
+      kind: "claim";
+      name: string;
+      page: string | null;
+      verdict: string | null;
+      stated: string | null;
+      found: string | null;
+      because: string | null;
+    }
+  | { kind: "unasked"; question: string; needed: string | null };
+
+function isOutcome(value: string): value is UpkeepOutcome {
+  return value === "clean" || value === "changed" || value === "blocked";
+}
+
+function isClaimVerdict(value: string): value is UpkeepClaimVerdict {
+  return value === "stale" || value === "unchecked";
+}
+
+/**
+ * The upkeep report's sections, in the order written. Only the section headers
+ * and the first labeled line of each kind per section are read; every other
+ * line is prose.
+ */
+export function parseUpkeepReport(
+  text: string,
+): { ok: true; report: UpkeepReport } | { ok: false; error: string } {
+  const report: UpkeepReport = { verifiers: [], features: [], claims: [], unasked: [] };
+  const seenClaims = new Set<string>();
+  const seenFeatures = new Set<string>();
+  const seenVerifiers = new Set<string>();
+  let current: UpkeepSection | null = null;
+  const close = (): { ok: false; error: string } | null => {
+    if (current === null) return null;
+    if (current.kind === "verifier") {
+      if (current.folder === null || current.folder === "") {
+        return { ok: false, error: `the report names no folder for ${current.name}` };
+      }
+      const normalized = normalizeFolder(current.folder);
+      if (!normalized.ok) {
+        return {
+          ok: false,
+          error: `the report folder for ${current.name} is not inside the repo: ${current.folder}`,
+        };
+      }
+      report.verifiers.push({ name: current.name, folder: normalized.folder });
+    } else if (current.kind === "feature") {
+      if (current.outcome === null || current.outcome === "") {
+        return { ok: false, error: `the report names no outcome for ${current.page}` };
+      }
+      if (!isOutcome(current.outcome)) {
+        return {
+          ok: false,
+          error: `the outcome for ${current.page} is not clean, changed or blocked: ${current.outcome}`,
+        };
+      }
+      report.features.push({ page: current.page, outcome: current.outcome });
+    } else if (current.kind === "claim") {
+      if (current.page === null || current.page === "") {
+        return { ok: false, error: `the report names no page for ${current.name}` };
+      }
+      if (current.verdict === null || current.verdict === "") {
+        return { ok: false, error: `the report names no verdict for ${current.name}` };
+      }
+      if (!isClaimVerdict(current.verdict)) {
+        return {
+          ok: false,
+          error: `the verdict for ${current.name} is not stale or unchecked: ${current.verdict}`,
+        };
+      }
+      if (current.stated === null || current.stated === "") {
+        return { ok: false, error: `the report names no stated result for ${current.name}` };
+      }
+      if (current.verdict === "stale" && (current.found === null || current.found === "")) {
+        return { ok: false, error: `the report names no finding for ${current.name}` };
+      }
+      if (current.verdict === "unchecked" && (current.because === null || current.because === "")) {
+        return { ok: false, error: `the report names no reason for ${current.name}` };
+      }
+      report.claims.push({
+        name: current.name,
+        page: current.page,
+        verdict: current.verdict,
+        stated: current.stated,
+        found: current.found,
+        because: current.because,
+      });
+    } else {
+      if (current.needed === null || current.needed === "") {
+        return {
+          ok: false,
+          error: `the report names nothing its unasked question needed: ${current.question}`,
+        };
+      }
+      report.unasked.push({ question: current.question, needed: current.needed });
+    }
+    current = null;
+    return null;
+  };
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    const header =
+      line.startsWith("## Verifier:") ||
+      line.startsWith("## Feature:") ||
+      line.startsWith("## Claim:") ||
+      line.startsWith("## Unasked:")
+        ? line
+        : null;
+    if (header !== null) {
+      const failed = close();
+      if (failed !== null) return failed;
+      if (header.startsWith("## Verifier:")) {
+        const name = header.slice("## Verifier:".length).trim();
+        if (name === "") return { ok: false, error: "the report has a verifier with no name" };
+        if (seenVerifiers.has(name)) {
+          return { ok: false, error: `the report names ${name} twice` };
+        }
+        seenVerifiers.add(name);
+        current = { kind: "verifier", name, folder: null };
+      } else if (header.startsWith("## Feature:")) {
+        const page = header.slice("## Feature:".length).trim();
+        if (page === "") return { ok: false, error: "the report has a feature with no page" };
+        if (seenFeatures.has(page)) {
+          return { ok: false, error: `the report names ${page} twice` };
+        }
+        seenFeatures.add(page);
+        current = { kind: "feature", page, outcome: null };
+      } else if (header.startsWith("## Claim:")) {
+        const name = header.slice("## Claim:".length).trim();
+        if (name === "") return { ok: false, error: "the report has a claim with no name" };
+        if (seenClaims.has(name)) {
+          return { ok: false, error: `the report names ${name} twice` };
+        }
+        seenClaims.add(name);
+        current = {
+          kind: "claim",
+          name,
+          page: null,
+          verdict: null,
+          stated: null,
+          found: null,
+          because: null,
+        };
+      } else {
+        const question = header.slice("## Unasked:".length).trim();
+        if (question === "") {
+          return { ok: false, error: "the report has an unasked question with no question" };
+        }
+        current = { kind: "unasked", question, needed: null };
+      }
+    } else if (current !== null) {
+      if (current.kind === "verifier" && line.startsWith("Folder:") && current.folder === null) {
+        current.folder = line.slice("Folder:".length).trim();
+      } else if (
+        current.kind === "feature" &&
+        line.startsWith("Outcome:") &&
+        current.outcome === null
+      ) {
+        current.outcome = line.slice("Outcome:".length).trim();
+      } else if (current.kind === "claim" && line.startsWith("Page:") && current.page === null) {
+        current.page = line.slice("Page:".length).trim();
+      } else if (
+        current.kind === "claim" &&
+        line.startsWith("Verdict:") &&
+        current.verdict === null
+      ) {
+        current.verdict = line.slice("Verdict:".length).trim();
+      } else if (
+        current.kind === "claim" &&
+        line.startsWith("Stated:") &&
+        current.stated === null
+      ) {
+        current.stated = line.slice("Stated:".length).trim();
+      } else if (current.kind === "claim" && line.startsWith("Found:") && current.found === null) {
+        current.found = line.slice("Found:".length).trim();
+      } else if (
+        current.kind === "claim" &&
+        line.startsWith("Because:") &&
+        current.because === null
+      ) {
+        current.because = line.slice("Because:".length).trim();
+      } else if (
+        current.kind === "unasked" &&
+        line.startsWith("Needed:") &&
+        current.needed === null
+      ) {
+        current.needed = line.slice("Needed:".length).trim();
+      }
+    }
+  }
+  const failed = close();
+  if (failed !== null) return failed;
+  return { ok: true, report };
+}
+
+export interface UpkeepVerdict {
+  lines: string[];
+  stale: number;
+  unchecked: number;
+}
+
+/**
+ * The verdict over a parsed report: every committed feature page driven exactly
+ * once, every changed or blocked page carrying its claims, every claim's
+ * verdict matching its page's outcome. The lines list each stale claim with
+ * what the pass found instead, each unchecked claim with why, the unasked
+ * questions, and the summary.
+ */
+export function verdictUpkeep(
+  pages: string[],
+  folder: string,
+  report: UpkeepReport,
+): { ok: true; verdict: UpkeepVerdict } | { ok: false; error: string } {
+  if (report.verifiers.length === 0) return { ok: false, error: "the report names no verifier" };
+  for (const v of report.verifiers) {
+    if (v.folder !== folder && !v.folder.startsWith(`${folder}/`)) {
+      return {
+        ok: false,
+        error: `the report's verifier ${v.name} sits outside ${folder}: ${v.folder}`,
+      };
+    }
+  }
+  const outcomes = new Map(report.features.map((f) => [f.page, f.outcome]));
+  for (const page of pages) {
+    if (!outcomes.has(page)) {
+      return { ok: false, error: `the report names no outcome for ${page}` };
+    }
+  }
+  for (const page of outcomes.keys()) {
+    if (!pages.includes(page)) {
+      return { ok: false, error: `the report names a page the verifiers do not hold: ${page}` };
+    }
+  }
+  for (const feature of report.features) {
+    const onPage = report.claims.filter((c) => c.page === feature.page);
+    if (feature.outcome === "changed" && !onPage.some((c) => c.verdict === "stale")) {
+      return {
+        ok: false,
+        error: `the report names no stale claim for its changed page ${feature.page}`,
+      };
+    }
+    if (feature.outcome === "blocked" && !onPage.some((c) => c.verdict === "unchecked")) {
+      return {
+        ok: false,
+        error: `the report names no unchecked claim for its blocked page ${feature.page}`,
+      };
+    }
+    if (feature.outcome === "clean" && onPage.length > 0) {
+      return {
+        ok: false,
+        error: `the report names claims for its clean page ${feature.page}`,
+      };
+    }
+  }
+  for (const claim of report.claims) {
+    if (!pages.includes(claim.page)) {
+      return {
+        ok: false,
+        error: `the report's claim ${claim.name} sits on no page the verifiers hold: ${claim.page}`,
+      };
+    }
+    const outcome = outcomes.get(claim.page) as UpkeepOutcome;
+    const want = claim.verdict === "stale" ? "changed" : "blocked";
+    if (outcome !== want) {
+      return {
+        ok: false,
+        error: `the report's ${claim.verdict} claim ${claim.name} sits on a ${outcome} page`,
+      };
+    }
+  }
+  const lines: string[] = [];
+  for (const claim of report.claims) {
+    if (claim.verdict === "stale") {
+      lines.push(`stale: ${claim.name} (${claim.page})`);
+      lines.push(`  stated: ${claim.stated}`);
+      lines.push(`  found: ${claim.found as string}`);
+    } else {
+      lines.push(`unchecked: ${claim.name} (${claim.page})`);
+      lines.push(`  because: ${claim.because as string}`);
+    }
+  }
+  for (const open of report.unasked) {
+    lines.push(`unasked: ${open.question}`);
+    lines.push(`  needed: ${open.needed}`);
+  }
+  const stale = report.claims.filter((c) => c.verdict === "stale").length;
+  const unchecked = report.claims.filter((c) => c.verdict === "unchecked").length;
+  lines.push(`features driven: ${pages.length}, stale: ${stale}, unchecked: ${unchecked}`);
+  return { ok: true, verdict: { lines, stale, unchecked } };
 }
 
 /** The diff paths outside the verifiers' folder, in the order git listed them. */
@@ -1060,6 +1593,57 @@ function runPrompt(req: ParsedPrompt): number {
   return 0;
 }
 
+function readUpkeepTemplate(): string {
+  return readFileSync(join(scriptsDir(import.meta), "verifier-upkeep-prompt.md"), "utf8");
+}
+
+/** The pass instructions for the repo's verifiers at its current commit. */
+function renderUpkeepPrompt(
+  repo: string,
+  folder: string,
+  base: string,
+  pages: string[],
+  headless: boolean,
+): string {
+  const modes = modeBlocks(headless);
+  return renderTemplate(readUpkeepTemplate(), {
+    REPO: repo,
+    VERIFY_DIR: folder,
+    BASE: base,
+    FEATURE_LIST: pages.map((p) => `- ${p}`).join("\n"),
+    ASK_RULE: modes.askRule,
+    SECRETS_RULE: modes.secretsRule,
+    UNASKED_RULE: headless ? UPKEEP_HEADLESS_UNASKED : "",
+  });
+}
+
+/** The folder and pages the pass drives, or the usage error when there are none. */
+function upkeepScope(repo: string, folder: string | null): { folder: string; pages: string[] } {
+  const found = detectFolder(repo, folder);
+  if (found === null) throw new UsageError(`no verifiers in ${repo}`);
+  const pages = featurePages(repo, found);
+  if (pages === null) throw new RunError(`the verifiers under ${found} could not be read`);
+  if (pages.length === 0) throw new UsageError(`no verifiers under ${found} in ${repo}`);
+  return { folder: found, pages };
+}
+
+/** The current commit the pass drives: HEAD, which the scope proved present. */
+function currentHead(repo: string): string {
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  if (head.code !== 0) throw new RunError(`the current commit of ${repo} could not be read`);
+  return head.out.trim();
+}
+
+function runUpkeepPrompt(req: ParsedUpkeepPrompt): number {
+  const repo = resolve(req.repo);
+  if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
+  const scope = upkeepScope(repo, req.folder);
+  const head = currentHead(repo);
+  process.stdout.write(renderUpkeepPrompt(repo, scope.folder, head, scope.pages, req.headless));
+  return 0;
+}
+
 function fileText(path: string): string {
   try {
     return readFileSync(path, "utf8").trim();
@@ -1307,6 +1891,108 @@ function runMake(req: ParsedMake): number {
   }
 }
 
+/** The report the session wrote, or the failure when it wrote none fresh. */
+function validateUpkeepFresh(wt: string, cutAt: number): string {
+  const report = join(wt, "UPKEEP.md");
+  const written = handoverMtimeMs(report);
+  if (written === null) {
+    throw new RunError(`the session ended with no UPKEEP.md in ${wt}`);
+  }
+  if (!handoverFresh(written, cutAt)) {
+    throw new RunError(`the UPKEEP.md in ${wt} predates this session`);
+  }
+  return readFileSync(report, "utf8");
+}
+
+/** The verdict over a finished report; a malformed report fails the pass. */
+function decideUpkeep(pages: string[], folder: string, text: string): UpkeepVerdict {
+  const parsed = parseUpkeepReport(text);
+  if (!parsed.ok) throw new RunError(parsed.error);
+  const decided = verdictUpkeep(pages, folder, parsed.report);
+  if (!decided.ok) throw new RunError(decided.error);
+  return decided.verdict;
+}
+
+function runUpkeep(req: ParsedUpkeep): number {
+  const repo = resolve(req.repo);
+  if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
+  const dispatch = resolve(req.dispatch);
+  if (!existsSync(join(dispatch, "run.json"))) {
+    throw new UsageError(`no run at the dispatch: ${req.dispatch}`);
+  }
+  const scope = upkeepScope(repo, req.folder);
+  // The pass drives the current commit, not the default base: the claims must
+  // hold where the project stands, whatever its branches have done since.
+  const head = currentHead(repo);
+  pruneWorktrees(repo);
+  const branch = pickUpkeepBranch((name) => branchTaken(repo, name));
+  const wt = pickUpkeepWorktree(repo, existsSync);
+  const added = git(repo, ["worktree", "add", wt, "-b", branch, head]);
+  if (added.code !== 0) {
+    throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
+  }
+  const sessionStarted = { started: false };
+  const cutAt = Date.now();
+  try {
+    return runUpkeepLaunches(req, repo, dispatch, head, branch, wt, scope, sessionStarted, cutAt);
+  } catch (e) {
+    const outcome = failureOutcome(sessionStarted.started, wt, branch);
+    const extra = outcome.cleanup ? removeProvisioning(repo, wt, branch) : outcome.suffix;
+    if (e instanceof RunError && extra !== "") throw new RunError(`${e.message}${extra}`);
+    throw e;
+  }
+}
+
+/** Upkeep's briefing: the pass instructions, the report wait, the verdict summary. */
+function runUpkeepLaunches(
+  req: ParsedUpkeep,
+  repo: string,
+  dispatch: string,
+  head: string,
+  branch: string,
+  wt: string,
+  scope: { folder: string; pages: string[] },
+  sessionStarted: { started: boolean },
+  cutAt: number,
+): number {
+  // Decided by validate on either path, printed after it: the interactive path
+  // logs a malformed report as the session's failure before it throws.
+  let decided: UpkeepVerdict | null = null;
+  return runSessionLaunches({
+    repo,
+    dispatch,
+    branch,
+    wt,
+    timeout: req.timeout,
+    cutAt,
+    sessionStarted,
+    logLabel: "upkeep",
+    sessionNoun: "upkeep",
+    renderPrompt: (headless) => renderUpkeepPrompt(repo, scope.folder, head, scope.pages, headless),
+    sendFileText: (promptFile) => upkeepSendText(promptFile),
+    waitFile: "UPKEEP.md",
+    validate: () => {
+      decided = decideUpkeep(scope.pages, scope.folder, validateUpkeepFresh(wt, cutAt));
+    },
+    print: ({ final, handle, promptFile }) => {
+      const verdict = decided as UpkeepVerdict;
+      const lines = [`branch ${branch}`, `base ${head}`, `worktree ${wt}`];
+      if (final === null) {
+        lines.push("role coachman", `handle ${handle}`);
+      } else {
+        lines.push(`role ${final.role}`, `thread ${final.thread}`);
+      }
+      lines.push(`prompt ${promptFile}`);
+      if (final !== null) lines.push(`stream ${final.stream}`);
+      lines.push(`report ${join(wt, "UPKEEP.md")}`);
+      for (const line of [...lines, ...verdict.lines]) console.log(line);
+      logVerdict(dispatch, branch, "note", verdict.lines[verdict.lines.length - 1] as string);
+      return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
+    },
+  });
+}
+
 /** Seconds one send waits for the session's turn, and how many sends before make gives up. */
 export const SEND_WAIT_SECONDS = 60;
 export const SEND_ATTEMPTS = 3;
@@ -1417,7 +2103,166 @@ export function checkMultiVerifiers(
   }
 }
 
+/** The headless launches, as #323 ran them: the coachman role, then its fallback on a wall. */
+function runRoles(
+  o: {
+    wt: string;
+    name: string;
+    logs: string;
+    branch: string;
+    surface: string;
+    promptFile: string;
+    dispatch: string;
+    timeout: number;
+  },
+  sessionStarted: { started: boolean },
+): Attempt {
+  const first = attempt({ role: "coachman", leg: "synthesis", ...o }, sessionStarted);
+  if (!first.walled) return first;
+  const second = attempt({ role: "coachman_fallback", leg: "synthesis", ...o }, sessionStarted);
+  if (second.walled) {
+    throw new RunError(
+      `both roles walled: coachman: ${first.wallDetail}; coachman_fallback: ${second.wallDetail}`,
+    );
+  }
+  return second;
+}
+
+/** What a summary step gets: the headless attempt, or the interactive handle. */
+interface PrintCtx {
+  final: Attempt | null;
+  handle: string;
+  promptFile: string;
+}
+
+/**
+ * One session's briefing: what differs between making verifiers and passing
+ * over them. The launch machinery below is one mechanism for both.
+ */
+interface SessionOpts {
+  repo: string;
+  dispatch: string;
+  branch: string;
+  wt: string;
+  timeout: number;
+  cutAt: number;
+  sessionStarted: { started: boolean };
+  /** The log target's suffix: verifier-<logLabel>, and the host role name. */
+  logLabel: string;
+  /** The noun the messages name: the verifier session, the upkeep session. */
+  sessionNoun: string;
+  renderPrompt: (headless: boolean) => string;
+  sendFileText: (promptFile: string) => string;
+  /** The worktree file whose arrival ends the wait: HANDOVER.md, UPKEEP.md. */
+  waitFile: string;
+  /** The session's deliverables, on either path; throws when they are missing. */
+  validate: () => void;
+  /** The summary lines; returns the command's exit code. */
+  print: (ctx: PrintCtx) => number;
+}
+
 /** Everything past the cut: a thrower here cleans up only before any session starts. */
+function runSessionLaunches(o: SessionOpts): number {
+  const logs = join(o.dispatch, "logs");
+  mkdirSync(logs, { recursive: true });
+  const promptFile = join(logs, `verifier-${o.branch}-prompt.txt`);
+  writeFileSync(promptFile, o.renderPrompt(false));
+  const named = run(RUN, ["host", "name", o.dispatch, "role", `verifier-${o.logLabel}`]);
+  if (named.code !== 0) {
+    throw new RunError(`the launch could not be named: ${named.err.trim() || named.out.trim()}`);
+  }
+  const name = named.out.trim();
+  const form = formOrNull(o.wt, name);
+  const handle = verifierHandle(o.repo, o.branch);
+  const spawned =
+    form === null
+      ? null
+      : run(RUN, [
+          "host",
+          "spawn",
+          handle,
+          o.wt,
+          "--label",
+          name,
+          "--",
+          ...spawnCommand(o.wt, form),
+        ]);
+  if (spawned === null || spawned.code === 3) {
+    // No session host keeps an interactive session: run headless, as #323 did,
+    // with the no-host instructions, which report what could not be asked. The
+    // prompt file holds what the session read either way.
+    writeFileSync(promptFile, o.renderPrompt(true));
+    return runSessionHeadless(o, name, logs, promptFile);
+  }
+  if (spawned.code !== 0) {
+    throw new RunError(
+      `the ${o.sessionNoun} session could not start: ${(spawned.out + spawned.err).trim() || `exit ${spawned.code}`}`,
+    );
+  }
+  if (!spawned.out.includes("handle=")) {
+    throw new RunError(
+      `the ${o.sessionNoun} session started but the host did not confirm its handle (${spawned.out.trim()})`,
+    );
+  }
+  o.sessionStarted.started = true;
+  const sendFile = join(logs, `verifier-${o.branch}-send.txt`);
+  writeFileSync(sendFile, o.sendFileText(promptFile));
+  const delivery = deliverInstructions((args) => run(RUN, args), handle, sendFile);
+  if (!delivery.delivered) {
+    const tries =
+      delivery.attempts === 1
+        ? "could not be sent"
+        : `could not be sent after ${delivery.attempts} tries`;
+    const failed = `the instructions ${tries}: ${delivery.lastError}; the session was left open in ${handle}`;
+    logInteractive(o.dispatch, o.logLabel, o.branch, handle, failed);
+    throw new RunError(`${failed}; read the session and resend if it is idle`);
+  }
+  logInteractive(o.dispatch, o.logLabel, o.branch, handle, "");
+  if (!waitForFile(o.wt, o.waitFile, o.cutAt, o.timeout)) {
+    const failed = `the ${o.sessionNoun} session is still running after ${o.timeout} seconds; it was left open in ${handle}`;
+    logInteractive(o.dispatch, o.logLabel, o.branch, handle, failed);
+    throw new RunError(failed);
+  }
+  try {
+    o.validate();
+  } catch (e) {
+    logInteractive(
+      o.dispatch,
+      o.logLabel,
+      o.branch,
+      handle,
+      e instanceof Error ? e.message : String(e),
+    );
+    throw e;
+  }
+  return o.print({ final: null, handle, promptFile });
+}
+
+/** The no-host session: the headless launches, then the deliverables and the summary. */
+function runSessionHeadless(
+  o: SessionOpts,
+  name: string,
+  logs: string,
+  promptFile: string,
+): number {
+  const final = runRoles(
+    {
+      wt: o.wt,
+      name,
+      logs,
+      branch: o.branch,
+      surface: o.logLabel,
+      promptFile,
+      dispatch: o.dispatch,
+      timeout: o.timeout,
+    },
+    o.sessionStarted,
+  );
+  o.validate();
+  return o.print({ final, handle: "", promptFile });
+}
+
+/** Make's briefing: the making instructions, the handover wait, the handover summary. */
 function runMakeLaunches(
   req: ParsedMake,
   repo: string,
@@ -1429,88 +2274,34 @@ function runMakeLaunches(
   sessionStarted: { started: boolean },
   cutAt: number,
 ): number {
-  const logs = join(dispatch, "logs");
-  mkdirSync(logs, { recursive: true });
-  const promptFile = join(logs, `verifier-${branch}-prompt.txt`);
-  writeFileSync(promptFile, renderSessionPrompt(repo, req.surfaces, base, false));
-  const label = req.surfaces.join("-");
-  const named = run(RUN, ["host", "name", dispatch, "role", `verifier-${label}`]);
-  if (named.code !== 0) {
-    throw new RunError(`the launch could not be named: ${named.err.trim() || named.out.trim()}`);
-  }
-  const name = named.out.trim();
-  const form = formOrNull(wt, name);
-  const handle = verifierHandle(repo, branch);
-  const spawned =
-    form === null
-      ? null
-      : run(RUN, ["host", "spawn", handle, wt, "--label", name, "--", ...spawnCommand(wt, form)]);
-  if (spawned === null || spawned.code === 3) {
-    // No session host keeps an interactive session: run headless, as #323 did,
-    // with the no-host instructions, which report what could not be asked. The
-    // prompt file holds what the session read either way.
-    writeFileSync(promptFile, renderSessionPrompt(repo, req.surfaces, base, true));
-    return runHeadless(
-      req,
-      dispatch,
-      base,
-      branch,
-      wt,
-      vdir,
-      name,
-      logs,
-      promptFile,
-      sessionStarted,
-      cutAt,
-    );
-  }
-  if (spawned.code !== 0) {
-    throw new RunError(
-      `the verifier session could not start: ${(spawned.out + spawned.err).trim() || `exit ${spawned.code}`}`,
-    );
-  }
-  if (!spawned.out.includes("handle=")) {
-    throw new RunError(
-      `the verifier session started but the host did not confirm its handle (${spawned.out.trim()})`,
-    );
-  }
-  sessionStarted.started = true;
-  const sendFile = join(logs, `verifier-${branch}-send.txt`);
-  writeFileSync(sendFile, sendText(promptFile));
-  const delivery = deliverInstructions((args) => run(RUN, args), handle, sendFile);
-  if (!delivery.delivered) {
-    const tries =
-      delivery.attempts === 1
-        ? "could not be sent"
-        : `could not be sent after ${delivery.attempts} tries`;
-    const failed = `the instructions ${tries}: ${delivery.lastError}; the session was left open in ${handle}`;
-    logInteractive(dispatch, label, branch, handle, failed);
-    throw new RunError(`${failed}; read the session and resend if it is idle`);
-  }
-  logInteractive(dispatch, label, branch, handle, "");
-  if (!waitForHandover(wt, cutAt, req.timeout)) {
-    const failed = `the verifier session is still running after ${req.timeout} seconds; it was left open in ${handle}`;
-    logInteractive(dispatch, label, branch, handle, failed);
-    throw new RunError(failed);
-  }
-  try {
-    validateSession(wt, base, branch, vdir, cutAt, req.surfaces);
-  } catch (e) {
-    logInteractive(dispatch, label, branch, handle, e instanceof Error ? e.message : String(e));
-    throw e;
-  }
-  for (const line of [
-    `branch ${branch}`,
-    `base ${base}`,
-    `worktree ${wt}`,
-    `role coachman`,
-    `handle ${handle}`,
-    `prompt ${promptFile}`,
-    `handover ${join(wt, "HANDOVER.md")}`,
-  ]) {
-    console.log(line);
-  }
-  return 0;
+  return runSessionLaunches({
+    repo,
+    dispatch,
+    branch,
+    wt,
+    timeout: req.timeout,
+    cutAt,
+    sessionStarted,
+    logLabel: req.surfaces.join("-"),
+    sessionNoun: "verifier",
+    renderPrompt: (headless) => renderSessionPrompt(repo, req.surfaces, base, headless),
+    sendFileText: (promptFile) => sendText(promptFile),
+    waitFile: "HANDOVER.md",
+    validate: () => validateSession(wt, base, branch, vdir, cutAt, req.surfaces),
+    print: ({ final, handle, promptFile }) => {
+      const lines = [`branch ${branch}`, `base ${base}`, `worktree ${wt}`];
+      if (final === null) {
+        lines.push("role coachman", `handle ${handle}`);
+      } else {
+        lines.push(`role ${final.role}`, `thread ${final.thread}`);
+      }
+      lines.push(`prompt ${promptFile}`);
+      if (final !== null) lines.push(`stream ${final.stream}`);
+      lines.push(`handover ${join(wt, "HANDOVER.md")}`);
+      for (const line of lines) console.log(line);
+      return 0;
+    },
+  });
 }
 
 /**
@@ -1591,75 +2382,6 @@ function logInteractive(
   ]);
   if (r.code !== 0)
     throw new RunError(`the launch was not logged: ${r.err.trim() || r.out.trim()}`);
-}
-
-/** The no-host session: the headless launches, as #323 ran them. */
-function runHeadless(
-  req: ParsedMake,
-  dispatch: string,
-  base: string,
-  branch: string,
-  wt: string,
-  vdir: string,
-  name: string,
-  logs: string,
-  promptFile: string,
-  sessionStarted: { started: boolean },
-  cutAt: number,
-): number {
-  const first = attempt(
-    {
-      role: "coachman",
-      leg: "synthesis",
-      wt,
-      name,
-      logs,
-      branch,
-      surface: req.surfaces.join("-"),
-      promptFile,
-      dispatch,
-      timeout: req.timeout,
-    },
-    sessionStarted,
-  );
-  let final = first;
-  if (first.walled) {
-    const second = attempt(
-      {
-        role: "coachman_fallback",
-        leg: "synthesis",
-        wt,
-        name,
-        logs,
-        branch,
-        surface: req.surfaces.join("-"),
-        promptFile,
-        dispatch,
-        timeout: req.timeout,
-      },
-      sessionStarted,
-    );
-    if (second.walled) {
-      throw new RunError(
-        `both roles walled: coachman: ${first.wallDetail}; coachman_fallback: ${second.wallDetail}`,
-      );
-    }
-    final = second;
-  }
-  validateSession(wt, base, branch, vdir, cutAt, req.surfaces);
-  for (const line of [
-    `branch ${branch}`,
-    `base ${base}`,
-    `worktree ${wt}`,
-    `role ${final.role}`,
-    `thread ${final.thread}`,
-    `prompt ${promptFile}`,
-    `stream ${final.stream}`,
-    `handover ${join(wt, "HANDOVER.md")}`,
-  ]) {
-    console.log(line);
-  }
-  return 0;
 }
 
 /**
@@ -2005,6 +2727,27 @@ function runCheckCmd(req: ParsedCheck): number {
   return decided.accepted ? 0 : 1;
 }
 
+function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
+  const repo = resolve(req.repo);
+  if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
+  const dispatch = resolve(req.dispatch);
+  if (!existsSync(join(dispatch, "run.json"))) {
+    throw new UsageError(`no run at the dispatch: ${req.dispatch}`);
+  }
+  let text: string;
+  try {
+    text = readFileSync(resolve(req.report), "utf8");
+  } catch {
+    throw new UsageError(`no report to read: ${req.report}`);
+  }
+  const scope = upkeepScope(repo, req.folder);
+  const verdict = decideUpkeep(scope.pages, scope.folder, text);
+  for (const line of verdict.lines) console.log(line);
+  logVerdict(dispatch, repo, "note", verdict.lines[verdict.lines.length - 1] as string);
+  return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
+}
+
 function landLocal(
   o: { repo: string; branch: string; dispatch: string },
   target: string,
@@ -2161,6 +2904,9 @@ function main(argv: string[]): number {
     if (parsed.req.cmd === "prompt") return runPrompt(parsed.req);
     if (parsed.req.cmd === "check") return runCheckCmd(parsed.req);
     if (parsed.req.cmd === "land") return runLandCmd(parsed.req);
+    if (parsed.req.cmd === "upkeep") return runUpkeep(parsed.req);
+    if (parsed.req.cmd === "upkeep-prompt") return runUpkeepPrompt(parsed.req);
+    if (parsed.req.cmd === "upkeep-report") return runUpkeepReportCmd(parsed.req);
     return runMake(parsed.req);
   } catch (e) {
     if (e instanceof UsageError) {
