@@ -1861,6 +1861,7 @@ export function parseFilesList(scope: string): string[] | null {
   const confirmed = value.indexOf("Confirmed:");
   if (confirmed !== -1) value = value.slice(0, confirmed);
   const entries: string[] = [];
+  // ASCII: widening to Unicode whitespace only folds more runs, never splits an entry
   for (const raw of value.replace(/\s+/gu, " ").split(",")) {
     let entry = raw.trim().replace(/\/+$/u, "");
     if (entry.endsWith(".") && entry.length > 1) entry = entry.slice(0, -1);
@@ -2268,6 +2269,7 @@ function staleDetail(repo: string, vdir: string, shared: boolean, at: string): s
       sha = confirmedSha(scope);
     }
   } else {
+    // ASCII: indentation before the label is plain spaces
     scope = text.split("\n").find((l) => /^\s*Files:/u.test(l)) ?? null;
     sha = featuresConfirm(text);
   }
