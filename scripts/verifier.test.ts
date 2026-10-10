@@ -33,6 +33,7 @@ import {
   handoverFresh,
   hasUpkeepLine,
   indexNames,
+  isSetupDispatch,
   isSurface,
   joinBodies,
   landTarget,
@@ -1812,6 +1813,14 @@ describe("mergeAuthorityOf and defaultLanding", () => {
   test("an origin remote means a pull request", () => {
     expect(defaultLanding(true)).toBe("pull-request");
     expect(defaultLanding(false)).toBe("local");
+  });
+
+  test("only the setup kind is a setup dispatch", () => {
+    expect(isSetupDispatch('{"kind":"setup-verifiers"}')).toBe(true);
+    expect(isSetupDispatch('{"config":{}}')).toBe(false);
+    expect(isSetupDispatch('{"kind":"other"}')).toBe(false);
+    expect(isSetupDispatch("not json")).toBe(false);
+    expect(isSetupDispatch("")).toBe(false);
   });
 });
 

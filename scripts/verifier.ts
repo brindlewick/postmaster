@@ -895,6 +895,16 @@ export function mergeAuthorityOf(runJsonText: string): "user" | "postmaster" {
   }
 }
 
+/** Whether the record is a setup run, whose launch-card yes is the merge word. */
+export function isSetupDispatch(runJsonText: string): boolean {
+  try {
+    const data = JSON.parse(runJsonText) as Record<string, unknown>;
+    return data["kind"] === "setup-verifiers";
+  } catch {
+    return false;
+  }
+}
+
 /** The landing route when none is named: pull-request with an origin remote. */
 export function defaultLanding(hasOrigin: boolean): "local" | "pull-request" {
   return hasOrigin ? "pull-request" : "local";
@@ -2062,7 +2072,11 @@ function landLocal(
   o: { repo: string; branch: string; dispatch: string; wordGiven: boolean },
   target: string,
 ): { line: string; verb: "note" | "merge"; code: number } {
-  if (!o.wordGiven && mergeAuthorityOf(fileText(join(o.dispatch, "run.json"))) !== "postmaster") {
+  const runJson = fileText(join(o.dispatch, "run.json"));
+  // The launch-card yes this flag carries belongs to the setup flow alone: on
+  // any other dispatch the flag is ignored and authority decides as before.
+  const setupWord = o.wordGiven && isSetupDispatch(runJson);
+  if (!setupWord && mergeAuthorityOf(runJson) !== "postmaster") {
     return {
       line: `waiting: ${o.branch} is ready to merge into ${target}; waiting for the user's word`,
       verb: "note",
