@@ -276,9 +276,7 @@ describe("C3: creates happen only for repositories with no space yet", () => {
 
       const st = readHerdr(fx);
       expect(Object.keys(st.spaces).length).toBe(2);
-      const pmSpace = Object.keys(st.spaces).find(
-        (ws) => st.spaces[ws]!.path === resolve(pmRoot),
-      );
+      const pmSpace = Object.keys(st.spaces).find((ws) => st.spaces[ws]!.path === resolve(pmRoot));
       const repoSpace = Object.keys(st.spaces).find((ws) => st.spaces[ws]!.path === resolve(repo));
       expect(pmSpace).not.toBeUndefined();
       expect(repoSpace).not.toBeUndefined();
@@ -286,9 +284,7 @@ describe("C3: creates happen only for repositories with no space yet", () => {
         (tab) => st.tabs[tab]!.label === "fixture · fixcopy",
       );
       expect(fixTab).not.toBeUndefined();
-      const runTab = st.spaces[repoSpace!]!.tabs.find(
-        (tab) => st.tabs[tab]!.label === SHORT_NAME,
-      );
+      const runTab = st.spaces[repoSpace!]!.tabs.find((tab) => st.tabs[tab]!.label === SHORT_NAME);
       expect(runTab).not.toBeUndefined();
     } finally {
       cleanup(fx);
