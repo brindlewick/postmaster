@@ -425,6 +425,18 @@ function valueSpan(body: string[], at: number): number {
   return n;
 }
 
+// findKeyLine <body> <key>: the assignment line for a key, skipping the
+// spans of multiline values, whose string bodies may hold key-shaped lines.
+function findKeyLine(body: string[], key: string): number {
+  let i = 0;
+  while (i < body.length) {
+    const line = body[i] as string;
+    if (keyOf(line) === key) return i;
+    i += keyOf(line) === null ? 1 : valueSpan(body, i);
+  }
+  return -1;
+}
+
 /** mergeSettings <existing> <out>: this run's TOML over the existing file:
  * answered keys replaced or added, everything else kept verbatim. */
 function mergeSettings(existing: string, out: string): string {
@@ -444,7 +456,7 @@ function mergeSettings(existing: string, out: string): string {
       const pairs = parseInlinePairs(line);
       if (pairs === null) return [line];
       for (const [k, v] of pairs) {
-        const at = child.body.findIndex((l) => keyOf(l) === k);
+        const at = findKeyLine(child.body, k);
         if (at < 0) child.body.push(`${k} = ${v}`);
         else child.body.splice(at, valueSpan(child.body, at), `${k} = ${v}`);
       }
@@ -466,7 +478,7 @@ function mergeSettings(existing: string, out: string): string {
         target.body.push(line);
         continue;
       }
-      const at = target.body.findIndex((l) => keyOf(l) === key);
+      const at = findKeyLine(target.body, key);
       if (at < 0) {
         target.body.push(line);
       } else {
@@ -493,7 +505,7 @@ function mergeSettings(existing: string, out: string): string {
       preamble.push(line);
       continue;
     }
-    const at = preamble.findIndex((l) => keyOf(l) === key);
+    const at = findKeyLine(preamble, key);
     if (at < 0) preamble.push(line);
     else preamble.splice(at, valueSpan(preamble, at), line);
   }

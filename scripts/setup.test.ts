@@ -902,6 +902,22 @@ review_link = ""
     expect(settingsOf(s.repo)).toContain('review_link = ""');
   });
 
+  test("a key-shaped line inside a multiline string is left alone", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '[tracker]\nname = """\nkind = "not-a-key"\n"""\n',
+      "utf8",
+    );
+    const r = runProject(s.repo, s.config, "tracker=local\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('kind = "not-a-key"');
+    expect(written).toContain('kind = "local"');
+  });
+
   test("an interactive blank link answer clears it too", () => {
     const s = stageProject();
     // Every question blank except tracker=local at position 34: lanes,
