@@ -857,4 +857,68 @@ review_link = ""
     expect(r.code).toBe(0);
     expect(settingsOf(s.repo)).toContain('postmaster = { harness = "claude", model = "m-p" }');
   });
+
+  test("brackets in comments do not stretch a multiline value's span", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '[team]\nworkhorses = [\n  "alpha", # [see notes\n  "beta",\n]\nmax_runs = 7\nmode = "synthesis"\n',
+      "utf8",
+    );
+    const r = runProject(s.repo, s.config, "workhorses=alpha,beta\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('workhorses = ["alpha", "beta"]');
+    expect(written).toContain("max_runs = 7");
+    expect(written).toContain('mode = "synthesis"');
+  });
+
+  test("an answered role folds into an existing child table", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '[team.coachman]\nharness = "claude"\nmodel = "m-old"\n',
+      "utf8",
+    );
+    const r = runProject(s.repo, s.config, "coachman.model=m-new\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain("[team.coachman]");
+    expect(written).toContain('model = "m-new"');
+    expect(written).toContain('harness = "claude"');
+    expect(written).not.toContain("coachman = {");
+    expect(written).not.toContain("[team]\n");
+  });
+
+  test("a blank link answer clears the inherited link", () => {
+    const s = stageProject();
+    const r = runProject(s.repo, s.config, "tracker=local\nreview_link=");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("(cleared)");
+    expect(settingsOf(s.repo)).toContain('review_link = ""');
+  });
+
+  test("an interactive blank link answer clears it too", () => {
+    const s = stageProject();
+    // Every question blank except tracker=local at position 34: lanes,
+    // workhorses, reviewers, 3 lens lists, 16 role keys, max_runs, mode,
+    // poll_seconds, 8 limit keys, then tracker.
+    const input = [...Array<string>(33).fill(""), "local", ...Array<string>(8).fill("")].join("\n");
+    const r = run(SELF, ["setup", "--project", s.repo], {
+      env: {
+        ...(process.env as Record<string, string>),
+        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+        POSTMASTER_CONFIG: s.config,
+      },
+      input: `${input}\n`,
+    });
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('kind = "local"');
+    expect(written).toContain('review_link = ""');
+  });
 });

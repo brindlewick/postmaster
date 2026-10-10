@@ -206,7 +206,7 @@ function askProject(
       return "";
     }
     if (found === "") {
-      if (optional && (k === "review_link" || k === "planning.review_link")) {
+      if (blankLinkClear(k, optional)) {
         GIVEN.add(k);
         console.log(`${prompt}: (cleared)`);
         return "";
@@ -224,9 +224,18 @@ function askProject(
     def !== "" ? ` (blank leaves it unset; setup default: ${def})` : " (blank leaves it unset)";
   process.stderr.write(`${prompt}${hint}: `);
   const line = readStdinLine();
-  if (line === "") return "";
+  if (line === "") {
+    if (blankLinkClear(k, optional)) GIVEN.add(k);
+    return "";
+  }
   GIVEN.add(k);
   return line;
+}
+
+// blankLinkClear <k> <optional>: a blank link answer clears the key it names,
+// on either input path, so an explicit none wins over an inherited link.
+function blankLinkClear(k: string, optional: boolean): boolean {
+  return optional && (k === "review_link" || k === "planning.review_link");
 }
 
 // Lane names implied by lane.* answers, for the scaffolding when `lanes` is
@@ -290,55 +299,64 @@ function keyOf(line: string): string | null {
   return m?.[1] === undefined ? null : m[1].trim();
 }
 
+// parseInlinePairs <text>: the flat pairs inside the first braces. Comments
+// run to the end of their line, and either quote shields a comma; anything
+// else falls back to null, and the caller keeps the whole line.
+function parseInlinePairs(text: string): Array<[string, string]> | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < start) return null;
+  const inner = text.slice(start + 1, end);
+  const pairs: Array<[string, string]> = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+  let current = "";
+  const parts: string[] = [];
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i] as string;
+    if (quote !== null) {
+      current += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\" && quote === '"') escaped = true;
+      else if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if (ch === "#") {
+      while (i < inner.length && inner[i] !== "\n") i++;
+    } else if (ch === "[" || ch === "{") {
+      depth += 1;
+      current += ch;
+    } else if (ch === "]" || ch === "}") {
+      depth -= 1;
+      current += ch;
+    } else if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  for (const part of parts) {
+    if (part.trim() === "") continue;
+    const eq = part.indexOf("=");
+    if (eq < 0) return null;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k === "" || v === "" || v.startsWith("{") || v.startsWith("[")) return null;
+    pairs.push([k, v]);
+  }
+  return pairs;
+}
+
 // Merge one inline table line (`coachman = { harness = "x" }`) key-wise, so a
 // run answering one role key keeps the keys an earlier run set. Flat pairs
 // only; anything else falls back to the whole line.
 function mergeInlineLine(oldLine: string, newLine: string): string {
-  const parse = (text: string): Array<[string, string]> | null => {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start < 0 || end < start) return null;
-    const pairs: Array<[string, string]> = [];
-    let depth = 0;
-    let quote = false;
-    let escaped = false;
-    let current = "";
-    const parts: string[] = [];
-    for (const ch of text.slice(start + 1, end)) {
-      if (quote) {
-        current += ch;
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') quote = false;
-      } else if (ch === '"') {
-        quote = true;
-        current += ch;
-      } else if (ch === "[" || ch === "{") {
-        depth += 1;
-        current += ch;
-      } else if (ch === "]" || ch === "}") {
-        depth -= 1;
-        current += ch;
-      } else if (ch === "," && depth === 0) {
-        parts.push(current);
-        current = "";
-      } else {
-        current += ch;
-      }
-    }
-    parts.push(current);
-    for (const part of parts) {
-      const eq = part.indexOf("=");
-      if (eq < 0) return null;
-      const k = part.slice(0, eq).trim();
-      const v = part.slice(eq + 1).trim();
-      if (k === "" || v === "" || v.startsWith("{") || v.startsWith("[")) return null;
-      pairs.push([k, v]);
-    }
-    return pairs;
-  };
-  const oldPairs = parse(oldLine);
-  const newPairs = parse(newLine);
+  const oldPairs = parseInlinePairs(oldLine);
+  const newPairs = parseInlinePairs(newLine);
   if (oldPairs === null || newPairs === null) return newLine;
   const merged: Array<[string, string]> = [...oldPairs];
   for (const [k, v] of newPairs) {
@@ -396,7 +414,9 @@ function valueSpan(body: string[], at: number): number {
         depth += 1;
       } else if (ch === "]" || ch === "}") {
         depth -= 1;
-      } else if (ch === "#" && depth === 0) {
+      } else if (ch === "#") {
+        // A comment runs to the end of its line inside brackets too; its
+        // brackets must not count, or the span swallows the following keys.
         break;
       }
     }
@@ -411,11 +431,33 @@ function mergeSettings(existing: string, out: string): string {
   const oldFile = splitSections(existing);
   const newFile = splitSections(out);
   const merged: TomlSection[] = oldFile.sections.map((s) => ({ ...s, body: [...s.body] }));
+  // A role this run answers inline folds into an existing child table for
+  // that role instead of redeclaring it: `[team.coachman]` keeps its form.
+  const ROLE_KEYS = ["coachman", "coachman_fallback", "postmaster", "clerk"];
+  const newTeam = newFile.sections.find((s) => s.key === "team");
+  if (newTeam !== undefined) {
+    newTeam.body = newTeam.body.flatMap((line) => {
+      const key = keyOf(line);
+      if (key === null || !ROLE_KEYS.includes(key) || !line.includes("{")) return [line];
+      const child = merged.find((s) => s.key === `team.${key}`);
+      if (child === undefined) return [line];
+      const pairs = parseInlinePairs(line);
+      if (pairs === null) return [line];
+      for (const [k, v] of pairs) {
+        const at = child.body.findIndex((l) => keyOf(l) === k);
+        if (at < 0) child.body.push(`${k} = ${v}`);
+        else child.body.splice(at, valueSpan(child.body, at), `${k} = ${v}`);
+      }
+      return [];
+    });
+  }
   for (const section of newFile.sections) {
     let target = merged.find((s) => s.key === section.key);
+    let created = false;
     if (target === undefined) {
       target = { header: section.header, key: section.key, body: [] };
       merged.push(target);
+      created = true;
     }
     for (const line of section.body) {
       if (line.trim() === "") continue;
@@ -438,6 +480,8 @@ function mergeSettings(existing: string, out: string): string {
         }
       }
     }
+    // A section whose lines all folded into child tables leaves no header.
+    if (created && target.body.length === 0) merged.splice(merged.indexOf(target), 1);
   }
   // Top-level assignments from the new preamble merge into the old preamble
   // the same way: replaced where the key exists, appended where it does not.
