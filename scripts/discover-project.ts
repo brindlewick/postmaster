@@ -2,10 +2,17 @@
 // Prints key=value lines. Empty value means "could not determine, ask the user". Each check a
 // change is verified by is a `check.<name>=<where it came from>: <what it shows>` line: declared in
 // the project's .postmaster/project.toml, or a default and which one (scripts/run verify).
+// surfaces= names the surface kinds to offer verifiers for, from discovery's own found
+// defaults rather than the resolved checks, so a project that declares its checks still
+// names them; a fixture copy names none, since it is never offered verifiers.
+// verifiers= names the verifier folders already at the repo top, or nothing.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { tryJsonFile } from "./lib/data.ts";
+import { isFixtureCopy } from "./lib/fixture-mark.ts";
 import { beside, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
+import { orderKinds, presentVerifierFolders, surfaceKind, type Surface } from "./verifier.ts";
+import { discover } from "./verify.ts";
 
 for (const name of [
   "GIT_DIR",
@@ -161,9 +168,29 @@ if (verified.code === 0) {
   console.error(`warn=checks: ${joined}`);
 }
 
+/** The kinds to offer verifiers for: discovery's found names as kinds, in cli, web, library order. */
+const surfaceNames = (repo: string): string[] => {
+  if (isFixtureCopy(repo)) return [];
+  const kinds: Surface[] = [];
+  const unknown: string[] = [];
+  for (const name of discover(repo).found) {
+    const kind = surfaceKind(name);
+    if (kind === null) {
+      if (!unknown.includes(name)) unknown.push(name);
+    } else {
+      kinds.push(kind);
+    }
+  }
+  // A found name with no verifier mapping is passed through raw, never dropped:
+  // setup-verifiers reports it instead of silently offering fewer surfaces.
+  return [...orderKinds(kinds), ...unknown.sort()];
+};
+
 console.log(`gate=${gate}`);
 console.log(`install=${install}`);
 console.log(`docs=${(docs + dirs).replace(/ *$/u, "")}`);
+console.log(`surfaces=${surfaceNames(ABS).join(",")}`);
+console.log(`verifiers=${presentVerifierFolders(ABS).join(",")}`);
 console.log(`tracker=${kind}`);
 console.log(`tracker_prefix=${trackerPrefix}`);
 for (const l of settings.out.replace(/\n$/u, "").split("\n")) console.log(l);
