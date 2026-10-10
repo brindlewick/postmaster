@@ -411,6 +411,22 @@ describe("D5 and D6: the wait follows the host", () => {
     }
   });
 
+  test("the dispatch logs the session before make runs", () => {
+    const { dir, repo } = noCommitRepo();
+    try {
+      const dispatch = mkdtempSync(join(dir, "dispatch-"));
+      const config = writeMinimalConfig(dir);
+      const r = run(RUN, ["setup-verifiers", repo, "library", "--run", dispatch], {
+        env: { POSTMASTER_HOST: "none", POSTMASTER_CONFIG: config },
+      });
+      expect(r.code).toBe(2);
+      const actions = readFileSync(join(dispatch, "actions.jsonl"), "utf8");
+      expect(actions).toContain("dispatching verifier session for kinds library");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("the dispatch record absolutizes project-relative env files", () => {
     const { dir, repo } = noCommitRepo();
     try {
