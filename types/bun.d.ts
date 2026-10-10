@@ -143,6 +143,7 @@ declare const Bun: {
   version: string;
   TOML: {
     parse(text: string): Record<string, unknown>;
+    stringify(data: Record<string, unknown>): string;
   };
   file(path: string | URL): {
     exists(): Promise<boolean>;
@@ -238,6 +239,7 @@ declare module "bun" {
   };
   export const TOML: {
     parse(text: string): Record<string, unknown>;
+    stringify(data: Record<string, unknown>): string;
   };
   export function file(path: string | URL): {
     exists(): Promise<boolean>;
