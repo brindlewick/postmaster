@@ -57,7 +57,9 @@ export function ticketBody(criteria: string[], mark: string, decision: string): 
     "",
     "### Checks",
     "",
-    ...criteria.map((_, i) => `- **C${i + 1}** Show outcome ${i + 1} working the way it will be used.`),
+    ...criteria.map(
+      (_, i) => `- **C${i + 1}** Show outcome ${i + 1} working the way it will be used.`,
+    ),
     "",
     "### Technical notes",
     "",

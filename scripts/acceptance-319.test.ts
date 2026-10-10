@@ -58,10 +58,17 @@ describe("C2: the parts check warns above five without failing", () => {
     for (const flags of [["--final"], []] as Array<string[]>) {
       const label = flags.length > 0 ? flags.join(" ") : "no flag";
       test(`${c.name} (${label})`, () => {
-        const out = runParts(tmp, `t${seq++}.md`, ticketBody(c.criteria, "(proposed)", DECISION), flags);
+        const out = runParts(
+          tmp,
+          `t${seq++}.md`,
+          ticketBody(c.criteria, "(proposed)", DECISION),
+          flags,
+        );
         expect(out.code).toBe(0);
         expect(out.findings).toEqual([]);
-        expect(out.notes).toContain(`criteria ${c.criteria.length}, decisions 1, technical notes 1`);
+        expect(out.notes).toContain(
+          `criteria ${c.criteria.length}, decisions 1, technical notes 1`,
+        );
         const found = warned(out.notes);
         if (c.warns === null) {
           expect(found).toEqual([]);
