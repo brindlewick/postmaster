@@ -182,14 +182,22 @@ function usageError(message: string): never {
 /**
  * The reason the target cannot take the local landing, or null when it can.
  * Land needs the default branch checked out with a clean tree; setup checks
- * before any session starts rather than waste one. A null target (no main or
- * master, such as no commit yet) skips the check: make reports that itself.
- * Land re-checks at landing time, so a branch moved mid-session still fails.
+ * before any session starts rather than waste one. A null target with no
+ * commit yet skips the check: make reports that itself. A null target with
+ * commits (an exotic default branch land cannot name) refuses here, since
+ * land would fail after the session. Land re-checks at landing time, so a
+ * branch moved mid-session still fails.
  */
 export function landingCheckout(repo: string): string | null {
-  const target = landTarget(repo);
-  if (target === null) return null;
   const current = run("git", ["-C", repo, "symbolic-ref", "--short", "-q", "HEAD"]).out.trim();
+  const target = landTarget(repo);
+  if (target === null) {
+    const head = run("git", ["-C", repo, "rev-parse", "--verify", "--quiet", "HEAD"]);
+    if (head.code !== 0) return null;
+    if (current === "")
+      return `${repo} is not on a branch and has no main or master branch to land onto`;
+    return `${repo} is on ${current}, which has no main or master branch to land onto`;
+  }
   if (current === "") return `${repo} is not on a branch; check out ${target} and run again`;
   if (current !== target)
     return `${repo} is on ${current}, not ${target}; check out ${target} and run again`;

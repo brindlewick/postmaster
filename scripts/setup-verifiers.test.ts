@@ -187,6 +187,22 @@ describe("landingCheckout", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("a committed repo with no land target names the branch", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "setup-checkout-")));
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      gitOrThrow(repo, "branch", "-m", "main", "trunk");
+      expect(landingCheckout(repo)).toBe(
+        `${repo} is on trunk, which has no main or master branch to land onto`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("setupConfig", () => {
