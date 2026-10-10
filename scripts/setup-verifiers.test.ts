@@ -65,6 +65,10 @@ describe("timeoutForHost", () => {
     expect(timeoutForHost("herdr", 2)).toBe(0);
     expect(timeoutForHost("tmux", 1)).toBe(0);
   });
+
+  test("an undetected host waits bounded, never without a limit", () => {
+    expect(timeoutForHost("", 2)).toBe(7200);
+  });
 });
 
 describe("parseMakeOutput", () => {

@@ -111,7 +111,7 @@ export function parseArgs(argv: string[]): ParseResult {
 
 /** Seconds make waits: without a limit on a watched session, an hour a kind on its own. */
 export function timeoutForHost(host: string, kindCount: number): number {
-  return host === "none" ? SECONDS_PER_SURFACE * kindCount : 0;
+  return host !== "none" && host !== "" ? 0 : SECONDS_PER_SURFACE * kindCount;
 }
 
 /** The branch and hand-over make printed, or null when it printed no such lines. */
@@ -121,6 +121,8 @@ export function parseMakeOutput(out: string): { branch: string; handover: string
   for (const line of out.split("\n")) {
     if (branch === null && line.startsWith("branch ")) {
       const name = line.slice("branch ".length).trim();
+      // Whitespace in the field means the line carries no branch name.
+      // ASCII: make prints branch names it made itself (verify-...).
       if (name !== "" && !/\s/u.test(name)) branch = name;
     } else if (handover === null && line.startsWith("handover ")) {
       const path = line.slice("handover ".length).trim();
