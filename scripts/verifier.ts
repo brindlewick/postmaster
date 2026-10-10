@@ -492,34 +492,53 @@ export function indexNames(text: string, kind: Surface): boolean {
 /**
  * What the session may ask, in the tool's own words from pstack's first step:
  * the project first, the user only for what it does not show. The headless
- * session cannot ask at all, so it records each open question for HANDOVER.md.
+ * session cannot ask at all, so it records each open question for the
+ * deliverable's unasked list: HANDOVER.md for make, UPKEEP.md for upkeep.
  */
-export const INTERACTIVE_ASK_RULE =
-  "Learn the project from its files first, and ask the user only what you cannot observe there. " +
-  "A question the working copy answers is never asked; the user sits behind this session and answers " +
-  "what the project does not show.";
-
-export const HEADLESS_ASK_RULE =
-  "Learn the project from its files, never from the user: this session cannot ask anyone anything. " +
-  "For every question below the working copy does not answer, record it for HANDOVER.md's unasked list " +
-  "instead of asking: what you needed, and what it would have taken.";
+export function askRule(headless: boolean, doc: string): string {
+  if (!headless) {
+    return (
+      "Learn the project from its files first, and ask the user only what you cannot observe there. " +
+      "A question the working copy answers is never asked; the user sits behind this session and answers " +
+      "what the project does not show."
+    );
+  }
+  return (
+    "Learn the project from its files, never from the user: this session cannot ask anyone anything. " +
+    `For every question below the working copy does not answer, record it for ${doc}'s unasked list ` +
+    "instead of asking: what you needed, and what it would have taken."
+  );
+}
 
 /**
  * A secret reaches the session as the name of the file that holds it, which the
  * user fills in themselves, as setup takes a tracker key; the value never passes
- * through the conversation, the hand-over or the verifiers. Headless, the need
+ * through the conversation, the deliverable or the verifiers. Headless, the need
  * joins the unasked list and no value is ever invented.
  */
-export const INTERACTIVE_SECRETS_RULE =
-  "When a step needs a secret — a login, a token or a key — ask the user for the name of the file " +
-  "that holds it, never the value itself. The user fills that file in themselves; the verifier reads " +
-  "the file when it drives the app. The value never appears in this conversation, in HANDOVER.md or in " +
-  "the verifier: only the file's name does.";
+export function secretsRule(headless: boolean, doc: string): string {
+  if (!headless) {
+    return (
+      "When a step needs a secret — a login, a token or a key — ask the user for the name of the file " +
+      "that holds it, never the value itself. The user fills that file in themselves; the verifier reads " +
+      `the file when it drives the app. The value never appears in this conversation, in ${doc} or in ` +
+      "the verifier: only the file's name does."
+    );
+  }
+  return (
+    "When a step needs a secret — a login, a token or a key — record the file you would have asked the user " +
+    "to name in the unasked list, with what the value unlocks. Never invent a value, and never write a " +
+    `guessed one into the verifier: no value reaches ${doc} or the verifier.`
+  );
+}
 
-export const HEADLESS_SECRETS_RULE =
-  "When a step needs a secret — a login, a token or a key — record the file you would have asked the user " +
-  "to name in the unasked list, with what the value unlocks. Never invent a value, and never write a " +
-  "guessed one into the verifier: no value reaches HANDOVER.md or the verifier.";
+export const INTERACTIVE_ASK_RULE = askRule(false, "HANDOVER.md");
+
+export const HEADLESS_ASK_RULE = askRule(true, "HANDOVER.md");
+
+export const INTERACTIVE_SECRETS_RULE = secretsRule(false, "HANDOVER.md");
+
+export const HEADLESS_SECRETS_RULE = secretsRule(true, "HANDOVER.md");
 
 /** The hand-over's extra section with no host; the interactive hand-over needs none. */
 export const HEADLESS_HANDOVER_UNASKED =
@@ -531,22 +550,29 @@ export const UPKEEP_HEADLESS_UNASKED =
   " It also carries in UPKEEP.md one `## Unasked:` section per question you could not ask, each with " +
   "a `Needed:` line saying what answering it would have taken — the file, the value's purpose, the step it blocked.";
 
-/** The template's mode blocks: the interactive session's, or the headless one's. */
-export function modeBlocks(headless: boolean): {
+/**
+ * The template's mode blocks: the interactive session's, or the headless
+ * one's, naming the deliverable that carries the unasked list: HANDOVER.md
+ * for make, UPKEEP.md for upkeep.
+ */
+export function modeBlocks(
+  headless: boolean,
+  doc = "HANDOVER.md",
+): {
   askRule: string;
   secretsRule: string;
   handoverUnasked: string;
 } {
   if (headless) {
     return {
-      askRule: HEADLESS_ASK_RULE,
-      secretsRule: HEADLESS_SECRETS_RULE,
+      askRule: askRule(true, doc),
+      secretsRule: secretsRule(true, doc),
       handoverUnasked: HEADLESS_HANDOVER_UNASKED,
     };
   }
   return {
-    askRule: INTERACTIVE_ASK_RULE,
-    secretsRule: INTERACTIVE_SECRETS_RULE,
+    askRule: askRule(false, doc),
+    secretsRule: secretsRule(false, doc),
     handoverUnasked: "",
   };
 }
@@ -1619,7 +1645,7 @@ function renderUpkeepPrompt(
   pages: string[],
   headless: boolean,
 ): string {
-  const modes = modeBlocks(headless);
+  const modes = modeBlocks(headless, "UPKEEP.md");
   return renderTemplate(readUpkeepTemplate(), {
     REPO: repo,
     VERIFY_DIR: folder,

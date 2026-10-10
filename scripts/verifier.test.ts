@@ -292,6 +292,25 @@ describe("modeBlocks", () => {
     expect(blocks.secretsRule).toContain("Never invent a value");
     expect(blocks.handoverUnasked).toContain("Unasked questions");
   });
+
+  test("the default deliverable is HANDOVER.md, as make renders", () => {
+    expect(modeBlocks(false)).toEqual(modeBlocks(false, "HANDOVER.md"));
+    expect(modeBlocks(true)).toEqual(modeBlocks(true, "HANDOVER.md"));
+    expect(modeBlocks(true).askRule).toContain("HANDOVER.md");
+  });
+
+  test("an upkeep pass names UPKEEP.md in both forms, never HANDOVER.md", () => {
+    for (const headless of [false, true]) {
+      const blocks = modeBlocks(headless, "UPKEEP.md");
+      expect(blocks.askRule).not.toContain("HANDOVER.md");
+      expect(blocks.secretsRule).not.toContain("HANDOVER.md");
+      expect(blocks.secretsRule).toContain("UPKEEP.md");
+    }
+    expect(modeBlocks(true, "UPKEEP.md").askRule).toContain("UPKEEP.md");
+    expect(modeBlocks(false, "UPKEEP.md").askRule).toContain(
+      "ask the user only what you cannot observe",
+    );
+  });
 });
 
 describe("naming", () => {
