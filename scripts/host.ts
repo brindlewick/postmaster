@@ -3222,16 +3222,28 @@ async function runCmd(args: string[]): Promise<void> {
     }
     // BASE's dispatch_info fails only when python itself breaks, which the port
     // has no equivalent of; an unreadable waybill reads as no worktree below.
-    const underPath = dispatchInfo(under).worktree;
+    // A dispatch without a waybill still names its space when it carries run.json:
+    // setup launches its verifier session before any ticket run, and its run dir
+    // holds the record but no waybill and no synthesis worktree. But run.json
+    // names the space only for such a waybill-less dispatch: one that names a
+    // worktree needs it live, so a run whose worktree was pruned still refuses
+    // instead of launching into the background.
+    const underInfo = dispatchInfo(under);
+    const underPath = underInfo.worktree;
     let underPathIsDir = false;
     try {
       underPathIsDir = !!underPath && statSync(underPath).isDirectory();
     } catch {}
-    if (!underPathIsDir)
+    let underHasRun = false;
+    try {
+      underHasRun = statSync(join(under, "run.json")).isFile();
+    } catch {}
+    const briefLess = underInfo.name === "" && underInfo.worktree === "";
+    if (!underPathIsDir && !(underHasRun && briefLess))
       appendFailure(
         err,
         marker,
-        `the run at ${under} has no existing synthesis worktree to place its tab`,
+        `the run at ${under} has no existing synthesis worktree or run.json to place its tab`,
       );
   }
   if (dispatch) {
@@ -3325,9 +3337,17 @@ async function runCmd(args: string[]): Promise<void> {
   });
   let where = "";
   if (host === "herdr") {
-    const placed = under
-      ? herdrRunPlace(launchName, cwd, under)
-      : herdrPlace(launchName, cwd, "worktree", dispatch);
+    // A dispatch with no waybill names no run space: setup launches its
+    // session before any ticket run exists, so place it by the worktree and
+    // keep its tab and its watched wait. A dispatch that names a space keeps
+    // run placement alone.
+    const underBrief = under === "" ? null : dispatchInfo(under);
+    const briefLess = underBrief !== null && (underBrief.name === "" || underBrief.worktree === "");
+    const placed = !under
+      ? herdrPlace(launchName, cwd, "worktree", dispatch)
+      : briefLess
+        ? herdrPlace(launchName, cwd, "worktree", under)
+        : herdrRunPlace(launchName, cwd, under);
     if (placed) {
       startFinishWatcher("herdr", placed.space, placed.tab, placed.pane, cwd, marker);
       run("mkfifo", [join(specDir, "env")]);

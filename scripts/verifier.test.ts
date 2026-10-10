@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
+  UNLIMITED_WAIT_CHUNK_SECONDS,
   acceptLine,
   acceptLineReport,
   addedFeaturePages,
@@ -42,6 +43,7 @@ import {
   indexFileFor,
   indexNames,
   isFeaturePage,
+  isSetupDispatch,
   isSurface,
   joinBodies,
   kindProse,
@@ -66,6 +68,7 @@ import {
   pickUpkeepBranch,
   pickUpkeepWorktree,
   pickWorktree,
+  presentVerifierFolders,
   proseList,
   pruneWorktrees,
   refuseLine,
@@ -80,6 +83,7 @@ import {
   scrubGitEnv,
   sendText,
   sendVerdict,
+  sessionFolder,
   spanNamesDir,
   spawnCommand,
   strayUncommitted,
@@ -102,6 +106,7 @@ import {
   verifyDirName,
   waitForFile,
   waitForHandover,
+  waitForMarker,
   wallInStream,
 } from "./verifier.ts";
 
@@ -204,7 +209,6 @@ describe("parseArgs", () => {
   });
 
   test("a bad timeout and an unknown flag fail", () => {
-    expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "0"]).ok).toBe(false);
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "soon"]).ok).toBe(false);
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "1234567890"]).ok).toBe(
       false,
@@ -231,6 +235,19 @@ describe("parseArgs", () => {
       ok: false,
       error: "stale needs --at <commit>",
     });
+  });
+
+  test("make takes 0 to wait without a limit; check and land need seconds past zero", () => {
+    expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "0"])).toEqual({
+      ok: true,
+      req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 0 },
+    });
+    expect(
+      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--timeout", "0"]),
+    ).toEqual({ ok: false, error: "bad timeout: 0" });
+    expect(
+      parseArgs(["land", "/r", "b", "--run", "/d", "--handover", "/h", "--timeout", "0"]),
+    ).toEqual({ ok: false, error: "bad timeout: 0" });
   });
 });
 
@@ -967,6 +984,126 @@ describe("waitForHandover", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("a zero timeout naps past every deadline until the handover lands", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        0,
+        0,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          if (naps.length === 4) writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+        },
+        () => now,
+      );
+      expect(ok).toBe(true);
+      expect(naps).toEqual([5000, 5000, 5000, 5000, 5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a zero timeout with no handover never gives up on its own", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      let naps = 0;
+      expect(() =>
+        waitForHandover(
+          wt,
+          0,
+          0,
+          () => {
+            naps += 1;
+            if (naps === 5) throw new Error("still waiting");
+          },
+          () => 999999999,
+        ),
+      ).toThrow("still waiting");
+      expect(naps).toBe(5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("waitForMarker", () => {
+  test("a timeout waits once and returns its result", () => {
+    const seen: number[] = [];
+    const settled = waitForMarker(60, (seconds) => {
+      seen.push(seconds);
+      return { code: 3, out: "", err: "" };
+    });
+    expect(seen).toEqual([60]);
+    expect(settled.code).toBe(3);
+  });
+
+  test("a zero timeout waits in day chunks until the marker lands", () => {
+    const seen: number[] = [];
+    let calls = 0;
+    const settled = waitForMarker(0, (seconds) => {
+      seen.push(seconds);
+      calls += 1;
+      return calls < 3 ? { code: 3, out: "", err: "" } : { code: 0, out: "", err: "" };
+    });
+    expect(seen).toEqual([
+      UNLIMITED_WAIT_CHUNK_SECONDS,
+      UNLIMITED_WAIT_CHUNK_SECONDS,
+      UNLIMITED_WAIT_CHUNK_SECONDS,
+    ]);
+    expect(settled.code).toBe(0);
+  });
+
+  test("a zero timeout returns a failed wait instead of waiting on", () => {
+    const seen: number[] = [];
+    const settled = waitForMarker(0, (seconds) => {
+      seen.push(seconds);
+      return seen.length < 2 ? { code: 3, out: "", err: "" } : { code: 1, out: "", err: "broken" };
+    });
+    expect(seen).toEqual([UNLIMITED_WAIT_CHUNK_SECONDS, UNLIMITED_WAIT_CHUNK_SECONDS]);
+    expect(settled.code).toBe(1);
+  });
+});
+
+describe("sessionFolder", () => {
+  test("one surface keeps its own folder, several share one", () => {
+    expect(sessionFolder("/x/app", ["cli"])).toBe("verify-app");
+    expect(sessionFolder("/x/app", ["cli", "web"])).toBe("verifier");
+    expect(sessionFolder("/x/app", ["cli", "web", "library"])).toBe("verifier");
+  });
+});
+
+describe("presentVerifierFolders", () => {
+  test("no folder reports none", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      mkdirSync(repo, { recursive: true });
+      expect(presentVerifierFolders(repo)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("each folder reports its name, the shared one first", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      mkdirSync(join(repo, "verify-app"), { recursive: true });
+      mkdirSync(join(repo, "verifier"), { recursive: true });
+      expect(presentVerifierFolders(repo)).toEqual(["verifier", "verify-app"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("failureOutcome", () => {
@@ -1558,6 +1695,7 @@ describe("check and land args", () => {
         folder: "custom",
         timeout: 60,
         landing: "local",
+        wordGiven: false,
       },
     });
     const bare = parseArgs(["land", "/r", "verify-x", "--run", "/d", "--handover", "/h"]);
@@ -1572,7 +1710,30 @@ describe("check and land args", () => {
         folder: null,
         timeout: 3600,
         landing: null,
+        wordGiven: false,
       },
+    });
+  });
+
+  test("land takes --word; check refuses it", () => {
+    const word = parseArgs(["land", "/r", "verify-x", "--run", "/d", "--handover", "/h", "--word"]);
+    expect(word).toEqual({
+      ok: true,
+      req: {
+        cmd: "land",
+        repo: "/r",
+        branch: "verify-x",
+        dispatch: "/d",
+        handover: "/h",
+        folder: null,
+        timeout: 3600,
+        landing: null,
+        wordGiven: true,
+      },
+    });
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--word"])).toEqual({
+      ok: false,
+      error: "unknown flag for check: --word",
     });
   });
 
@@ -1802,6 +1963,14 @@ describe("mergeAuthorityOf and defaultLanding", () => {
   test("an origin remote means a pull request", () => {
     expect(defaultLanding(true)).toBe("pull-request");
     expect(defaultLanding(false)).toBe("local");
+  });
+
+  test("only the setup kind is a setup dispatch", () => {
+    expect(isSetupDispatch('{"kind":"setup-verifiers"}')).toBe(true);
+    expect(isSetupDispatch('{"config":{}}')).toBe(false);
+    expect(isSetupDispatch('{"kind":"other"}')).toBe(false);
+    expect(isSetupDispatch("not json")).toBe(false);
+    expect(isSetupDispatch("")).toBe(false);
   });
 });
 
@@ -3049,6 +3218,7 @@ describe("correcting args", () => {
         folder: null,
         timeout: 3600,
         landing: "local",
+        wordGiven: false,
       },
     });
     expect(

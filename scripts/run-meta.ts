@@ -351,8 +351,9 @@ export const RUN_MODES = ["synthesis", "single-thread"];
 
 // previousRunMode <dispatch>: the mode of the project's latest run under the run root (the
 // dispatch's parent), by the `written` time in its run.json, whatever its stage. A latest run
-// that records no mode is a synthesis run; null when the project has no run yet. Ties break
-// by file time, then directory name, so the answer never depends on directory order.
+// that records no mode is a synthesis run; null when the project has no run yet. Setup
+// records are not runs and are skipped. Ties break by file time, then directory name,
+// so the answer never depends on directory order.
 function previousRunMode(dispatch: string): string | null {
   const root = dirname(dispatch);
   let names: string[];
@@ -368,6 +369,7 @@ function previousRunMode(dispatch: string): string | null {
     const path = join(candidate, "run.json");
     const record = tryJsonFile<Record<string, unknown>>(path);
     if (!record) continue;
+    if (record.kind === "setup-verifiers") continue;
     let mtime = 0;
     try {
       mtime = statSync(path).mtimeMs;

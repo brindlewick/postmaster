@@ -151,7 +151,7 @@ The flow is general and carries no assumptions about build tools, docs layout or
 config file before it runs on a plain git repo is a tool nobody adopts.
 
 ```sh
-<tool>/scripts/run discover-project <target>   # gate=… docs=… tracker=… tracker_prefix=… ambient_context=… check.<name>=…
+<tool>/scripts/run discover-project <target>   # gate=… docs=… surfaces=… verifiers=… tracker=… tracker_prefix=… ambient_context=… check.<name>=…
 <tool>/scripts/run project-settings inspect <target> # optional project facts and their source
 ```
 
@@ -226,10 +226,11 @@ its env file, never in settings.
    with the user at the terminal: the postmaster is this session, and no second one is
    started. `spawn` means a separate postmaster session is needed, and the reasons say
    which conditions failed: the harness or the model differs from `team.postmaster`, the
-   target is another repo, or nobody is at the terminal. When the decision is `spawn` and the
-   target is a fixture copy (`run fixture new` marked it), it also prints `headless`: that
-   postmaster starts headless on every host, in the form `hosts.md` gives under none, so it
-   never meets a trust prompt. `self` stays `self` in a fixture copy. If it exits non-zero instead,
+   target is another repo, or nobody is at the terminal. When the target is a fixture copy
+   (`run fixture new` marked it), it also prints `fixture`, on both routes. When the decision
+   is `spawn`, it prints `headless` too: that postmaster starts headless on every host, in the
+   form `hosts.md` gives under none, so it never meets a trust prompt. `self` stays `self` in
+   a fixture copy. If it exits non-zero instead,
    stop and tell the user what it said: the config is missing, does not parse, or has no
    `team.postmaster`, or the report was malformed. Settle that first; there is no route
    to put on the launch card until the script answers.
@@ -242,7 +243,14 @@ its env file, never in settings.
    recorded but not yet enforced, until launch reads the key in #200), who says
    the merge word for local-merge projects (`ship.merge_authority`), the landing route
    (`pull-request` or `local`), the session host the fleet will run on
-   (`<tool>/scripts/run host detect`), and the project facts above. Launch nothing before the user
+   (`<tool>/scripts/run host detect`), and the project facts above. Where the discovery's
+   `verifiers=` line is empty and step 3 printed neither a `headless` line nor a `fixture`
+   line, the card also offers to make the project's verifiers before anything starts: one
+   for each surface the
+   discovery's `surfaces=` line names, or one for the project's main surface when that
+   line names none, the surface named from the project or asked on the card. The user
+   answers the offer with the rest of the card. A fixture copy, and a project whose
+   `verifiers=` line names its folders, are offered nothing. Launch nothing before the user
    picks.
 5. **Create the project-local run root** and keep what the call prints for the steps below.
    The project path, not its basename, identifies this run root:
@@ -257,10 +265,26 @@ its env file, never in settings.
    action there. A postmaster that is this session keeps the same records as one you spawn. The
    call never creates settings. A run already in flight under the old
    `~/.postmaster/runs/<basename>/` layout is not migrated.
-6. **Write the brief** to `<runs>/postmaster/brief.md`: "You are the postmaster for <project>.
+6. **Where the card said yes to verifiers, make and land them before anything else.** The
+   step runs once the run root exists and before the postmaster takes the stream, the same
+   whether the front door goes on as the postmaster or spawns one. It is one call, and it
+   returns only when the verifiers have landed or been given up:
+
+   ```sh
+   <tool>/scripts/run setup-verifiers <target> <surface>... --run <runs>/postmaster
+   ```
+
+   Surfaces are the discovery's `surfaces=` names, or the main surface the card named when
+   that line was empty. Exit 0 lands them; exit 1 gives them up, and setup goes on without
+   verifiers; exit 2 stops setup. After a no, on a fixture copy, or where the project
+   already holds verifiers, this step does not run: no session starts and setup goes on as
+   it does. If the user stops the verifier session instead of answering it, stop this
+   command and go on without verifiers.
+7. **Write the brief** to `<runs>/postmaster/brief.md`: "You are the postmaster for <project>.
    Read `<tool>/skills/postmaster/postmaster.md` first", then the stream paragraph, the project
    profile, the configured team, who says the merge word, the session host, `<tool>` and the
-   config path, plus this session's report and the route result, and, when the route says
+   config path, the verifiers' outcome (landed, given up, declined, or not offered and why),
+   plus this session's report and the route result, and, when the route says
    `headless` or the host is none, that it runs headless and writes
    `<runs>/postmaster/ESCALATION.md` when it needs the user.
    It is what you settled here,
@@ -270,10 +294,10 @@ its env file, never in settings.
    <tool>/scripts/run log-action <runs>/postmaster postmaster note launch "<route result>"
    ```
 
-7. **`self`: carry on as the postmaster.** Read `<tool>/skills/postmaster/postmaster.md` and
+8. **`self`: carry on as the postmaster.** Read `<tool>/skills/postmaster/postmaster.md` and
    run the stream in this conversation. Log every action through `run log-action` under
    `<runs>/postmaster/`, as that runbook says. Do not start a second session.
-8. **`spawn`: start a new postmaster session.** If the route has a `headless` line, use the
+9. **`spawn`: start a new postmaster session.** If the route has a `headless` line, use the
    headless form from `hosts.md` through `run host run` on every host. It starts the configured
    harness headless with the brief as its prompt, writes events and errors under
    `<runs>/postmaster/`, and has no terminal to stop at a question:
@@ -308,7 +332,7 @@ its env file, never in settings.
    host, `spawn` exits 3: launch it headless as `hosts.md` gives under none, with a line in its
    brief that it runs headless, so whenever it needs the user it writes
    `<runs>/postmaster/ESCALATION.md` and ends its turn; tell the user it answers by resume.
-9. **Report**. `self`: say that you are the postmaster and the stream is running here. `spawn`:
+10. **Report**. `self`: say that you are the postmaster and the stream is running here. `spawn`:
    say where to watch it (the space and tab, the tmux session, or with no host its events
    file), the run root, and the brief, then stop.
 
