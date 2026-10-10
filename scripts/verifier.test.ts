@@ -80,6 +80,7 @@ import {
   sendVerdict,
   spanNamesDir,
   spawnCommand,
+  strayUncommitted,
   strayVerifierPaths,
   surfaceFromReadme,
   surfaceKind,
@@ -2290,6 +2291,24 @@ describe("upkeep scope", () => {
     }
   });
 
+  test("detectFolders reads the shapes a revision holds, never the branch", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      commitAll(repo, "single");
+      const base = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      commitAll(repo, "multi");
+      expect(detectFolders(repo, null, base)).toEqual(["verify-app"]);
+      expect(detectFolders(repo, null, "HEAD")).toEqual(["verify-app", "verifier"]);
+      expect(detectFolders(repo, "custom", base)).toEqual(["custom"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("scopeVdirs finds the folder's verifier dirs, and no subdir features", () => {
     const dir = tempDir();
     try {
@@ -3203,6 +3222,23 @@ describe("untouchedCorrected", () => {
   });
 });
 
+describe("strayUncommitted", () => {
+  test("the report alone is clean", () => {
+    expect(strayUncommitted("?? UPKEEP.md\0", ["UPKEEP.md"])).toEqual([]);
+    expect(strayUncommitted("", ["UPKEEP.md"])).toEqual([]);
+  });
+
+  test("modified and untracked paths stray", () => {
+    expect(
+      strayUncommitted(" M verify-app/helper.ts\0?? notes.txt\0?? UPKEEP.md\0", ["UPKEEP.md"]),
+    ).toEqual(["verify-app/helper.ts", "notes.txt"]);
+  });
+
+  test("either side of a rename strays", () => {
+    expect(strayUncommitted("R  new.md\0old.md\0", ["UPKEEP.md"])).toEqual(["new.md", "old.md"]);
+  });
+});
+
 describe("index confirmation", () => {
   const sha = "0123456789abcdef0123456789abcdef01234567";
 
@@ -3294,6 +3330,32 @@ describe("index confirmation", () => {
       "",
     ].join("\n");
     expect(bulletConfirm(accepted, "verifier/web")).toBe(null);
+  });
+
+  test("a paragraph after the list belongs to no bullet", () => {
+    expect(
+      indexBullets(
+        [
+          "- cli goes in verifier/cli/.",
+          "- web goes in verifier/web/.",
+          "",
+          `Confirmed: ${sha}`,
+          "",
+        ].join("\n"),
+      ),
+    ).toEqual([["- cli goes in verifier/cli/."], ["- web goes in verifier/web/.", ""]]);
+  });
+
+  test("a free-floating Confirmed: line confirms nothing", () => {
+    const index = [
+      "- cli goes in verifier/cli/. Files: x.",
+      "- web goes in verifier/web/. Files: y.",
+      "",
+      `Confirmed: ${sha}`,
+      "",
+    ].join("\n");
+    expect(bulletConfirm(index, "verifier/cli")).toBe(null);
+    expect(bulletConfirm(index, "verifier/web")).toBe(null);
   });
 
   test("featuresConfirm reads the whole features index", () => {

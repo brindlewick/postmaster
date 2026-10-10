@@ -46,7 +46,7 @@
 //              pass the project's checks on a scratch, its diff touches only the
 //              verifiers' folder, and every failed verifier's folder is absent; with
 //              a report, a correcting pass's branch lands on the folder rule, over
-//              every shape the repo holds unless --folder names one, and the
+//              every shape the base commit holds unless --folder names one, and the
 //              project's checks alone. Prints one accept: or refuse: line and logs
 //              the same line
 //   land       check, then land an accepted branch once: local merges with git merge
@@ -991,15 +991,17 @@ export function branchHasPath(repo: string, branch: string, path: string): boole
 
 /**
  * The verifiers' folders: the explicit one alone, else every shape the
- * current commit holds, the single front page first. A repo that holds both
+ * revision holds, the single front page first. A repo that holds both
  * shapes gets both: preferring one would silently drop the other's suite.
+ * The pass reads the current commit; the report landing reads the compared
+ * base, never the branch being judged.
  */
-export function detectFolders(repo: string, explicit: string | null): string[] {
+export function detectFolders(repo: string, explicit: string | null, at = "HEAD"): string[] {
   if (explicit !== null) return [explicit];
   const folders: string[] = [];
   const single = verifyDirName(repo);
-  if (branchHasPath(repo, "HEAD", `${single}/README.md`)) folders.push(single);
-  if (branchHasPath(repo, "HEAD", "verifier/README.md")) folders.push("verifier");
+  if (branchHasPath(repo, at, `${single}/README.md`)) folders.push(single);
+  if (branchHasPath(repo, at, "verifier/README.md")) folders.push("verifier");
   return folders;
 }
 
@@ -1736,8 +1738,9 @@ const HEADING_RE = /^\s*#{1,6}\s/u;
 
 /**
  * The shared index's bullets, each with the lines it spans. A confirmation on
- * a continuation line counts, so a wrapped bullet confirms like a
- * single-line one.
+ * an indented continuation line counts, so a wrapped bullet confirms like a
+ * single-line one; a flush-left line ends the list, so a free-floating
+ * Confirmed: paragraph credits no verifier.
  */
 export function indexBullets(text: string): string[][] {
   const bullets: string[][] = [];
@@ -1749,7 +1752,11 @@ export function indexBullets(text: string): string[][] {
     } else if (HEADING_RE.test(line)) {
       current = null;
     } else if (current !== null) {
-      current.push(line);
+      if (line === "" || line.startsWith(" ") || line.startsWith("\t")) {
+        current.push(line);
+      } else {
+        current = null;
+      }
     }
   }
   return bullets;
@@ -2429,6 +2436,22 @@ export function untouchedCorrected(diff: string[], mended: UpkeepClaim[]): Upkee
 }
 
 /**
+ * The worktree paths a `git status --porcelain -z` output names outside the
+ * allowed list: every other entry is a change the branch does not carry.
+ * Rename entries name both sides; either side outside the list strays.
+ */
+export function strayUncommitted(out: string, allowed: string[]): string[] {
+  const keep = new Set(allowed);
+  const strays: string[] = [];
+  for (const part of out.split("\0")) {
+    if (part === "") continue;
+    const path = part.length > 3 && part[2] === " " ? part.slice(3) : part;
+    if (!keep.has(path)) strays.push(path);
+  }
+  return strays;
+}
+
+/**
  * The correcting pass's branch: its diff past the driven commit touches only
  * the verifiers' folders, every mended claim's page is among the touched
  * files, and every verifier the pass drove is confirmed on the branch at the
@@ -2554,7 +2577,19 @@ function runUpkeepLaunches(
       const judged = decideUpkeep(scope.pages, scope.folders, validateUpkeepFresh(wt, cutAt));
       decided = judged.verdict;
       corrected = judged.mended.length;
-      if (correcting) validateCorrectingBranch(repo, head, branch, scope.folders, judged.mended);
+      if (correcting) {
+        validateCorrectingBranch(repo, head, branch, scope.folders, judged.mended);
+        const status = git(wt, ["status", "--porcelain", "-z"]);
+        if (status.code !== 0) throw new RunError("the pass worktree could not be read");
+        const strays = strayUncommitted(status.out, ["UPKEEP.md"]);
+        if (strays.length > 0) {
+          const shown = strays.slice(0, 10).join(", ");
+          const more = strays.length > 10 ? ` and ${strays.length - 10} more` : "";
+          throw new RunError(
+            `the pass leaves uncommitted changes besides UPKEEP.md on ${branch}: ${shown}${more}`,
+          );
+        }
+      }
     },
     print: ({ final, handle, promptFile }) => {
       const verdict = decided as UpkeepVerdict;
@@ -3253,8 +3288,8 @@ interface Validated {
   branch: string;
   dispatch: string;
   folder: string;
-  /** The report path's folders: every shape held, unless --folder names one. */
-  folders: string[];
+  /** The --folder flag as given, or null: the report path resolves it at the base. */
+  explicitFolder: string | null;
   deliverable: { kind: "handover"; text: string } | { kind: "report"; text: string };
 }
 
@@ -3282,7 +3317,7 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
         branch: req.branch,
         dispatch,
         folder: req.folder ?? verifyDirName(repo),
-        folders: req.folder !== null ? [req.folder] : [verifyDirName(repo), "verifier"],
+        explicitFolder: req.folder,
         deliverable: { kind: "report", text },
       };
     } catch {
@@ -3297,7 +3332,7 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
         branch: req.branch,
         dispatch,
         folder: req.folder ?? verifyDirName(repo),
-        folders: [req.folder ?? verifyDirName(repo)],
+        explicitFolder: req.folder,
         deliverable: { kind: "handover", text },
       };
     } catch {
@@ -3309,10 +3344,10 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
 
 /**
  * A pass branch lands on the folder rule and the project's checks alone: the
- * rule covers every shape the repo holds unless --folder names one, and the
- * report must be well formed, but how much of it the pass corrected is the
- * user's to judge from the proposal, never a refusal. Partial corrections
- * land like whole ones.
+ * rule covers every shape the compared base holds unless --folder names one,
+ * and the report must be well formed, but how much of it the pass corrected
+ * is the user's to judge from the proposal, never a refusal. Partial
+ * corrections land like whole ones.
  */
 function decideReportBranch(o: {
   repo: string;
@@ -3355,7 +3390,7 @@ function decideFromValidated(v: Validated, timeout: number): Decided {
       repo: v.repo,
       branch: v.branch,
       dispatch: v.dispatch,
-      folders: v.folders,
+      folders: detectFolders(v.repo, v.explicitFolder, base),
       timeout,
       report: parsed.report,
       compareBase: base,
