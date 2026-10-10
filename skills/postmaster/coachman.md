@@ -337,8 +337,9 @@ implementation divergences with no such explanation.
 **In single-thread mode, leg 1 runs like this:**
 
 1. Stage 0 steps 1–4 as written: read the waybill, base pre-flight, check the ticket's
-   premises and record the `premises` action, exclude `.worktrees/`. A premise that does not
-   hold escalates exactly as Step 3 says, before any branch or worktree exists.
+   premises and record the `premises` action (skipped without the notes, as Step 3 says),
+   exclude `.worktrees/`. A premise that does not hold escalates exactly as Step 3 says,
+   before any branch or worktree exists.
 2. Stage 0 step 5 without the workhorse worktrees: make the run's directories and confirm the
    synthesis worktree the postmaster cut is at BASE and is your cwd. Stage 0 step 6 sets
    `bootstrapped` and adds no `lanes` entry. Stage 0 step 7 writes no workhorse brief.
@@ -432,7 +433,11 @@ second implementer wrote (single-thread).
    (`<tool>/scripts/run check-target <repo>` exits 0). On either failing, stop and escalate rather than
    cut worktrees from a base that is not the one the postmaster dispatched, or that would
    silently drop uncommitted work.
-3. **Check the ticket's premises before implementation starts.** Run
+3. **Check the ticket's premises before implementation starts — unless the run holds the
+   notes back.** `<tool>/scripts/run run-meta ticket-notes <dispatch>` prints the value from
+   the run's record: when it prints `held-back`, the postmaster checked the premises at
+   dispatch, so confirm `actions.jsonl` holds its `premises` line and skip this step, and
+   when it holds none, stop and escalate before making anything. Otherwise run
    `<tool>/scripts/run premises <repo> <dispatch>/brief.md <BASE>` and record its output with
    `<tool>/scripts/run log-action <dispatch> coachman premises <verified-commit> "base=<BASE>"
    "result=<result>"`.
@@ -470,7 +475,7 @@ second implementer wrote (single-thread).
    `<tool>/scripts/run run-times <dispatch>`.
    Never delete the manifest. It is the run's history, and
    the postmaster's poll reads it.
-7. **In synthesis mode, write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the ticket verbatim, the
+7. **In synthesis mode, write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the waybill's `## Ticket` part verbatim, the
    project profile, the docs to read first named explicitly, the `WORKHORSE-SUMMARY.md` /
    `WORKHORSE-BLOCKED.md` contract, and the line that the ready ticket is the run's contract,
    the autonomous-defaults rule (decide within-brief questions
