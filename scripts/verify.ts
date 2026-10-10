@@ -791,7 +791,7 @@ function runChecks(wt: string, dispatch: string | null): never {
     const d = loadJson(join(spec, "spec.json"));
     if (!d || typeof d !== "object" || !Array.isArray((d as Record<string, unknown>).checks)) {
       dieV(
-        `${top} is not armed: ${join(spec, "spec.json")} is missing; the coachman arms each workhorse worktree with run verify arm`,
+        `${top} is not armed: ${join(spec, "spec.json")} is missing; the coachman arms each workhorse copy with run verify arm`,
       );
     }
     checks = (d as Record<string, unknown>).checks as Check[];

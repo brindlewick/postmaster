@@ -139,7 +139,22 @@ function lintConfigFindings(value: unknown): string[] {
   return out;
 }
 
-/** The gate runs the linter as it is, with no flag that fails every warning. */
+/** A blanket-fail mechanism in the check script other than --deny-warnings, or
+ * null when the script carries none: --max-warnings with a zero threshold, or
+ * denying the whole `all` category. */
+function blanketFlag(check: string): string | null {
+  // ASCII: a shell splits words on ASCII whitespace, as does JS \s.
+  const capped = /--max-warnings(?:=|\s+)0+(?![0-9])/u.exec(check);
+  if (capped !== null) return capped[0];
+  // ASCII: a shell splits words on ASCII whitespace, as does JS \s.
+  const denied = /(?:^|\s)(?:--deny|-D)(?:=|\s+)all(?:\s|$)/u.exec(check);
+  if (denied !== null) return denied[0].trim();
+  return null;
+}
+
+/** The gate runs the linter with the rule failing at error, and fails on every
+ * warning only through --deny-warnings (#232): any other blanket mechanism is
+ * refused, naming the flag. */
 function gateFindings(value: unknown): string[] {
   if (!isRecord(value)) return ["package.json: want an object at the top"];
   const scripts: unknown = value["scripts"];
@@ -147,9 +162,10 @@ function gateFindings(value: unknown): string[] {
   const check: unknown = scripts["check"];
   if (typeof check !== "string") return ["package.json: no check script runs the linter"];
   if (!check.includes("oxlint")) return ["package.json: the check script does not run oxlint"];
-  if (check.includes("--deny-warnings")) {
+  const blanket = blanketFlag(check);
+  if (blanket !== null) {
     return [
-      "package.json: the check script fails on every warning, want only this rule to fail it",
+      `package.json: the check script fails on every warning with ${blanket}, want --deny-warnings or none`,
     ];
   }
   return [];

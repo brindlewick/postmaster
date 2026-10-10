@@ -175,7 +175,17 @@ export interface HerdrState {
       path: string | null;
     }
   >;
-  panes: Record<string, { ws: string; tab: string; cwd: string; tokens: Record<string, string> }>;
+  panes: Record<
+    string,
+    {
+      ws: string;
+      tab: string;
+      cwd: string;
+      tokens: Record<string, string>;
+      label?: string;
+      title?: string;
+    }
+  >;
   tabs: Record<string, { ws: string; pane: string; cwd: string; label: string }>;
   tab_n: Record<string, number>;
   open: Record<string, string>;
@@ -328,15 +338,27 @@ export function place(
   const dir = join(fx.state, "placements");
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, `${createHash("sha256").update(entry.tab).digest("hex")}.json`),
+    join(dir, `${createHash("sha256").update(entry.pane).digest("hex")}.json`),
     `${JSON.stringify(entry)}\n`,
   );
 }
 
-export function readPlacement(fx: Fx, tab: string): Record<string, unknown> {
+export function placeRunTab(
+  fx: Fx,
+  entry: { workspace: string; tab: string; pane: string; run: string },
+): void {
+  const dir = join(fx.state, "runtabs");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${createHash("sha256").update(entry.run).digest("hex")}.json`),
+    `${JSON.stringify(entry)}\n`,
+  );
+}
+
+export function readPlacement(fx: Fx, pane: string): Record<string, unknown> {
   return JSON.parse(
     readFileSync(
-      join(fx.state, "placements", `${createHash("sha256").update(tab).digest("hex")}.json`),
+      join(fx.state, "placements", `${createHash("sha256").update(pane).digest("hex")}.json`),
       "utf8",
     ),
   ) as Record<string, unknown>;
@@ -392,8 +414,9 @@ export function tmuxSessionFor(repo: string): string {
   return `postmaster-${basename(repo).replace(/[.:]/gu, "_")}`;
 }
 
-// A run on an ordinary project: synthesis worktree, workhorse, reviewer
-// scratch, and the project's own watcher tab beside them.
+// A run on an ordinary project: one run tab in the project's space, with a
+// pane per launch beside the state pane, and the project's own watcher tab
+// beside them.
 export interface NormalRun {
   fx: Fx;
   repo: string;
@@ -401,8 +424,9 @@ export interface NormalRun {
   synth: string;
   horse: string;
   scratch: string;
-  runSpace: string;
-  runTabs: string[];
+  runTab: string;
+  runPanes: string[];
+  statePane: string;
   projSpace: string;
   watcherTab: string;
   watcherPane: string;
@@ -428,27 +452,24 @@ export function setupNormal(tag: string): NormalRun {
   st.panes[proj.pane]!.tokens = {};
   const watcher = hTab(st, proj.ws, repo, "watch · repo");
   st.panes[watcher.pane]!.tokens = { postmaster: "launch" };
-  const run = hSpace(st, "#373, probe", synth);
-  // The run space's root tab is gone: the first launch closed it.
-  delete st.tabs[run.tab];
-  delete st.panes[run.pane];
-  st.spaces[run.ws]!.tabs = [];
-  st.spaces[run.ws]!.panes = [];
-  st.spaces[run.ws]!.tokens = { postmaster: "opened" };
-  const runTabs: string[] = [];
+  const run = hTab(st, proj.ws, synth, "#373, probe");
+  st.panes[run.pane]!.tokens = { postmaster: "launch", role: "runstate" };
+  const runPanes: string[] = [];
   for (const [cwd, label] of [
     [synth, "coachman · leg 1"],
     [horse, "luna · workhorse · m"],
     [scratch, "solo · style review · m · r1"],
   ] as Array<[string, string]>) {
-    const placed = hTab(st, run.ws, cwd, label);
-    st.panes[placed.pane]!.tokens = { postmaster: "launch" };
-    runTabs.push(placed.tab);
-    place(fx, { workspace: run.ws, tab: placed.tab, pane: placed.pane, cwd, run: dispatch });
+    const pane = hSplit(st, proj.ws, run.tab, cwd);
+    st.panes[pane]!.tokens = { postmaster: "launch" };
+    st.panes[pane]!.label = label;
+    st.panes[pane]!.title = label;
+    runPanes.push(pane);
+    place(fx, { workspace: proj.ws, tab: run.tab, pane, cwd, run: dispatch });
   }
   place(fx, { workspace: proj.ws, tab: watcher.tab, pane: watcher.pane, cwd: repo, run: "" });
+  placeRunTab(fx, { workspace: proj.ws, tab: run.tab, pane: run.pane, run: dispatch });
   st.open[repo] = proj.ws;
-  st.open[synth] = run.ws;
   saveHerdr(fx, st);
 
   const tm = freshTmux();
@@ -487,8 +508,9 @@ export function setupNormal(tag: string): NormalRun {
     synth,
     horse,
     scratch,
-    runSpace: run.ws,
-    runTabs,
+    runTab: run.tab,
+    runPanes,
+    statePane: run.pane,
     projSpace: proj.ws,
     watcherTab: watcher.tab,
     watcherPane: watcher.pane,
@@ -500,14 +522,16 @@ export function setupNormal(tag: string): NormalRun {
   };
 }
 
-// A run on a fixture copy: the copy's own space with its postmaster's tab and
-// its watcher's tab, beside an outer project's watcher that is not this run's.
+// A run on a fixture copy: the run's tab with its launches' panes in the
+// copy's own space, beside the copy's postmaster and watcher tabs, and an
+// outer project's watcher that is not this run's.
 export interface FixtureRun {
   fx: Fx;
   fix: string;
   dispatch: string;
-  runSpace: string;
-  runTabs: string[];
+  runTab: string;
+  runPanes: string[];
+  statePane: string;
   fixSpace: string;
   pmTab: string;
   pmPane: string;
@@ -543,25 +567,8 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
   mkdirSync(outer, { recursive: true });
 
   const st = freshHerdr();
-  const run = hSpace(st, "#1, probe", synth);
-  delete st.tabs[run.tab];
-  delete st.panes[run.pane];
-  st.spaces[run.ws]!.tabs = [];
-  st.spaces[run.ws]!.panes = [];
-  st.spaces[run.ws]!.tokens = { postmaster: "opened" };
-  const runTabs: string[] = [];
-  for (const [cwd, label] of [
-    [synth, "coachman · leg 1"],
-    [horse, "luna · workhorse · m"],
-    [scratch, "solo · style review · m · r1"],
-  ] as Array<[string, string]>) {
-    const placed = hTab(st, run.ws, cwd, label);
-    st.panes[placed.pane]!.tokens = { postmaster: "launch" };
-    runTabs.push(placed.tab);
-    place(fx, { workspace: run.ws, tab: placed.tab, pane: placed.pane, cwd, run: dispatch });
-  }
   // The copy's own space: the flow opened it for this one run, so it carries
-  // the ownership token, with no spare shell beside the two tabs.
+  // the ownership token, with no spare shell beside the tabs.
   const copy = hSpace(st, basename(fix), fix);
   delete st.tabs[copy.tab];
   delete st.panes[copy.pane];
@@ -574,6 +581,22 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
   st.panes[watch.pane]!.tokens = { postmaster: "launch" };
   place(fx, { workspace: copy.ws, tab: pm.tab, pane: pm.pane, cwd: fix, run: "" });
   place(fx, { workspace: copy.ws, tab: watch.tab, pane: watch.pane, cwd: fix, run: "" });
+  const run = hTab(st, copy.ws, synth, "#373, probe");
+  st.panes[run.pane]!.tokens = { postmaster: "launch", role: "runstate" };
+  const runPanes: string[] = [];
+  for (const [cwd, label] of [
+    [synth, "coachman · leg 1"],
+    [horse, "luna · workhorse · m"],
+    [scratch, "solo · style review · m · r1"],
+  ] as Array<[string, string]>) {
+    const pane = hSplit(st, copy.ws, run.tab, cwd);
+    st.panes[pane]!.tokens = { postmaster: "launch" };
+    st.panes[pane]!.label = label;
+    st.panes[pane]!.title = label;
+    runPanes.push(pane);
+    place(fx, { workspace: copy.ws, tab: run.tab, pane, cwd, run: dispatch });
+  }
+  placeRunTab(fx, { workspace: copy.ws, tab: run.tab, pane: run.pane, run: dispatch });
   if (userTabInCopy) {
     const user = hTab(st, copy.ws, fix, "user tab");
     st.panes[user.pane]!.tokens = {};
@@ -589,7 +612,6 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
     run: "",
   });
   st.open[fix] = copy.ws;
-  st.open[synth] = run.ws;
   saveHerdr(fx, st);
 
   const tm = freshTmux();
@@ -622,8 +644,9 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
     fx,
     fix,
     dispatch,
-    runSpace: run.ws,
-    runTabs,
+    runTab: run.tab,
+    runPanes,
+    statePane: run.pane,
     fixSpace: copy.ws,
     pmTab: pm.tab,
     pmPane: pm.pane,

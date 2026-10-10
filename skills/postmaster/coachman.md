@@ -38,7 +38,7 @@ half, how a run is prepared and what the waybill carries, is `SKILL.md`. You do 
 | `<dispatch>/handoff-<n>.md` | leg `n`'s hand-off, the whole of what the next leg knows |
 | `<dispatch>/.leg-<n>-done`, `.leg-<n>-exited` | leg `n` finished its hand-off; leg `n`'s process exited |
 | `<repo>/.worktrees/<TICKET>` | synthesis worktree, branch `<TICKET>` |
-| `<repo>/.worktrees/<TICKET>-<lane>` | workhorse worktree, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
+| `<repo>/.worktrees/<TICKET>-<lane>` | workhorse copy, branch `wb/<TICKET>-<lane>` (`wb` for workhorse branch) |
 | `<dispatch>/checkpoint-<n>.md` | checkpoint cards: `1` and `review` |
 | `<repo>/.worktrees/<TICKET>-rev-<lens>-<lane>` | reviewer scratch, one per lens per lane, detached at the synthesis HEAD, fresh every round: a clone of the repository under every lens |
 | `<repo>/.worktrees/<TICKET>-oracle-<lane>` | blind-test scratch, one per lane, cut at harvest with the oracle commit cherry-picked onto it, removed with the run |
@@ -222,18 +222,18 @@ leg continues.
 
 ## Lane capability: workhorses and reviewers
 
-**A workhorse may run anything it needs in its own worktree, including the project's gate,
+**A workhorse may run anything it needs in its own copy, including the project's gate,
 lint, build, tests and browser suite. A reviewer may run a targeted probe to check a finding,
 but does not run the project's gate, lint, build or tests; the coachman runs the recorded checks
 once per review round on that round's snapshot.** Browser work uses the project's own browser
-library, driven from a shell command inside the lane's worktree. Never route a lane's browser
+library, driven from a shell command inside the lane's folder. Never route a lane's browser
 work through a browser server shared with other sessions: a call into one can be acknowledged
 and never return, with no timeout. If the browser is genuinely unavailable, record QA as
 DEGRADED on the card, name what was not walked, and finish the run. A run that has passed every
 gate is never blocked by a browser.
 
 For every acceptance criterion that touches a user surface, the workhorse checks it in a real
-browser through the project's own library, from a shell command in its worktree, whether or not
+browser through the project's own library, from a shell command in its copy, whether or not
 the ticket has a `User journey`, and takes a screenshot per step. When the ticket has no
 journey, the ticket's steps are the journey. A workhorse whose harness has no browser backend
 marks the browser evidence `not shown` with that reason in its summary; the coachman's render
@@ -246,8 +246,8 @@ output and its exit.
 **No lane runs restricted.** Each harness's permission-bypass form is in `harnesses.md`; it goes
 on every launch and every resume.
 
-**The containment is the WORKTREE, not a permission flag.** No harness has verified mechanical
-write enforcement, so a workhorse is confined by having its own worktree and a reviewer by having its
+**The containment is the folder, not a permission flag.** No harness has verified mechanical
+write enforcement, so a workhorse is confined by having its own copy and a reviewer by having its
 own disposable scratch. **The one prohibition for a reviewer is modifying the code under
 review.** When `confine = "on"`, lanes also run in a process space of their own and cannot
 signal processes they did not start (`harnesses.md`, Confinement).
@@ -304,7 +304,7 @@ criterion's verdict as not met. Running every check with `<tool>/scripts/run ver
 before writing the summary stays the last step.
 
 A workhorse commits incrementally as it goes, never pushes, never reads other branches or
-`.worktrees/`, and never edits files outside its worktree.
+`.worktrees/`, and never edits files outside its copy.
 
 ## The run's mode: synthesis or single-thread
 
@@ -315,7 +315,7 @@ and the setting's value at dispatch). Read it before Stage 0 and act on it here:
 - **`synthesis`** — a waybill with no `mode:` line is a run dispatched before this change and
   reads as synthesis. The steps below harness the workhorse lanes exactly as written.
 - **`single-thread`** — no workhorse lane starts, and you write the change yourself, in the
-  synthesis worktree, in this leg's synthesis stage (D1, D5). Cut no workhorse worktree, add
+  synthesis worktree, in this leg's synthesis stage (D1, D5). Cut no workhorse copy, add
   no `lanes` entry to the manifest, write no `<lane>-prompt.txt`, launch, harvest or audit
   nothing, and run no `synthesis-shares`, `verify summary` or `summary-evidence` measurement:
   there is no lane to measure. The run's stages are `bootstrapped`, `synthesis`,
@@ -338,8 +338,8 @@ implementation divergences with no such explanation.
 
 1. Stage 0 steps 1–4 as written: read the waybill, base pre-flight, check the ticket's
    premises and record the `premises` action, exclude `.worktrees/`. A premise that does not
-   hold escalates exactly as Step 3 says, before any branch or worktree exists.
-2. Stage 0 step 5 without the workhorse worktrees: make the run's directories and confirm the
+   hold escalates exactly as Step 3 says, before any branch or copy exists.
+2. Stage 0 step 5 without the workhorse copies: make the run's directories and confirm the
    synthesis worktree the postmaster cut is at BASE and is your cwd. Stage 0 step 6 sets
    `bootstrapped` and adds no `lanes` entry. Stage 0 step 7 writes no workhorse brief.
 3. Set the stage `synthesis` as you start the acceptance tests, and write them under the rules
@@ -440,23 +440,23 @@ second implementer wrote (single-thread).
    still there, `moved` means the text still exists elsewhere, `changed` means it no longer says
    the same thing, `missing` means its file is gone, and `unknown` means the verified commit is
    unavailable. Judge whether each premise still holds. If one does not, stop before making a
-   workhorse branch or worktree, write `ESCALATION.md` with the premise, what BASE shows and the
+   workhorse branch or copy, write `ESCALATION.md` with the premise, what BASE shows and the
    choices to go on or send the ticket back, touch `.escalation-ready`, and exit. The postmaster
    carries the user's ruling back. Do not repair or reinterpret the signed-off ticket yourself.
 4. **Exclude worktrees without a commit** with `<tool>/scripts/run project-settings
    exclude-worktrees <repo>`, so the next pre-flight never reads them as dirt.
 5. **Check the run's directories exist** (`mkdir -p <dispatch>/logs <dispatch>/audit
    <dispatch>/render` is idempotent) and that the synthesis worktree the postmaster cut is at
-   BASE and is your cwd; then, in synthesis mode, cut one workhorse worktree per workhorse
-   from BASE **on that lane's own `wb/` branch**, the archive branch the Where-things-live
-   table names and the harvest keeps, with
-   `git -C <repo> worktree add .worktrees/<TICKET>-<lane> -b wb/<TICKET>-<lane> <BASE>`.
+   BASE and is your cwd; then, in synthesis mode, cut one workhorse copy per workhorse
+   from BASE **on that lane's own `wb/` branch**, a shared clone the take-in brings in and
+   the harvest keeps, with
+   `<tool>/scripts/run cut-scratch --cut-workhorse <repo> <repo>/.worktrees/<TICKET>-<lane> <BASE> wb/<TICKET>-<lane>`.
 
-   A worktree cut without `-b` leaves the lane on a detached head and the run with no
-   `wb/` branch to keep. Arm each
-   worktree with the run's checks: `<tool>/scripts/run verify arm <workhorse-wt> <dispatch>`.
+   A copy cut without its branch leaves the lane on a detached head and the run with no
+   `wb/` branch to bring in. Arm each
+   copy with the run's checks: `<tool>/scripts/run verify arm <workhorse-wt> <dispatch>`.
    In
-   single-thread mode cut no workhorse worktree (The run's mode, above).
+   single-thread mode cut no workhorse copy (The run's mode, above).
 6. **Update the manifest** the postmaster created: set the stage with `<tool>/scripts/run stage
    <dispatch> bootstrapped`. In synthesis mode, add one `lanes` entry per workhorse, in place;
    in single-thread mode leave `lanes` empty. Never rewrite the file (the postmaster owns `leg`,
@@ -485,7 +485,7 @@ second implementer wrote (single-thread).
    with `<tool>/scripts/run verify run .` just before writing the summary, in the background with a
    wait where the checks together can outlast the longest command its harness allows. Where the
    project has a user surface it says that every criterion touching it is checked in a real
-   browser through the project's own library from a shell command in the worktree, screenshot
+   browser through the project's own library from a shell command in its copy, screenshot
    per step, whether or not the ticket has a `User journey`, and that where the ticket has none
    the ticket's steps are the journey. Where the work is a command-line tool or scripts it says
    each new or changed command is run the way it will be run, on realistic input, and the
@@ -502,11 +502,18 @@ second implementer wrote (single-thread).
 **In single-thread mode none of this stage's workhorse work runs:** you launched nothing, and
 your leg 1 follows The run's mode, above, from its step 3. What follows is synthesis mode.
 
-**Every workhorse starts only after the ticket's premises are checked.** Launch each workhorse
-to implement the ready ticket, in blinkers, through the host script and the launch script so no
-form is ever copied by hand. The launch carries the ticket in its brief and the instruction to
-finish with `WORKHORSE-SUMMARY.md`. The form is
-the same as it always was:
+**Every workhorse starts only after the ticket's premises are checked and its copy is
+checked.** Before launching any workhorse, check each copy is of the repository, at BASE, on
+its workhorse's branch. If one fails, none starts.
+
+```sh
+<tool>/scripts/run cut-scratch --check-workhorse <repo> <repo>/.worktrees/<TICKET>-<lane> <BASE> wb/<TICKET>-<lane>
+```
+
+Launch each workhorse to implement the ready ticket, in blinkers, through the host script and
+the launch script so no form is ever copied by hand. The launch carries the ticket in its
+brief and the instruction to finish with `WORKHORSE-SUMMARY.md`. The form is the same as it
+always was:
 
 ```sh
 <tool>/scripts/run host workhorse <dispatch> <lane> <workhorse-wt>
@@ -515,7 +522,7 @@ the same as it always was:
 `run host` takes the name from `host name`, so neither name is typed into a shell, gives the
 lane its events, error and marker paths under `<dispatch>/logs/`, and runs the launch with the
 prompt at `<dispatch>/<lane>-prompt.txt`, its `--last` file and `--run <dispatch>`; the
-dispatch makes its synthesis worktree space carry the ticket name.
+dispatch makes the run tab in the repository's space carry the ticket name.
 A resume is the launch's `host run` composition with `--append` and the resume child:
 `<tool>/scripts/run host run <name> <workhorse-wt> --under <dispatch> --role lane --run <dispatch> --out <dispatch>/logs/<lane>-events.jsonl --err <dispatch>/logs/<lane>.err --append --marker <dispatch>/logs/<lane>.done -- <tool>/scripts/run launch resume <lane> <workhorse-wt> <thread-id> <prompt-file> --last <dispatch>/logs/<lane>-last.md --run <dispatch>`,
 with `<name>` as `host name <dispatch> workhorse <lane>` prints it;
@@ -541,8 +548,9 @@ from it.
   commit them on the ticket branch before any synthesis code. They are the run's only oracle no lane
   wrote, and they stay that only if they are finished before you open a diff. At harvest,
   cut a scratch of each lane at `<repo>/.worktrees/<TICKET>-oracle-<lane>` with `<tool>/scripts/run
-  cut-scratch`, cherry-pick that commit onto it and run it: the result ranks
-  the lanes on the ticket's criteria before you have read a line of either. aftercare removes
+  cut-scratch` at BASE, fetch that lane's HEAD from its workhorse copy into the scratch and check
+  it out, cherry-pick that commit onto it and run it: the result ranks the lanes on the ticket's
+  criteria before you have read a line of either. aftercare removes
   those scratches with the run's other folders, which is why they are named for the ticket. Where the ticket's
   design question IS the interface, do not write them, say so on the checkpoint 1 card, and
   compose on reading alone. Your reading of the ticket is a single reading: in a run with a
@@ -551,9 +559,9 @@ from it.
 - **Harvest.** Each lane's final message is the last result line of its events stream
   (`harnesses.md` gives the per-harness location). `run launch` exports each completed thread into
   `<dispatch>/sessions/` beside its event stream. For every workhorse, `WORKHORSE-SUMMARY.md` at
-  the worktree root is the authoritative final act.
+  the copy root is the authoritative final act.
 - **Monitor: three exit shapes.** Each workhorse's final act is writing `WORKHORSE-SUMMARY.md` at its
-  worktree root. On exit, read the lane's harvest plus its worktree root:
+  copy root. On exit, read the lane's harvest plus its copy root:
   (a) **Summary present.** Mark the workhorse harvested; manifest `outcome: harvested`.
   (b) **Blocked.** `WORKHORSE-BLOCKED.md` present, or the last message ends in a question. Bypass
   flags do not stop a model pausing to ask mid-run; headless, the run EXITS there with the
@@ -579,11 +587,12 @@ from it.
   the workhorse's actual diff and the repo code. A criterion claimed as shown without evidence
   counts against that lane. Workhorses ship false absolutes in docs and commit
   messages.
-- **Run the checks on each workhorse's branch** once its thread has exited, in its worktree:
+- **Run the checks on each workhorse's branch** once its thread has exited, in its copy:
   `<tool>/scripts/run verify run <workhorse-wt> <dispatch>`, which runs the run's checks whatever the
-  worktree's copy says, and logs each result. It refuses a worktree with uncommitted changes: run
-  it on a scratch cut at the branch's HEAD with `<tool>/scripts/run cut-scratch` instead, and put
-  what the workhorse left uncommitted on the card. Where a check's source names `web-journey`,
+  copy's armed checks say, and logs each result. It refuses a copy with uncommitted changes: run it on
+  a scratch cut at BASE with `<tool>/scripts/run cut-scratch`, fetch the branch's HEAD from the
+  copy into the scratch and check it out, instead, and put what the workhorse left uncommitted on
+  the card. Where a check's source names `web-journey`,
   first walk the ticket's User journey on that branch, in the format
   `<tool>/scripts/run verify-journey --format` gives, to the path `<tool>/scripts/run verify
   journey-path <workhorse-wt> <dispatch>` prints. A `run verify run` that can outlast your harness's
@@ -654,8 +663,9 @@ from it.
   no workhorse, so this step never runs there. After the walls pause above, before
   `<tool>/scripts/run stage <dispatch> synthesis`, run the take-in step. It admits each
   workhorse's branch only once no workhorse is running or waiting, and only at the commit its
-  checks recorded, logging one `take-in` line per lane and printing one `<lane>=<commit>`
-  per lane:
+  checks recorded, first fetching that commit from the workhorse's copy into the repository
+  under `wb/<TICKET>-<lane>`, logging one `take-in` line per lane and printing one
+  `<lane>=<commit>` per lane:
 
   ```sh
   <tool>/scripts/run take-in <dispatch>
@@ -771,7 +781,7 @@ from it.
   was taken from each lane, what was rejected and why**; the code-verified evidence behind each
   choice; the convention gaps found; what was dropped; gate status; the checks, as
   `<tool>/scripts/run landing results <dispatch> <wt>` prints them for each workhorse's branch
-  (`<wt>` the workhorse worktree) and then for the committed synthesis, the journey walked
+  (`<wt>` the workhorse copy) and then for the committed synthesis, the journey walked
   first where there is one, with each workhorse's `run verify summary` verdict and its `summary-evidence.ts`
   result. A card that presents a
   finished diff without saying which lane each part came from is the defaulting failure
@@ -1005,12 +1015,12 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    <tool>/scripts/run review-round teardown <dispatch> <round> <repo>
    ```
 
-   For each scratch it stops what still runs there (`run host stop`), closes its space
+   For each scratch it stops what still runs there (`run host stop`), closes its panes
    (`run host close`) and removes it (`run cut-scratch --remove`, which takes away a scratch of
    either kind and refuses anything else), each only once the one before has succeeded, and
    logs `teardown`. A reviewer it names as stopped before it had finished is DEGRADED for the
    round. A scratch it leaves in place is named with its reason, such as the user having its
-   space open, and reported; it is never removed by hand. A scratch never holds work, and its
+   tab open, and reported; it is never removed by hand. A scratch never holds work, and its
    contents were just checked.
    **Check reach and restore before any fix.** Once every reviewer has been harvested and each
    scratch's tracked diff has been checked, but before teardown or triage, run:
@@ -1358,12 +1368,12 @@ the run's stage timings to `run-log.md`. Never write timings by hand. A closing 
 on the ticket carries the run summary.
 Never delete the dispatch directory or the manifest, they are the run's history. Archive
 finished threads where the harness has an archive form (`harnesses.md`). After the merge, tear
-down the workhorse worktrees, preserving any stray file first (a workhorse killed mid-run leaves
-real artifacts) and closing each one's space before it is removed (`<tool>/scripts/run host close <wt>`),
+down the workhorse copies, preserving any stray file first (a workhorse killed mid-run leaves
+real artifacts) and closing each one's panes before it is removed (`<tool>/scripts/run host close <wt>`),
 and hand the synthesis worktree to the postmaster for removal from outside it.
 Keep the `wb/<TICKET>-<lane>` branches as a local archive. Durable process learnings go to the
 project's own docs, not this runbook. Residue contract: a clean run leaves only torn-down-able
-worktrees. Then finish `handoff-3.md` (the closing state of every branch and the ticket), close
+folders. Then finish `handoff-3.md` (the closing state of every branch and the ticket), close
 the open section with `<tool>/scripts/run run-log <dispatch> --close`, log `handoff`, touch
 `.leg-3-done`, and exit.
 
@@ -1427,7 +1437,9 @@ ticket that needs another's change waits for it to land.
   including abandoned and rejected approaches. Put the line in every workhorse brief; it costs
   nothing and closes all three paths (`git branch`, a plain recursive grep, and listing the
   directory). Re-runs of a ticket whose `wb/<TICKET>-*` branches still exist are the loud case;
-  concurrent lanes in a normal run are safe, since no lane has commits until it finishes.
+  concurrent lanes in a normal run cannot reach each other's commits through git, since each
+  works in its own copy that cannot reach another copy's commits until the take-in brings them
+  into the repository.
 - Review is a goal-loop, not a single shot: a loop whose fixes were never re-reviewed is
   not done, save a fix the user orders in a loop with no gating lens (Stage 2, step 5), which
   the checkpoint marks `applied on user word, not re-reviewed` and the card lists under
@@ -1501,6 +1513,6 @@ ticket that needs another's change waits for it to land.
   fails for them while the project's own code is clean. Establish which gate is red and whose
   file it is before touching shared config, and file the hygiene fix as its own ticket
   rather than editing lint config on the default branch mid-flight for another live run.
-- **A coachman cannot remove its own worktree.** Tear down the workhorse worktrees at stage 4,
+- **A coachman cannot remove its own worktree.** Tear down the workhorse copies at stage 4,
   preserving any stray file first, and hand the synthesis worktree to the postmaster for
   removal from an outside process.
