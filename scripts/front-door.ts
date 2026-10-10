@@ -21,6 +21,7 @@
 //   exit 2  usage
 import { existsSync, statSync } from "node:fs";
 import { postmasterProblems } from "./lib/config-check.ts";
+import { isFixtureCopy } from "./lib/fixture-mark.ts";
 import {
   effectiveConfigForProject,
   globalConfigPath,
@@ -65,13 +66,6 @@ function repoOf(path: string): string {
   if (!path) return "";
   const r = run("git", ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
   return r.code === 0 ? r.out.trim() : "";
-}
-
-/** Whether run fixture marked the target repository in its own git config. */
-function isFixtureCopy(path: string): boolean {
-  if (!path) return false;
-  const r = run("git", ["-C", path, "config", "--local", "--get", "postmaster.fixture"]);
-  return r.code === 0 && r.out.trim().length > 0;
 }
 
 interface DecideResult {
