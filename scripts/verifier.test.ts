@@ -267,6 +267,19 @@ describe("parseFilesList", () => {
     ]);
   });
 
+  test("the sentence dot and backticks strip in either nesting order", () => {
+    expect(parseFilesList("Files: `src/cli.ts`, `src/store.ts`")).toEqual([
+      "src/cli.ts",
+      "src/store.ts",
+    ]);
+    expect(parseFilesList("Files: `src/cli.ts`, `src/store.ts`.")).toEqual([
+      "src/cli.ts",
+      "src/store.ts",
+    ]);
+    expect(parseFilesList("Files: `docs/.`")).toEqual(["docs"]);
+    expect(parseFilesList("Files: `docs/`.")).toEqual(["docs"]);
+  });
+
   test("empty entries are dropped", () => {
     expect(parseFilesList("Files: src/cli.ts,, ")).toEqual(["src/cli.ts"]);
   });

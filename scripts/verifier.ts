@@ -1850,10 +1850,11 @@ export function indexFileFor(vdir: string, shared: boolean): string {
  * comma-separated, each relative to the repo top, or null when the scope names
  * none. The scope is one features-index line or one shared-index bullet span.
  * The value ends at a `Confirmed:` label or the scope's end; each entry drops
- * wrapping backticks and a leading `./`, then one trailing full stop (the
- * sentence's, as the shared bullets read), then trailing slashes, so a folder
- * last in the list matches. The label is case-sensitive, as the instructions
- * write it. A bare `.` names no path and is dropped.
+ * markdown framing from the outside in — wrapping backticks and one trailing
+ * full stop (the sentence's, as the shared bullets read), nesting in either
+ * order — then a leading `./` and trailing slashes, so a folder last in the
+ * list matches. A bare `.` names no path and is dropped. The label is
+ * case-sensitive, as the instructions write it.
  */
 export function parseFilesList(scope: string): string[] | null {
   const at = scope.indexOf("Files:");
@@ -1864,12 +1865,15 @@ export function parseFilesList(scope: string): string[] | null {
   const entries: string[] = [];
   // ASCII: widening to Unicode whitespace only folds more runs, never splits an entry
   for (const raw of value.replace(/\s+/gu, " ").split(",")) {
-    // The sentence's full stop drops before trailing slashes, so a folder last
-    // in the list keeps no slash; wrapping backticks and a leading ./ are the
-    // markdown framing agents write, not the path.
-    let entry = raw.trim().replace(/^`+|`+$/gu, "");
+    // Framing the sentences and markdown add is not the path: wrapping
+    // backticks and one sentence dot, nesting in either order, so both strip
+    // twice from the outside, then a leading ./ and trailing slashes.
+    let entry = raw.trim();
+    for (let pass = 0; pass < 2; pass++) {
+      entry = entry.replace(/^`+|`+$/gu, "");
+      if (entry.endsWith(".") && entry.length > 1) entry = entry.slice(0, -1);
+    }
     if (entry.startsWith("./")) entry = entry.slice("./".length);
-    if (entry.endsWith(".") && entry.length > 1) entry = entry.slice(0, -1);
     entry = entry.replace(/\/+$/u, "");
     if (entry !== "" && entry !== ".") entries.push(entry);
   }
@@ -2285,13 +2289,11 @@ function staleDetail(repo: string, vdir: string, shared: boolean, at: string): s
   if (git(repo, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]).code !== 0)
     return `unconfirmed (unknown commit ${sha})`;
   // Rename detection would report only the destination, hiding the listed
-  // source path the verifier depends on.
-  const diff = git(repo, ["diff", "--name-only", "--no-renames", sha, at]);
+  // source path the verifier depends on; -z lists every name as written,
+  // NUL-separated and never quoted.
+  const diff = git(repo, ["diff", "--name-only", "--no-renames", "-z", sha, at]);
   if (diff.code !== 0) throw new RunError(`the commits ${sha} and ${at} could not be compared`);
-  const changed = diff.out
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l !== "");
+  const changed = diff.out.split("\0").filter((l) => l !== "");
   const matched = matchDependedFiles(changed, files);
   return matched.length === 0 ? null : matched.join(", ");
 }
