@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-05
+updated: 2026-10-10
 ---
 
 # postmaster wiki
@@ -73,6 +73,15 @@ How the flow is checked, and what each check can and cannot see.
 - [Fixture runs](concepts/fixture-runs.md): **claimed**. A run against a small app whose tickets
   have hidden tests, scored from the run's own records, catches a broken contract between roles
   and a run that ships the wrong thing, which the offline gate cannot.
+
+## Reading tickets and changes
+
+How the user reads what the flow puts in front of them, on a phone and an iPad.
+
+- [A ticket or a change reads better as a story that scrolls, drawn before it shows code](concepts/story-pages.md):
+  **claimed**. Three trial pages, two of one merged change and one of a ticket, judged by the user in turn: a
+  section for each criterion, drawings before code, a picture and a plain welcome to start, and the ticket's words
+  a step at a time. #352 builds it for tickets, and #434 has the booking clerk make one for every ticket.
 
 ## Checking code
 
