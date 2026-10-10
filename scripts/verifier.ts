@@ -5,17 +5,21 @@
 // and answers it, asking only what the project does not show and taking secrets by
 // file name (#344). Land what a session made only when the project's own checks pass
 // with it in place (#325). An upkeep pass drives a project's verifiers again and
-// reports each claim that no longer holds and each it could not check (#318).
+// reports each claim that no longer holds and each it could not check (#318);
+// in its correcting mode it corrects the stale claims inside the verifiers'
+// folders only, confirms every verifier at the commit it drove, and proposes the
+// branch for the same landing (#328).
 //
 //   run verifier prompt <repo> <surface>... [--headless]
 //   run verifier list <repo>
 //   run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
-//   run verifier check <repo> <branch> --run <dispatch> --handover <file>
+//   run verifier check <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
 //     [--folder <dir>] [--timeout <seconds>]
-//   run verifier land <repo> <branch> --run <dispatch> --handover <file>
+//   run verifier land <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
 //     [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>]
-//   run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>] [--folder <dir>]
-//   run verifier upkeep-prompt <repo> [--headless] [--folder <dir>]
+//   run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>]
+//     [--folder <dir>] [--correct]
+//   run verifier upkeep-prompt <repo> [--headless] [--folder <dir>] [--correct]
 //   run verifier upkeep-report <repo> --run <dispatch> --report <file> [--folder <dir>]
 //
 //   surface    one or more of cli, web, library, cli-examples, browser-suite,
@@ -38,10 +42,12 @@
 //              coachman_fallback on a provider wall read from the session stream,
 //              stop the session at the limit by the pid host recorded, and log one
 //              dispatch action per launch either way
-//   check      decide whether the branch lands: its proven verifiers pass the project's
-//              checks on a scratch, its diff touches only the verifiers' folder, and
-//              every failed verifier's folder is absent. Prints one accept: or refuse:
-//              line and logs the same line
+//   check      decide whether the branch lands: with a hand-over, its proven verifiers
+//              pass the project's checks on a scratch, its diff touches only the
+//              verifiers' folder, and every failed verifier's folder is absent; with
+//              a report, a correcting pass's branch lands on the folder rule and the
+//              project's checks alone. Prints one accept: or refuse: line and logs
+//              the same line
 //   land       check, then land an accepted branch once: local merges with git merge
 //              --no-ff under the merge authority from the run, pull-request pushes and
 //              opens one pull request, never merging. Prints the verdict plus one
@@ -52,19 +58,28 @@
 //              reporting only. Prints one stale: line per claim that no longer holds,
 //              with what the pass found instead, one unchecked: line per claim it
 //              could not check, and a summary; exits 1 when any claim is stale or
-//              unchecked
+//              unchecked. With --correct the pass also corrects: the session mends
+//              each stale claim inside the verifiers' folders only, proves each
+//              correction by driving its recipe again, confirms every verifier at
+//              the driven commit, and commits the branch, leaving UPKEEP.md
+//              uncommitted. Each corrected claim prints a corrected: line and the
+//              tally, and every claim holds prints when nothing is left stale or
+//              unchecked; exits 1 otherwise, or when the branch reaches past the
+//              folders or a verifier is left unconfirmed
 //   upkeep-prompt  print the pass's instructions, the interactive form, or with
 //              --headless the no-host form, which lists each question it could not
-//              ask in UPKEEP.md instead of asking
+//              ask in UPKEEP.md instead of asking; --correct prints the correcting
+//              instructions instead
 //   upkeep-report  read a finished UPKEEP.md, refuse it unless it drives every
 //              feature page, and print the same stale, unchecked and summary lines
-//              upkeep prints, logged as printed
+//              upkeep prints, logged as printed; a corrected claim counts as held
 //   --handover the session's HANDOVER.md, with one ## Verifier: section per verifier
 //              carrying a Folder: line and a Proof: line (the proof file's absolute
 //              path alone, or none with the reason). Proven means the file exists
 //   --report   the pass's UPKEEP.md, with one ## Feature: section per feature page
 //              carrying an Outcome: line, one ## Claim: section per stale or
-//              unchecked claim, and the unasked questions where the pass ran headless
+//              unchecked claim, a Corrected: line on each claim a correcting pass
+//              mended, and the unasked questions where the pass ran headless
 //   --folder   the verifiers' folder, relative to the repo top (default verify-<slug>;
 //              the pass takes every shape the repo holds: verify-<slug>/, verifier/, or both)
 //   --landing  local or pull-request (default pull-request with an origin remote)
@@ -76,15 +91,17 @@
 //   exit 0  prompt or list printed; make: HANDOVER.md validated, the interactive session
 //           left open in its tab, the headless one ended with no wall;
 //           check: the branch lands; land: merged, or the pull request waits for the word;
-//           upkeep, upkeep-report: every claim holds
+//           upkeep, upkeep-report: every claim holds or is corrected
 //   exit 1  make failed: the launch would not start, the session was still running at the
 //           limit, both roles walled, the handover, commit, verifier, upkeep line or
 //           index entry is missing, a verifier was made for an unlisted surface,
 //           verifier files landed outside the folder, or the action was not logged;
 //           check, land: the branch lands nothing, or the landing failed after it
 //           was accepted;
-//           upkeep, upkeep-report: a claim is stale or unchecked, the report is missing
-//           or malformed, or the pass failed as make fails
+//           upkeep, upkeep-report: a claim is left uncorrected or unchecked, the report
+//           is missing or malformed, or the pass failed as make fails;
+//           upkeep --correct: as above, or the branch reaches past the folders,
+//           or a verifier is left unconfirmed
 //   exit 2  usage: an unknown command or surface, a missing argument, a bad flag or
 //           timeout, a path that is not a git repository or not its top, a repo holding
 //           no commit or no verifiers, no run at the dispatch, or a branch that is not
@@ -112,12 +129,13 @@ import { RESULT_RE } from "./verify.ts";
 const USAGE = `usage: run verifier prompt <repo> <surface>... [--headless]
        run verifier list <repo>
        run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
-       run verifier check <repo> <branch> --run <dispatch> --handover <file>
+       run verifier check <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
          [--folder <dir>] [--timeout <seconds>]
-       run verifier land <repo> <branch> --run <dispatch> --handover <file>
+       run verifier land <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
          [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>]
-       run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>] [--folder <dir>]
-       run verifier upkeep-prompt <repo> [--headless] [--folder <dir>]
+       run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>]
+         [--folder <dir>] [--correct]
+       run verifier upkeep-prompt <repo> [--headless] [--folder <dir>] [--correct]
        run verifier upkeep-report <repo> --run <dispatch> --report <file> [--folder <dir>]
 
        each surface is cli, web, library, cli-examples, browser-suite, web-journey or library-tests;
@@ -196,7 +214,9 @@ export interface ParsedCheck {
   repo: string;
   branch: string;
   dispatch: string;
-  handover: string;
+  /** The deliverable: exactly one of the two is set. */
+  handover?: string;
+  report?: string;
   folder: string | null;
   timeout: number;
 }
@@ -206,7 +226,9 @@ export interface ParsedLand {
   repo: string;
   branch: string;
   dispatch: string;
-  handover: string;
+  /** The deliverable: exactly one of the two is set. */
+  handover?: string;
+  report?: string;
   folder: string | null;
   timeout: number;
   landing: string | null;
@@ -218,6 +240,8 @@ export interface ParsedUpkeep {
   dispatch: string;
   timeout: number;
   folder: string | null;
+  /** Set only with --correct: the pass corrects as well as reports. */
+  correct?: boolean;
 }
 
 export interface ParsedUpkeepPrompt {
@@ -225,6 +249,8 @@ export interface ParsedUpkeepPrompt {
   repo: string;
   headless: boolean;
   folder: string | null;
+  /** Set only with --correct: the correcting instructions. */
+  correct?: boolean;
 }
 
 export interface ParsedUpkeepReport {
@@ -259,7 +285,7 @@ function parseTimeoutText(
   return { ok: true, timeout: Number(value) };
 }
 
-/** The upkeep commands' flags: upkeep and upkeep-report take --run, prompt takes --headless. */
+/** The upkeep commands' flags: upkeep and upkeep-report take --run, prompt takes --headless, and upkeep and prompt take --correct. */
 function parseUpkeepArgs(
   cmd: "upkeep" | "upkeep-prompt" | "upkeep-report",
   repo: string | undefined,
@@ -270,6 +296,7 @@ function parseUpkeepArgs(
   let report: string | null = null;
   let folder: string | null = null;
   let headless = false;
+  let correct = false;
   let timeout = DEFAULT_TIMEOUT;
   for (let j = 0; j < rest.length; j++) {
     const flag = rest[j] as string;
@@ -301,13 +328,24 @@ function parseUpkeepArgs(
     } else if (flag === "--headless") {
       if (cmd !== "upkeep-prompt") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
       headless = true;
+    } else if (flag === "--correct") {
+      if (cmd === "upkeep-report") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
+      correct = true;
     } else {
       return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
     }
   }
-  if (cmd === "upkeep-prompt") return { ok: true, req: { cmd, repo, headless, folder } };
+  if (cmd === "upkeep-prompt") {
+    const req: ParsedUpkeepPrompt = { cmd, repo, headless, folder };
+    if (correct) req.correct = true;
+    return { ok: true, req };
+  }
   if (dispatch === null) return { ok: false, error: `${cmd} needs --run <dispatch>` };
-  if (cmd === "upkeep") return { ok: true, req: { cmd, repo, dispatch, timeout, folder } };
+  if (cmd === "upkeep") {
+    const req: ParsedUpkeep = { cmd, repo, dispatch, timeout, folder };
+    if (correct) req.correct = true;
+    return { ok: true, req };
+  }
   if (report === null) return { ok: false, error: `${cmd} needs --report <file>` };
   return { ok: true, req: { cmd, repo, dispatch, report, folder } };
 }
@@ -393,6 +431,7 @@ export function parseArgs(argv: string[]): Parsed {
   const branch = second as string;
   let dispatch: string | null = null;
   let handover: string | null = null;
+  let report: string | null = null;
   let folder: string | null = null;
   let landing: string | null = null;
   let timeout = DEFAULT_TIMEOUT;
@@ -408,6 +447,11 @@ export function parseArgs(argv: string[]): Parsed {
       const value = rest[j + 1];
       if (value === undefined) return { ok: false, error: `${cmd} needs --handover <file>` };
       handover = value;
+      j++;
+    } else if (flag === "--report") {
+      const value = rest[j + 1];
+      if (value === undefined) return { ok: false, error: `${cmd} needs --report <file>` };
+      report = value;
       j++;
     } else if (flag === "--folder") {
       const value = rest[j + 1];
@@ -434,11 +478,22 @@ export function parseArgs(argv: string[]): Parsed {
     }
   }
   if (dispatch === null) return { ok: false, error: `${cmd} needs --run <dispatch>` };
-  if (handover === null) return { ok: false, error: `${cmd} needs --handover <file>` };
-  if (cmd === "land") {
-    return { ok: true, req: { cmd, repo, branch, dispatch, handover, folder, timeout, landing } };
+  if (handover !== null && report !== null) {
+    return { ok: false, error: `${cmd} takes --handover or --report, not both` };
   }
-  return { ok: true, req: { cmd, repo, branch, dispatch, handover, folder, timeout } };
+  if (handover === null && report === null) {
+    return { ok: false, error: `${cmd} needs --handover <file>` };
+  }
+  if (cmd === "land") {
+    const req: ParsedLand = { cmd, repo, branch, dispatch, folder, timeout, landing };
+    if (handover !== null) req.handover = handover;
+    if (report !== null) req.report = report;
+    return { ok: true, req };
+  }
+  const req: ParsedCheck = { cmd, repo, branch, dispatch, folder, timeout };
+  if (handover !== null) req.handover = handover;
+  if (report !== null) req.report = report;
+  return { ok: true, req };
 }
 
 export interface PromptVars {
@@ -859,6 +914,18 @@ export function upkeepSendText(promptFile: string): string {
   );
 }
 
+/**
+ * The short first message the correcting tab gets, clerk-style: the full
+ * instructions live in the prompt file, and the session reads them there.
+ */
+export function upkeepCorrectSendText(promptFile: string): string {
+  return (
+    "You are running a correcting upkeep pass over this project's verifiers. " +
+    `Read your instructions at ${promptFile}, then follow them. ` +
+    "This directory is your working copy.\n"
+  );
+}
+
 /** The remote branch origin/HEAD names, or null when it names none. */
 export function remoteFromSymbolicRef(out: string): string | null {
   const ref = out.trim();
@@ -946,28 +1013,21 @@ export function isFeaturePage(vdir: string, path: string): boolean {
 }
 
 /**
- * The folder's verifier dirs at the current commit: itself when it carries a
- * front page and a features/ folder, and each subdir that does. A features/
- * folder without a front page beside it is no verifier's, so the pass counts
- * exactly what make counts. Null when unreadable.
+ * The folder's verifier dirs at a revision: itself when it carries a front
+ * page and a features/ folder, and each subdir that does. A features/ folder
+ * without a front page beside it is no verifier's, so the pass counts exactly
+ * what make counts. Null when unreadable. The pass reads the current commit;
+ * the correcting validation reads the driven one, which no later merge moves.
  */
-export function scopeVdirs(repo: string, folder: string): string[] | null {
+export function scopeVdirs(repo: string, folder: string, at = "HEAD"): string[] | null {
   // -z: NUL-separated and never quoted, so non-ASCII names list as written;
   // -d lists the immediate subdirs, and a missing folder lists nothing.
-  const subs = git(repo, ["ls-tree", "-z", "-d", "--name-only", "HEAD", "--", `${folder}/`]);
+  const subs = git(repo, ["ls-tree", "-z", "-d", "--name-only", at, "--", `${folder}/`]);
   if (subs.code !== 0) return null;
   const vdirs: string[] = [];
   for (const cand of [folder, ...subs.out.split("\0").filter((l) => l !== "")]) {
-    if (!branchHasPath(repo, "HEAD", `${cand}/README.md`)) continue;
-    const has = git(repo, [
-      "ls-tree",
-      "-z",
-      "-r",
-      "--name-only",
-      "HEAD",
-      "--",
-      `${cand}/features/`,
-    ]);
+    if (!branchHasPath(repo, at, `${cand}/README.md`)) continue;
+    const has = git(repo, ["ls-tree", "-z", "-r", "--name-only", at, "--", `${cand}/features/`]);
     if (has.code !== 0) return null;
     if (has.out.split("\0").some((l) => l !== "")) vdirs.push(cand);
   }
@@ -1281,6 +1341,8 @@ export interface UpkeepClaim {
   found: string | null;
   /** Why the claim could not be checked; unchecked claims only. */
   because: string | null;
+  /** What the correcting pass changed; set only with a Corrected: line. */
+  corrected?: string;
 }
 
 export interface UpkeepUnasked {
@@ -1310,6 +1372,7 @@ type UpkeepSection =
       stated: string | null;
       found: string | null;
       because: string | null;
+      corrected: string | null;
     }
   | { kind: "unasked"; question: string; needed: string | null };
 
@@ -1381,14 +1444,16 @@ export function parseUpkeepReport(
       if (current.verdict === "unchecked" && (current.because === null || current.because === "")) {
         return { ok: false, error: `the report names no reason for ${current.name}` };
       }
-      report.claims.push({
+      const claim: UpkeepClaim = {
         name: current.name,
         page: current.page,
         verdict: current.verdict,
         stated: current.stated,
         found: current.found,
         because: current.because,
-      });
+      };
+      if (current.corrected !== null) claim.corrected = current.corrected;
+      report.claims.push(claim);
     } else {
       if (current.needed === null || current.needed === "") {
         return {
@@ -1444,6 +1509,7 @@ export function parseUpkeepReport(
           stated: null,
           found: null,
           because: null,
+          corrected: null,
         };
       } else {
         const question = header.slice("## Unasked:".length).trim();
@@ -1484,6 +1550,12 @@ export function parseUpkeepReport(
       ) {
         current.because = line.slice("Because:".length).trim();
       } else if (
+        current.kind === "claim" &&
+        line.startsWith("Corrected:") &&
+        current.corrected === null
+      ) {
+        current.corrected = line.slice("Corrected:".length).trim();
+      } else if (
         current.kind === "unasked" &&
         line.startsWith("Needed:") &&
         current.needed === null
@@ -1506,9 +1578,10 @@ export interface UpkeepVerdict {
 /**
  * The verdict over a parsed report: every committed feature page driven exactly
  * once, every changed or blocked page carrying its claims, a page with both a
- * stale and an unchecked claim reading blocked. The lines list each stale claim
- * with what the pass found instead, each unchecked claim with why, the unasked
- * questions, and the summary.
+ * stale and an unchecked claim reading blocked, and no correction on a claim
+ * the pass never checked. The lines list each stale claim with what the pass
+ * found instead and what a correcting pass changed, each unchecked claim with
+ * why, the unasked questions, and the summary.
  */
 export function verdictUpkeep(
   pages: string[],
@@ -1586,6 +1659,12 @@ export function verdictUpkeep(
         error: `the report's stale claim ${claim.name} sits on a ${outcome} page`,
       };
     }
+    if (claim.verdict === "unchecked" && claim.corrected !== undefined) {
+      return {
+        ok: false,
+        error: `the report's unchecked claim ${claim.name} carries a correction`,
+      };
+    }
   }
   const lines: string[] = [];
   for (const claim of report.claims) {
@@ -1593,6 +1672,10 @@ export function verdictUpkeep(
       lines.push(`stale: ${claim.name} (${claim.page})`);
       lines.push(`  stated: ${claim.stated}`);
       lines.push(`  found: ${claim.found as string}`);
+      if (claim.corrected !== undefined) {
+        lines.push(`corrected: ${claim.name} (${claim.page})`);
+        lines.push(`  change: ${claim.corrected}`);
+      }
     } else {
       lines.push(`unchecked: ${claim.name} (${claim.page})`);
       lines.push(`  because: ${claim.because as string}`);
@@ -1612,6 +1695,86 @@ export function verdictUpkeep(
 export function outsidePaths(paths: string[], folder: string): string[] {
   const prefix = `${folder}/`;
   return paths.filter((p) => !p.startsWith(prefix));
+}
+
+/** The folder-rule refusal for paths outside the verifiers' folder, or null. */
+export function outsideReason(outside: string[]): string | null {
+  if (outside.length === 0) return null;
+  const shown = outside.slice(0, 10).join(", ");
+  const more = outside.length > 10 ? ` and ${outside.length - 10} more` : "";
+  return `outside the verifiers' folder: ${shown}${more}`;
+}
+
+/** The confirmation a pass writes: the driven commit as a full sha. */
+const CONFIRMED_RE = /Confirmed:\s*([0-9a-fA-F]{40})\b/u;
+
+/**
+ * The sha an index span confirms, lowered, or null when it names none. The
+ * label is case-sensitive, as the instructions write it; the sha may use
+ * either case.
+ */
+export function confirmedSha(span: string): string | null {
+  const m = CONFIRMED_RE.exec(span);
+  return m === null ? null : (m[1] as string).toLowerCase();
+}
+
+/** A bullet starts a span; a heading ends whatever bullet is open. */
+const BULLET_START_RE = /^\s*[-*+]\s/u;
+const HEADING_RE = /^\s*#{1,6}\s/u;
+
+/**
+ * The shared index's bullets, each with the lines it spans. A confirmation on
+ * a continuation line counts, so a wrapped bullet confirms like a
+ * single-line one.
+ */
+export function indexBullets(text: string): string[][] {
+  const bullets: string[][] = [];
+  let current: string[] | null = null;
+  for (const line of text.split("\n")) {
+    if (BULLET_START_RE.test(line)) {
+      current = [line];
+      bullets.push(current);
+    } else if (HEADING_RE.test(line)) {
+      current = null;
+    } else if (current !== null) {
+      current.push(line);
+    }
+  }
+  return bullets;
+}
+
+/** A bullet span names a verifier dir when one of its lines names the dir's folder. */
+export function spanNamesDir(span: string[], vdir: string): boolean {
+  const seg = vdir.split("/").pop() ?? vdir;
+  const esc = seg.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  // The folder path bounded past the kind, as indexNames reads it, or a
+  // relative folder link [kind](kind/).
+  const re = new RegExp(`verifier/${esc}(?![A-Za-z0-9_-])|\\]\\( *${esc}/`, "iu");
+  return span.some((line) => re.test(line));
+}
+
+/** The sha a features index confirms for its one verifier, or null. */
+export function featuresConfirm(text: string): string | null {
+  return confirmedSha(text);
+}
+
+/** The sha the shared index's bullet for a verifier dir confirms, or null. */
+export function bulletConfirm(text: string, vdir: string): string | null {
+  for (const span of indexBullets(text)) {
+    if (spanNamesDir(span, vdir)) return confirmedSha(span.join("\n"));
+  }
+  return null;
+}
+
+/**
+ * A verifier dir's index file: the shared index where one covers it, else its
+ * own features index. The shared index covers verifier/<kind> dirs only; the
+ * folder itself keeps its features index like a single verifier.
+ */
+export function indexFileFor(vdir: string, shared: boolean): string {
+  const seg = vdir.split("/");
+  if (shared && seg.length === 2 && seg[0] === "verifier") return "verifier/README.md";
+  return `${vdir}/features/README.md`;
 }
 
 export interface VerifySummary {
@@ -1712,12 +1875,7 @@ export function decideCheap(facts: CheapFacts): string | null {
     const who = facts.provenEmpty.map((e) => `${e.name} (${e.folder})`).join(", ");
     return `proven verifier has no files on the branch: ${who}`;
   }
-  if (facts.outside.length > 0) {
-    const shown = facts.outside.slice(0, 10).join(", ");
-    const more = facts.outside.length > 10 ? ` and ${facts.outside.length - 10} more` : "";
-    return `outside the verifiers' folder: ${shown}${more}`;
-  }
-  return null;
+  return outsideReason(facts.outside);
 }
 
 /** What the project's checks reported: their summary, a timeout, or no result. */
@@ -1761,6 +1919,23 @@ export function acceptLine(branch: string, classified: ClassifiedEntry[]): strin
   const landed = classified.filter((e) => e.proven);
   const leftOut = classified.filter((e) => !e.proven);
   return `accept: ${branch} lands ${landedText(landed)}; left out: ${leftOutText(leftOut)}`;
+}
+
+/** One line saying a pass branch lands, with what its report corrected. */
+export function acceptLineReport(branch: string, report: UpkeepReport): string {
+  const who = report.verifiers.map((v) => `${v.name} (${v.folder})`).join(", ");
+  const stale = report.claims.filter((c) => c.verdict === "stale").length;
+  const corrected = correctedClaims(report.claims).length;
+  const unchecked = report.claims.filter((c) => c.verdict === "unchecked").length;
+  return (
+    `accept: ${branch} lands upkeep corrections for ${who}; ` +
+    `corrected: ${corrected} of ${stale} stale, unchecked: ${unchecked}`
+  );
+}
+
+/** The stale claims a correcting pass mended: verdict stale with a Corrected: line. */
+export function correctedClaims(claims: UpkeepClaim[]): UpkeepClaim[] {
+  return claims.filter((c) => c.verdict === "stale" && c.corrected !== undefined);
 }
 
 /** One line saying nothing lands, and why. */
@@ -1881,6 +2056,30 @@ function renderUpkeepPrompt(
   });
 }
 
+function readUpkeepCorrectTemplate(): string {
+  return readFileSync(join(scriptsDir(import.meta), "verifier-upkeep-correct-prompt.md"), "utf8");
+}
+
+/** The correcting instructions: correct, prove, confirm and commit. */
+function renderUpkeepCorrectPrompt(
+  repo: string,
+  folders: string[],
+  base: string,
+  pages: string[],
+  headless: boolean,
+): string {
+  const modes = modeBlocks(headless, "UPKEEP.md");
+  return renderTemplate(readUpkeepCorrectTemplate(), {
+    REPO: repo,
+    VERIFY_DIR: folders.map((f) => `${f}/`).join(" and "),
+    BASE: base,
+    FEATURE_LIST: pages.map((p) => `- ${p}`).join("\n"),
+    ASK_RULE: modes.askRule,
+    SECRETS_RULE: modes.secretsRule,
+    UNASKED_RULE: headless ? UPKEEP_HEADLESS_UNASKED : "",
+  });
+}
+
 /** The folders and pages the pass drives, or the usage error when there are none. */
 export function upkeepScope(
   repo: string,
@@ -1911,7 +2110,8 @@ function runUpkeepPrompt(req: ParsedUpkeepPrompt): number {
   if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
   const scope = upkeepScope(repo, req.folder);
   const head = currentHead(repo);
-  process.stdout.write(renderUpkeepPrompt(repo, scope.folders, head, scope.pages, req.headless));
+  const render = req.correct === true ? renderUpkeepCorrectPrompt : renderUpkeepPrompt;
+  process.stdout.write(render(repo, scope.folders, head, scope.pages, req.headless));
   return 0;
 }
 
@@ -2184,12 +2384,65 @@ function validateUpkeepFresh(wt: string, cutAt: number): string {
 }
 
 /** The verdict over a finished report; a malformed report fails the pass. */
-function decideUpkeep(pages: string[], folders: string[], text: string): UpkeepVerdict {
+function decideUpkeep(
+  pages: string[],
+  folders: string[],
+  text: string,
+): { verdict: UpkeepVerdict; corrected: number } {
   const parsed = parseUpkeepReport(text);
   if (!parsed.ok) throw new RunError(parsed.error);
   const decided = verdictUpkeep(pages, folders, parsed.report);
   if (!decided.ok) throw new RunError(decided.error);
-  return decided.verdict;
+  return { verdict: decided.verdict, corrected: correctedClaims(parsed.report.claims).length };
+}
+
+/**
+ * The correcting pass's branch: its diff past the driven commit touches only
+ * the verifiers' folders, and every verifier the pass drove is confirmed on
+ * the branch at the driven commit, with corrections or without. A verifier
+ * dir the branch no longer holds is left to the user's review of the diff.
+ */
+function validateCorrectingBranch(
+  repo: string,
+  head: string,
+  branch: string,
+  folders: string[],
+): void {
+  const diff = branchDiffPaths(repo, head, branch);
+  if (diff === null) {
+    throw new RunError(`the pass branch ${branch} could not be compared with ${head}`);
+  }
+  const outside = diff.filter((p) => !folders.some((f) => p.startsWith(`${f}/`)));
+  const reason = outsideReason(outside);
+  if (reason !== null) {
+    throw new RunError(`the pass changed files ${reason} on ${branch}`);
+  }
+  const shared = branchHasPath(repo, branch, "verifier/README.md");
+  for (const folder of folders) {
+    const vdirs = scopeVdirs(repo, folder, head);
+    if (vdirs === null) throw new RunError(`the verifiers under ${folder} could not be read`);
+    for (const vdir of vdirs) {
+      if (!branchHasPath(repo, branch, `${vdir}/README.md`)) continue;
+      const indexFile = indexFileFor(vdir, shared);
+      const text = branchFileText(repo, branch, indexFile);
+      const sha =
+        text === null
+          ? null
+          : indexFile === "verifier/README.md"
+            ? bulletConfirm(text, vdir)
+            : featuresConfirm(text);
+      if (sha === null) {
+        throw new RunError(
+          `the index for ${vdir} names no confirmed commit (expected Confirmed: ${head} in ${indexFile})`,
+        );
+      }
+      if (sha !== head.toLowerCase()) {
+        throw new RunError(
+          `the index for ${vdir} records ${sha}, not the driven commit ${head} (in ${indexFile})`,
+        );
+      }
+    }
+  }
 }
 
 function runUpkeep(req: ParsedUpkeep): number {
@@ -2238,6 +2491,9 @@ function runUpkeepLaunches(
   // Decided by validate on either path, printed after it: the interactive path
   // logs a malformed report as the session's failure before it throws.
   let decided: UpkeepVerdict | null = null;
+  let corrected = 0;
+  const correcting = req.correct === true;
+  const render = correcting ? renderUpkeepCorrectPrompt : renderUpkeepPrompt;
   return runSessionLaunches({
     repo,
     dispatch,
@@ -2248,12 +2504,15 @@ function runUpkeepLaunches(
     sessionStarted,
     logLabel: "upkeep",
     sessionNoun: "upkeep",
-    renderPrompt: (headless) =>
-      renderUpkeepPrompt(repo, scope.folders, head, scope.pages, headless),
-    sendFileText: (promptFile) => upkeepSendText(promptFile),
+    renderPrompt: (headless) => render(repo, scope.folders, head, scope.pages, headless),
+    sendFileText: (promptFile) =>
+      correcting ? upkeepCorrectSendText(promptFile) : upkeepSendText(promptFile),
     waitFile: "UPKEEP.md",
     validate: () => {
-      decided = decideUpkeep(scope.pages, scope.folders, validateUpkeepFresh(wt, cutAt));
+      const judged = decideUpkeep(scope.pages, scope.folders, validateUpkeepFresh(wt, cutAt));
+      decided = judged.verdict;
+      corrected = judged.corrected;
+      if (correcting) validateCorrectingBranch(repo, head, branch, scope.folders);
     },
     print: ({ final, handle, promptFile }) => {
       const verdict = decided as UpkeepVerdict;
@@ -2266,9 +2525,19 @@ function runUpkeepLaunches(
       lines.push(`prompt ${promptFile}`);
       if (final !== null) lines.push(`stream ${final.stream}`);
       lines.push(`report ${join(wt, "UPKEEP.md")}`);
-      for (const line of [...lines, ...verdict.lines]) console.log(line);
-      for (const line of verdict.lines) logVerdict(dispatch, branch, "note", line);
-      return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
+      if (!correcting) {
+        for (const line of [...lines, ...verdict.lines]) console.log(line);
+        for (const line of verdict.lines) logVerdict(dispatch, branch, "note", line);
+        return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
+      }
+      const tally = `corrections: ${corrected} of ${verdict.stale} stale corrected`;
+      const holds = verdict.unchecked === 0 && verdict.stale - corrected === 0;
+      const extra = holds ? [tally, "every claim holds"] : [tally];
+      for (const line of [...lines, ...verdict.lines, ...extra]) console.log(line);
+      for (const line of [...verdict.lines, ...extra]) {
+        logVerdict(dispatch, branch, "note", line);
+      }
+      return holds ? 0 : 1;
     },
   });
 }
@@ -2942,7 +3211,7 @@ interface Validated {
   branch: string;
   dispatch: string;
   folder: string;
-  handoverText: string;
+  deliverable: { kind: "handover"; text: string } | { kind: "report"; text: string };
 }
 
 function validateLanding(req: ParsedCheck | ParsedLand): Validated {
@@ -2960,23 +3229,92 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
   if (target !== null && req.branch === target) {
     throw new UsageError(`${req.branch} is the default branch; landing needs a verifier branch`);
   }
-  let handoverText: string;
-  try {
-    handoverText = readFileSync(resolve(req.handover), "utf8");
-  } catch {
-    throw new UsageError(`no hand-over to read: ${req.handover}`);
+  // The parser sets exactly one deliverable; the last throw is unreachable.
+  if (req.report !== undefined) {
+    try {
+      const text = readFileSync(resolve(req.report), "utf8");
+      return {
+        repo,
+        branch: req.branch,
+        dispatch,
+        folder: req.folder ?? verifyDirName(repo),
+        deliverable: { kind: "report", text },
+      };
+    } catch {
+      throw new UsageError(`no report to read: ${req.report}`);
+    }
   }
+  if (req.handover !== undefined) {
+    try {
+      const text = readFileSync(resolve(req.handover), "utf8");
+      return {
+        repo,
+        branch: req.branch,
+        dispatch,
+        folder: req.folder ?? verifyDirName(repo),
+        deliverable: { kind: "handover", text },
+      };
+    } catch {
+      throw new UsageError(`no hand-over to read: ${req.handover}`);
+    }
+  }
+  throw new UsageError(`${req.cmd} needs --handover <file>`);
+}
+
+/**
+ * A pass branch lands on the folder rule and the project's checks alone: the
+ * report must be well formed, but how much of it the pass corrected is the
+ * user's to judge from the proposal, never a refusal. Partial corrections
+ * land like whole ones.
+ */
+function decideReportBranch(o: {
+  repo: string;
+  branch: string;
+  dispatch: string;
+  folder: string;
+  timeout: number;
+  report: UpkeepReport;
+  compareBase: string;
+}): Decided {
+  const diff = branchDiffPaths(o.repo, o.compareBase, o.branch);
+  if (diff === null) {
+    return refused(o.branch, [], "the branch could not be compared");
+  }
+  const reason = outsideReason(outsidePaths(diff, o.folder));
+  if (reason !== null) return refused(o.branch, [], reason);
+  const outcome = runProjectChecks(o);
+  const checksReason = decideChecks(outcome);
+  if (checksReason !== null) return refused(o.branch, [], checksReason);
   return {
-    repo,
-    branch: req.branch,
-    dispatch,
-    folder: req.folder ?? verifyDirName(repo),
-    handoverText,
+    classified: [],
+    accepted: true,
+    summary: outcome.kind === "ran" ? outcome.summary : null,
+    line: acceptLineReport(o.branch, o.report),
   };
 }
 
 function decideFromValidated(v: Validated, timeout: number): Decided {
-  const parsed = parseHandover(v.handoverText);
+  if (v.deliverable.kind === "report") {
+    const parsed = parseUpkeepReport(v.deliverable.text);
+    if (!parsed.ok) return refused(v.branch, [], parsed.error);
+    if (parsed.report.verifiers.length === 0) {
+      return refused(v.branch, [], "the report names no verifier");
+    }
+    const base = defaultBase(v.repo);
+    if (base === null) {
+      return refused(v.branch, [], "no commit to compare the branch against");
+    }
+    return decideReportBranch({
+      repo: v.repo,
+      branch: v.branch,
+      dispatch: v.dispatch,
+      folder: v.folder,
+      timeout,
+      report: parsed.report,
+      compareBase: base,
+    });
+  }
+  const parsed = parseHandover(v.deliverable.text);
   if (!parsed.ok) return refused(v.branch, [], parsed.error);
   const classified = classifyEntries(parsed.entries, proofIsFile);
   const base = defaultBase(v.repo);
@@ -3022,12 +3360,12 @@ function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
     throw new UsageError(`no report to read: ${req.report}`);
   }
   const scope = upkeepScope(repo, req.folder);
-  const verdict = decideUpkeep(scope.pages, scope.folders, text);
-  for (const line of verdict.lines) console.log(line);
+  const judged = decideUpkeep(scope.pages, scope.folders, text);
+  for (const line of judged.verdict.lines) console.log(line);
   // The report is what was judged: the command cuts no branch to name.
-  const judged = resolve(req.report);
-  for (const line of verdict.lines) logVerdict(dispatch, judged, "note", line);
-  return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
+  const target = resolve(req.report);
+  for (const line of judged.verdict.lines) logVerdict(dispatch, target, "note", line);
+  return judged.verdict.unchecked + (judged.verdict.stale - judged.corrected) > 0 ? 1 : 0;
 }
 
 function landLocal(
@@ -3082,6 +3420,7 @@ function landPullRequest(
   o: {
     repo: string;
     branch: string;
+    title: string;
     acceptLine: string;
     summary: VerifySummary | null;
   },
@@ -3110,7 +3449,7 @@ function landPullRequest(
       "--head",
       o.branch,
       "--title",
-      `Verifiers for ${basename(o.repo)}`,
+      o.title,
       "--body",
       `${o.acceptLine}\n\nChecks: ${checks}`,
     ],
@@ -3167,7 +3506,16 @@ function runLandCmd(req: ParsedLand): number {
         }
       : route === "pull-request"
         ? landPullRequest(
-            { repo: v.repo, branch: v.branch, acceptLine: decided.line, summary: decided.summary },
+            {
+              repo: v.repo,
+              branch: v.branch,
+              title:
+                v.deliverable.kind === "report"
+                  ? `Upkeep pass for ${basename(v.repo)}`
+                  : `Verifiers for ${basename(v.repo)}`,
+              acceptLine: decided.line,
+              summary: decided.summary,
+            },
             target,
           )
         : landLocal({ repo: v.repo, branch: v.branch, dispatch: v.dispatch }, target);
