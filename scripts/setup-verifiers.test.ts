@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   firstLine,
+  landingCheckout,
   lastLine,
   logVerdict,
   parseArgs,
@@ -11,6 +12,7 @@ import {
   runJsonDoc,
   timeoutForHost,
 } from "./setup-verifiers.ts";
+import { commitAll, gitOrThrow, initRepo, writeRepoFile } from "./acceptance-323.ts";
 
 describe("parseArgs", () => {
   test("a repo, surfaces and a run parse, kinds ordered", () => {
@@ -145,6 +147,44 @@ describe("runJsonDoc", () => {
     expect(doc.target).toBe("/r");
     expect(doc.config).toEqual({ team: {} });
     expect(typeof doc.written).toBe("string");
+  });
+});
+
+describe("landingCheckout", () => {
+  test("a clean default checkout lands, anything else names itself", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "setup-checkout-")));
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      expect(landingCheckout(repo)).toBe(null);
+      gitOrThrow(repo, "checkout", "-b", "feature");
+      expect(landingCheckout(repo)).toBe(
+        `${repo} is on feature, not main; check out main and run again`,
+      );
+      gitOrThrow(repo, "checkout", "-q", "main");
+      writeRepoFile(repo, "note.txt", "note\n");
+      expect(landingCheckout(repo)).toBe(
+        `${repo} has uncommitted changes; commit or stash them and run again`,
+      );
+      gitOrThrow(repo, "checkout", "--detach", "-q", "HEAD");
+      expect(landingCheckout(repo)).toContain("is not on a branch");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a repo with no commit skips the check for make to report", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "setup-checkout-")));
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      expect(landingCheckout(repo)).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

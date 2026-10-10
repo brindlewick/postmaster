@@ -15,7 +15,8 @@
 //
 // It refuses a fixture copy, which is never offered verifiers and never waits for one,
 // a project that already holds verifiers, and anything but the top of a git repository,
-// writing nothing. With a session host the session waits in its tab without a limit,
+// writing nothing. It also refuses a target off its default branch or with uncommitted
+// changes, before any session starts, since the local landing needs both. With a session host the session waits in its tab without a limit,
 // watched by the user; with none it gets an hour for each surface kind offered, then
 // setup goes on without verifiers. Landing is always local on the launch-card yes: the
 // yes is the merge word, and scaffolding the user just approved merges directly, since
@@ -26,9 +27,10 @@
 //   exit 0  landed: the verifiers merged into the default branch
 //   exit 1  given up: make or land failed; setup goes on without verifiers
 //   exit 2  usage: bad arguments, a fixture copy, verifiers already held, a path that is
-//           not the top of a git repository, no dispatch, no effective config, a host
-//           that cannot be detected, a make call that misused its own command, or a
-//           verdict that could not be logged
+//           not the top of a git repository, a target off its default branch or with
+//           uncommitted changes, no dispatch, no effective config, a host that cannot
+//           be detected, a make call that misused its own command, or a verdict that
+//           could not be logged
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
@@ -38,6 +40,7 @@ import { run } from "./lib/proc.ts";
 import {
   isRepo,
   isRepoTop,
+  landTarget,
   orderKinds,
   presentVerifierFolders,
   sessionFolder,
@@ -169,6 +172,25 @@ function usageError(message: string): never {
 }
 
 /**
+ * The reason the target cannot take the local landing, or null when it can.
+ * Land needs the default branch checked out with a clean tree; setup checks
+ * before any session starts rather than waste one. A null target (no main or
+ * master, such as no commit yet) skips the check: make reports that itself.
+ * Land re-checks at landing time, so a branch moved mid-session still fails.
+ */
+export function landingCheckout(repo: string): string | null {
+  const target = landTarget(repo);
+  if (target === null) return null;
+  const current = run("git", ["-C", repo, "symbolic-ref", "--short", "-q", "HEAD"]).out.trim();
+  if (current === "") return `${repo} is not on a branch; check out ${target} and run again`;
+  if (current !== target)
+    return `${repo} is on ${current}, not ${target}; check out ${target} and run again`;
+  if (run("git", ["-C", repo, "status", "--porcelain"]).out !== "")
+    return `${repo} has uncommitted changes; commit or stash them and run again`;
+  return null;
+}
+
+/**
  * Log the setup verdict to the run's actions and the project ledger. False
  * when the audit line could not be written: an unlogged verdict stops setup
  * rather than go on unrecorded.
@@ -199,6 +221,8 @@ function main(argv: string[]): number {
   if (held.length > 0) {
     usageError(`${parsed.req.repo} already holds verifiers: ${held.join(",")}`);
   }
+  const checkout = landingCheckout(repo);
+  if (checkout !== null) usageError(checkout);
   const dispatch = resolve(parsed.req.dispatch);
   try {
     if (!statSync(dispatch).isDirectory()) throw new Error("not dir");
