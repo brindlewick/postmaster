@@ -56,6 +56,30 @@ describe("parseArgs", () => {
     expect(parseArgs(["/r", "__proto__", "--run", "/d"]).ok).toBe(false);
     expect(parseArgs(["/r", "cli", "--run", "/d", "--fresh"]).ok).toBe(false);
   });
+
+  test("a comma-joined surfaces value splits, a bad segment names itself", () => {
+    expect(parseArgs(["/r", "cli,web", "--run", "/d"])).toEqual({
+      ok: true,
+      req: { repo: "/r", names: ["cli", "web"], kinds: ["cli", "web"], dispatch: "/d" },
+    });
+    expect(parseArgs(["/r", "cli", "web,library", "--run", "/d"])).toEqual({
+      ok: true,
+      req: {
+        repo: "/r",
+        names: ["cli", "web", "library"],
+        kinds: ["cli", "web", "library"],
+        dispatch: "/d",
+      },
+    });
+    expect(parseArgs(["/r", "cli,bogus", "--run", "/d"])).toEqual({
+      ok: false,
+      error: "unknown surface: bogus",
+    });
+    expect(parseArgs(["/r", "cli,", "--run", "/d"])).toEqual({
+      ok: false,
+      error: "unknown surface: ",
+    });
+  });
 });
 
 describe("timeoutForHost", () => {

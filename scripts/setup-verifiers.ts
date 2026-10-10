@@ -8,7 +8,8 @@
 //
 //   surface    one or more of cli, web, library, cli-examples, browser-suite,
 //              web-journey, library-tests, as verifier make takes them; names of one
-//              surface make one verifier
+//              surface make one verifier. A discovery surfaces= value may be passed
+//              as one comma-joined argument and counts its surfaces.
 //   --run      the postmaster's run dir (<runs>/postmaster): the session's launches log
 //              there, and the setup records the run.json its roles run on there
 //
@@ -85,11 +86,17 @@ export function parseArgs(argv: string[]): ParseResult {
     names.push(token);
   }
   if (names.length === 0) return { ok: false, error: "setup-verifiers takes a repo and a surface" };
+  // A surfaces= value may arrive as one comma-joined argument; split it so the
+  // discovery line works verbatim. An empty segment fails loud, never silently.
   const kinds: Surface[] = [];
-  for (const name of names) {
-    const kind = surfaceKind(name);
-    if (kind === null) return { ok: false, error: `unknown surface: ${name}` };
-    kinds.push(kind);
+  const split: string[] = [];
+  for (const token of names) {
+    for (const part of token.split(",")) {
+      const kind = surfaceKind(part);
+      if (kind === null) return { ok: false, error: `unknown surface: ${part}` };
+      kinds.push(kind);
+      split.push(part);
+    }
   }
   let dispatch: string | null = null;
   const rest = argv.slice(i);
@@ -106,7 +113,7 @@ export function parseArgs(argv: string[]): ParseResult {
     }
   }
   if (dispatch === null) return { ok: false, error: "setup-verifiers needs --run <dispatch>" };
-  return { ok: true, req: { repo, names, kinds: orderKinds(kinds), dispatch } };
+  return { ok: true, req: { repo, names: split, kinds: orderKinds(kinds), dispatch } };
 }
 
 /** Seconds make waits: without a limit on a watched session, an hour a kind on its own. */
