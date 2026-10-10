@@ -1788,6 +1788,39 @@ export async function runControls(): Promise<number> {
         `${noSpaceNorRun.out}${noSpaceNorRun.err}`.includes("or run.json to name its space"),
       `${noSpaceNorRun.out}${noSpaceNorRun.err}`,
     );
+    const prunedRun = join(root, "run-pruned");
+    mkdirSync(prunedRun, { recursive: true });
+    writeFileSync(
+      join(prunedRun, "brief.md"),
+      `## Dispatch\nname: T-1 pruned\nsynthesis worktree: ${join(root, "worktree-gone")}\n`,
+    );
+    writeFileSync(join(prunedRun, "run.json"), '{"kind":"ticket"}\n');
+    const prunedLaunch = execHost(
+      [
+        "run",
+        SECURITY_LABEL,
+        f.clone,
+        "--role",
+        "reviewer",
+        "--under",
+        prunedRun,
+        "--run",
+        run1,
+        "--marker",
+        markerPath("pruned-space"),
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+    );
+    await pass(
+      "a dispatch naming a pruned worktree is refused despite its run.json, and its marker lands",
+      () =>
+        prunedLaunch.code === 1 &&
+        existsSync(markerPath("pruned-space")) &&
+        `${prunedLaunch.out}${prunedLaunch.err}`.includes("or run.json to name its space"),
+      `${prunedLaunch.out}${prunedLaunch.err}`,
+    );
 
     console.log("stop: owned process trees and refusal controls");
     const sol = join(f.repo, ".worktrees/T-1-sol");

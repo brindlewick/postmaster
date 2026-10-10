@@ -2642,8 +2642,12 @@ async function runCmd(args: string[]): Promise<void> {
     // has no equivalent of; an unreadable waybill reads as no worktree below.
     // A dispatch without a waybill still names its space when it carries run.json:
     // setup launches its verifier session before any ticket run, and its run dir
-    // holds the record but no waybill and no synthesis worktree.
-    const underPath = dispatchInfo(under).worktree;
+    // holds the record but no waybill and no synthesis worktree. But run.json
+    // names the space only for such a waybill-less dispatch: one that names a
+    // worktree needs it live, so a run whose worktree was pruned still refuses
+    // instead of launching into the background.
+    const underInfo = dispatchInfo(under);
+    const underPath = underInfo.worktree;
     let underPathIsDir = false;
     try {
       underPathIsDir = !!underPath && statSync(underPath).isDirectory();
@@ -2652,7 +2656,8 @@ async function runCmd(args: string[]): Promise<void> {
     try {
       underHasRun = statSync(join(under, "run.json")).isFile();
     } catch {}
-    if (!underPathIsDir && !underHasRun)
+    const briefLess = underInfo.name === "" && underInfo.worktree === "";
+    if (!underPathIsDir && !(underHasRun && briefLess))
       appendFailure(
         err,
         marker,
