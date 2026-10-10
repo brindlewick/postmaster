@@ -17,7 +17,7 @@ export function oxlintStep(): string[] {
   const segment = pkg.scripts.check
     .split("&&")
     .map((s) => s.trim())
-    .find((s) => s.split(/\s+/u).includes("oxlint")); // ASCII: a shell splits words on ASCII whitespace
+    .find((s) => s.split(/\s+/u).some((w) => w === "oxlint" || w.endsWith("/oxlint"))); // ASCII: a shell splits words on ASCII whitespace
   if (segment === undefined) throw new Error("check script runs no oxlint step");
   if (/["'\\|<>;&$`]/u.test(segment)) throw new Error(`oxlint step is not plain argv: ${segment}`);
   return segment.split(/\s+/u); // ASCII: a shell splits words on ASCII whitespace
