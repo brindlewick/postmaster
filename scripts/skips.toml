@@ -405,3 +405,45 @@ file = "scripts/host.test.ts"
 name = "workhorse and stop-pidfile > a recorded pidfile still stops the members of its zombie leader"
 reason = "the zombie-leader probe is built on setsid(1) and Linux's process groups"
 systems = ["darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C2: unset keeps today's behavior > a run with no key holds both sections in every copy"
+reason = "needs a dispatched run; the postmaster reads C5's run with no key at landing"
+systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C3: the cut > C5's runs without the notes hold no section line in any copy"
+reason = "needs dispatched runs; the postmaster reads C5's two runs at landing"
+systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C4: the postmaster checks the premises without the notes > C5's runs carry the postmaster line and no coachman line"
+reason = "needs dispatched runs; the postmaster reads C5's two runs at landing"
+systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C4: the postmaster checks the premises without the notes > a changed premise asks the user before any leg starts"
+reason = "needs a dispatch of a ticket whose cited text changed; hand-verified at landing"
+systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C5: fixture runs > without the notes in single-thread mode scores clean"
+reason = "needs a model run from this branch; the postmaster dispatches and scores it at landing"
+systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C5: fixture runs > without the notes in synthesis mode scores clean"
+reason = "needs a model run from this branch; the postmaster dispatches and scores it at landing"
+systems = ["linux", "darwin"]
+
+[[skip]]
+file = "scripts/acceptance-407.test.ts"
+name = "C5: fixture runs > with no key scores clean"
+reason = "needs a model run from this branch; the postmaster dispatches and scores it at landing"
+systems = ["linux", "darwin"]
