@@ -284,6 +284,23 @@ describe("setup-verifiers usage", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("a target off its default branch exits 2 naming the branch", () => {
+    const { dir, repo } = scratchRepo("bin");
+    try {
+      gitOrThrow(repo, "checkout", "-b", "feature");
+      const dispatch = mkdtempSync(join(dir, "dispatch-"));
+      const config = writeMinimalConfig(dir);
+      const r = run(RUN, ["setup-verifiers", repo, "cli", "--run", dispatch], {
+        env: { POSTMASTER_HOST: "none", POSTMASTER_CONFIG: config },
+      });
+      expect(r.code).toBe(2);
+      expect(r.err).toContain("is on feature, not main");
+      expect(existsSync(join(dispatch, "run.json"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("D5 and D6: the wait follows the host", () => {
@@ -389,6 +406,29 @@ describe("D5 and D6: the wait follows the host", () => {
       expect(coachman.harness).toBe("muse");
       expect(typeof stored.written).toBe("string");
       expect(r.out).toContain("timeout 3600");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the dispatch record absolutizes project-relative env files", () => {
+    const { dir, repo } = noCommitRepo();
+    try {
+      writeRepoFile(repo, ".postmaster/settings.toml", '[team.coachman]\nenv_file = "coach.env"\n');
+      const dispatch = mkdtempSync(join(dir, "dispatch-"));
+      const config = writeMinimalConfig(dir);
+      const r = run(RUN, ["setup-verifiers", repo, "library", "--run", dispatch], {
+        env: { POSTMASTER_HOST: "none", POSTMASTER_CONFIG: config },
+      });
+      expect(r.code).toBe(2);
+      const stored = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      const cfg = stored.config as Record<string, unknown>;
+      const team = cfg.team as Record<string, unknown>;
+      const coachman = team.coachman as Record<string, unknown>;
+      expect(coachman.env_file).toBe(join(repo, "coach.env"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
