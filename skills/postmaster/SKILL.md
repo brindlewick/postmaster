@@ -301,8 +301,8 @@ its env file, never in settings.
    <tool>/scripts/run host read postmaster-<project>      # it took the message: a new session can drop one
    ```
 
-   On Herdr it opens as a tab in the target repo's space, the root of every run's tree; on tmux,
-   as a window in session `postmaster-<project>`. If `spawn` says it is not ready, the harness is
+   On Herdr it opens as a tab in the target repo's space, as a pane of the fixture tab for a
+   fixture copy, the root of every run's tree; on tmux, as a window in session `postmaster-<project>`. If `spawn` says it is not ready, the harness is
    asking something on its first start there, such as claude asking whether to trust the folder:
    the user answers it in the pane, and then the prompt is sent. For an ordinary `spawn` with no
    host, `spawn` exits 3: launch it headless as `hosts.md` gives under none, with a line in its
