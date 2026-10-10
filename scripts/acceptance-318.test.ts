@@ -203,8 +203,14 @@ describe("upkeep-report: the verdict from a finished pass", () => {
       const logged = actions
         .trim()
         .split("\n")
-        .map((line) => JSON.parse(line) as { target: string });
+        .map((line) => JSON.parse(line) as { target: string; detail: string });
       expect(logged[logged.length - 1]?.target).toBe(join(sandbox.dir, "UPKEEP.md"));
+      const details = logged.map((line) => line.detail);
+      expect(details).toContain(`stale: list: an argument is a usage error (${LIST})`);
+      expect(details).toContain(`  stated: ${OLD_USAGE}`);
+      expect(details).toContain(`  found: ${NEW_USAGE}`);
+      expect(details).toContain(`unchecked: usage: --help (${USAGE_PAGE})`);
+      expect(details).toContain("unasked: the file holding the staging token");
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
