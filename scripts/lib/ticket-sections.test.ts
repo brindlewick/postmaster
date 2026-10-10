@@ -1,7 +1,14 @@
 // Tests beside scripts/lib/ticket-sections.ts: the shared reading of the agents
 // part's sections. ticket-parts and the cut both build on it.
 import { describe, expect, test } from "bun:test";
-import { agentsIndex, level3Sections } from "./ticket-sections.ts";
+import { agentsIndex, level3Sections, normalizeTicket } from "./ticket-sections.ts";
+
+describe("normalizeTicket", () => {
+  test("strips a byte-order mark and folds CRLF to LF", () => {
+    expect(normalizeTicket("\uFEFF# T\r\n\r\nBody\r\n")).toBe("# T\n\nBody\n");
+    expect(normalizeTicket("# T\n\nBody\n")).toBe("# T\n\nBody\n");
+  });
+});
 
 describe("agentsIndex", () => {
   test("finds the heading case-insensitively, or -1", () => {

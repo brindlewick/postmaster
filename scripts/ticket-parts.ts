@@ -52,6 +52,7 @@ import {
   fenceMap,
   isFence,
   level3Sections,
+  normalizeTicket,
 } from "./lib/ticket-sections.ts";
 
 // --- limits -----------------------------------------------------------------------------------
@@ -450,7 +451,7 @@ function main(argv: string[]): number {
     );
     return 2;
   }
-  const report = analyze(text.replace(/^﻿/u, "").replace(/\r\n/gu, "\n"), final);
+  const report = analyze(normalizeTicket(text), final);
   if (!report) {
     console.error('ticket-parts: no "## For the agents" section');
     return 2;

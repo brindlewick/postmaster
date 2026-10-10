@@ -5,26 +5,33 @@
 //
 // Reads the two sections as the readiness check does (scripts/lib/ticket-sections.ts):
 // the level-3 sections below `## For the agents`, case-insensitively, skipping
-// fenced blocks, each running to the next heading of level 3 or above. Every
-// other line prints in order, unchanged. A ticket with no `## For the agents`
-// prints unchanged.
+// fenced blocks, each running to the next heading of level 3 or above, over text
+// normalized as the check normalizes it. Every other line prints in order. A ticket
+// with no `## For the agents` prints unchanged.
 //
 //   exit 0  the cut ticket is on stdout
 //   exit 1  usage or an unreadable file
 import { readFileSync } from "node:fs";
-import { TECH_NOTES_RE, VERIFIED_RE, agentsIndex, level3Sections } from "./lib/ticket-sections.ts";
+import {
+  TECH_NOTES_RE,
+  VERIFIED_RE,
+  agentsIndex,
+  level3Sections,
+  normalizeTicket,
+} from "./lib/ticket-sections.ts";
 
 export function cutTicketNotes(text: string): string {
-  const lines = text.split("\n");
+  const clean = normalizeTicket(text);
+  const lines = clean.split("\n");
   const ai = agentsIndex(lines);
-  if (ai < 0) return text;
+  if (ai < 0) return clean;
   const drop = new Set<number>();
   for (const s of level3Sections(lines, ai + 1)) {
     if (TECH_NOTES_RE.test(s.title) || VERIFIED_RE.test(s.title)) {
       for (let i = s.at; i < s.end; i++) drop.add(i);
     }
   }
-  if (drop.size === 0) return text;
+  if (drop.size === 0) return clean;
   return lines.filter((_, i) => !drop.has(i)).join("\n");
 }
 
@@ -45,5 +52,6 @@ function main(argv: string[]): number {
 }
 
 if (import.meta.main) {
-  process.exit(main(process.argv.slice(2)));
+  // exitCode, not exit: exit would cut piped output short at the pipe buffer.
+  process.exitCode = main(process.argv.slice(2));
 }

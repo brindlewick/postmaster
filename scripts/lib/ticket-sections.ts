@@ -1,8 +1,17 @@
-// The agents part's sections, read one way for the readiness check and the cut.
-// ticket-parts and ticket-cut both import this module: the cut reads the two
-// held-back sections exactly as the readiness check does, so a ticket the
-// check accepted cannot keep its notes through a cut that reads them another way.
+// The agents part's sections, read one way for the readiness check, the cut and
+// the premises check. ticket-parts, ticket-cut and premises all import this
+// module: the cut and the premises check read the agents part exactly as the
+// readiness check does, so a ticket the check accepted cannot keep its notes
+// through a cut, or skip its premises check, that reads them another way.
 const FENCE = "```";
+
+/**
+ * Ticket text as the readiness check reads it: without a byte-order mark and
+ * with CRLF endings folded to LF, so headings match whatever produced them.
+ */
+export function normalizeTicket(text: string): string {
+  return text.replace(/^\uFEFF/u, "").replace(/\r\n/gu, "\n");
+}
 
 export function isFence(line: string): boolean {
   return line.trimStart().startsWith(FENCE);

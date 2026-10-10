@@ -21,6 +21,7 @@
 // Usage: run premises <repo> <ticket-file> <base>
 import { readFileSync } from "node:fs";
 import { run } from "./lib/proc.ts";
+import { agentsIndex, normalizeTicket } from "./lib/ticket-sections.ts";
 
 export type Citation = {
   path: string;
@@ -75,8 +76,8 @@ const PATH_RE =
   /((?:[\p{L}\p{N}_.-]+\/)*[\p{L}\p{N}_.-]+\.[\p{L}\p{N}_.-]+)(#L[0-9]+(?:-L?[0-9]+)?|(?<![A-Za-z0-9_])L[0-9]+(?:-L?[0-9]+)?)?/gu;
 
 export function agentsPart(body: string): string {
-  const lines = body.split("\n");
-  const start = lines.findIndex((line) => /^## For the agents[ \t]*$/u.test(line.trim()));
+  const lines = normalizeTicket(body).split("\n");
+  const start = agentsIndex(lines);
   if (start < 0) return "";
   // The caller passes the waybill, whose project profile, team and dispatch
   // sections follow the ticket: the part ends at the next level-two heading.

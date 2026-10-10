@@ -99,6 +99,18 @@ describe("cite extraction", () => {
     expect(cites[0]?.end).toBe(3);
   });
 
+  test("reads cites below a variant-case agents heading, as readiness accepts", () => {
+    const text = [
+      "## FOR THE AGENTS",
+      "",
+      "- [file](https://github.com/a/b/blob/abc1234/scripts/sample.ts#L2-L3)",
+      "",
+    ].join("\n");
+    const cites = citationsFromText(text);
+    expect(cites).toHaveLength(1);
+    expect(cites[0]?.path).toBe("scripts/sample.ts");
+  });
+
   test("reads a bare path and the other range forms", () => {
     const text = [
       "## For the agents",
