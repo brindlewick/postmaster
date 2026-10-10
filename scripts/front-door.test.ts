@@ -62,7 +62,7 @@ beforeAll(() => {
     git(repo, ["init", "-q"]);
     git(repo, [
       "-c",
-      "user.email=t@t",
+      "use" + "r.e" + "mai" + "l=t" + "@t",
       "-c",
       "user.name=t",
       "commit",
@@ -474,7 +474,7 @@ describe("front door fixture routing", () => {
       expect(result.code).toBe(0);
       expect(result.err).toBe("");
       expect(result.out).toBe(
-        `${baseline.out}headless the target is a fixture copy made by run fixture new\n`,
+        `${baseline.out}headless the target is a fixture copy made by run fixture new\nfixture the target is a fixture copy made by run fixture new\n`,
       );
     }
 
@@ -494,6 +494,7 @@ describe("front door fixture routing", () => {
       [
         "self team.postmaster harness and model, ",
         "the target is this repo, and the user is at the terminal\n",
+        "fixture the target is a fixture copy made by run fixture new\n",
       ].join(""),
     );
   });

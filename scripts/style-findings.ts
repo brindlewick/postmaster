@@ -1406,7 +1406,7 @@ class Reach {
       : this.t.up(cwd, ["justfile", "Justfile", ".justfile", "JUSTFILE"]);
     if (!p) return;
     if (!this.justs.has(p)) this.justs.set(p, parseJust(this.t.read(p) ?? ""));
-    const { recipes, vars, first } = this.justs.get(p)!;
+    const { recipes, first } = this.justs.get(p)!;
     let d = wd ? this.t.dir(cwd, wd) : null;
     if (d === null) d = posix.dirname(p);
     const toRun = names.filter((n) => recipes.has(n));
@@ -1416,7 +1416,7 @@ class Reach {
   }
 
   recipe(p: string, n: string, d: string): void {
-    const { recipes, vars, first } = this.justs.get(p)!;
+    const { recipes, vars } = this.justs.get(p)!;
     const key = `just|${p}|${n}`;
     if (this.seen.has(key) || !recipes.has(n)) return;
     this.seen.add(key);

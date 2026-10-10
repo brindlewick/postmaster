@@ -8,67 +8,103 @@ import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
 import { run } from "./lib/proc.ts";
 import {
-  UPKEEP_LINE,
+  UNLIMITED_WAIT_CHUNK_SECONDS,
   acceptLine,
+  acceptLineReport,
   addedFeaturePages,
   addedPaths,
   addedUnder,
   branchFileText,
   branchHasPath,
-  checkMultiVerifiers,
+  bulletConfirm,
   type CheapFacts,
   type ChecksOutcome,
   type ClassifiedEntry,
+  checkMultiVerifiers,
   classifyEntries,
   commitsPastBase,
   committedFeaturePages,
+  confirmedSha,
+  correctedClaims,
   decideCheap,
   decideChecks,
   defaultBase,
   defaultLanding,
   deliverInstructions,
+  detectFolders,
   dirLines,
   failureOutcome,
+  featurePageNames,
+  featurePages,
+  featuresConfirm,
   handoverFresh,
   hasUpkeepLine,
+  indexBullets,
+  indexFileFor,
   indexNames,
+  isFeaturePage,
+  isSetupDispatch,
   isSurface,
   joinBodies,
+  kindProse,
   landTarget,
   lastLine,
+  listVerifiers,
   mergeAuthorityOf,
   modeBlocks,
   normalizeFolder,
   orderKinds,
   outsideAdded,
+  outsideFolders,
   outsidePaths,
+  outsideReason,
   parseArgs,
   parseHandover,
+  parseUpkeepReport,
   parseVerifyResults,
   pickBranch,
+  pickUpkeepBranch,
+  pickUpkeepWorktree,
   pickWorktree,
+  presentVerifierFolders,
   proseList,
   pruneWorktrees,
   refuseLine,
   remoteFromSymbolicRef,
   removeProvisioning,
+  renderListing,
   renderPrompt,
   renderTemplate,
   repoTop,
   roleHarness,
+  scopeVdirs,
   scrubGitEnv,
   sendText,
   sendVerdict,
+  sessionFolder,
+  spanNamesDir,
   spawnCommand,
+  strayUncommitted,
   strayVerifierPaths,
+  surfaceFromReadme,
   surfaceKind,
   surfaceProse,
   timeoutMs,
+  UPKEEP_LINE,
   unlistedSentence,
   unrunProject,
+  untouchedCorrected,
+  type UpkeepReport,
+  upkeepCorrectSendText,
+  upkeepScope,
+  upkeepSendText,
+  UPKEEP_HEADLESS_UNASKED,
+  verdictUpkeep,
   verifierHandle,
   verifyDirName,
+  waitForFile,
   waitForHandover,
+  waitForMarker,
   wallInStream,
 } from "./verifier.ts";
 
@@ -104,7 +140,7 @@ describe("parseArgs", () => {
 
   test("no command and an unknown command fail", () => {
     expect(parseArgs([])).toEqual({ ok: false, error: "no command" });
-    expect(parseArgs(["upkeep"])).toEqual({ ok: false, error: "unknown command: upkeep" });
+    expect(parseArgs(["mend"])).toEqual({ ok: false, error: "unknown command: mend" });
   });
 
   test("a missing surface and an unknown surface fail", () => {
@@ -171,13 +207,25 @@ describe("parseArgs", () => {
   });
 
   test("a bad timeout and an unknown flag fail", () => {
-    expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "0"]).ok).toBe(false);
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "soon"]).ok).toBe(false);
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "1234567890"]).ok).toBe(
       false,
     );
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--fresh"]).ok).toBe(false);
     expect(parseArgs(["make", "/r", "web", "--run"]).ok).toBe(false);
+  });
+
+  test("make takes 0 to wait without a limit; check and land need seconds past zero", () => {
+    expect(parseArgs(["make", "/r", "web", "--run", "/d", "--timeout", "0"])).toEqual({
+      ok: true,
+      req: { cmd: "make", repo: "/r", surfaces: ["web"], dispatch: "/d", timeout: 0 },
+    });
+    expect(
+      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--timeout", "0"]),
+    ).toEqual({ ok: false, error: "bad timeout: 0" });
+    expect(
+      parseArgs(["land", "/r", "b", "--run", "/d", "--handover", "/h", "--timeout", "0"]),
+    ).toEqual({ ok: false, error: "bad timeout: 0" });
   });
 });
 
@@ -280,6 +328,25 @@ describe("modeBlocks", () => {
     expect(blocks.askRule).toContain("cannot ask anyone anything");
     expect(blocks.secretsRule).toContain("Never invent a value");
     expect(blocks.handoverUnasked).toContain("Unasked questions");
+  });
+
+  test("the default deliverable is HANDOVER.md, as make renders", () => {
+    expect(modeBlocks(false)).toEqual(modeBlocks(false, "HANDOVER.md"));
+    expect(modeBlocks(true)).toEqual(modeBlocks(true, "HANDOVER.md"));
+    expect(modeBlocks(true).askRule).toContain("HANDOVER.md");
+  });
+
+  test("an upkeep pass names UPKEEP.md in both forms, never HANDOVER.md", () => {
+    for (const headless of [false, true]) {
+      const blocks = modeBlocks(headless, "UPKEEP.md");
+      expect(blocks.askRule).not.toContain("HANDOVER.md");
+      expect(blocks.secretsRule).not.toContain("HANDOVER.md");
+      expect(blocks.secretsRule).toContain("UPKEEP.md");
+    }
+    expect(modeBlocks(true, "UPKEEP.md").askRule).toContain("UPKEEP.md");
+    expect(modeBlocks(false, "UPKEEP.md").askRule).toContain(
+      "ask the user only what you cannot observe",
+    );
   });
 });
 
@@ -720,7 +787,7 @@ describe("handoverFresh", () => {
 });
 
 describe("waitForHandover", () => {
-  test("a fresh handover already there returns at once, with no sleep", () => {
+  test("a fresh handover already there returns after one settle nap", () => {
     const dir = tempDir();
     try {
       const wt = join(dir, "wt");
@@ -738,7 +805,7 @@ describe("waitForHandover", () => {
           () => 1000,
         ),
       ).toBe(true);
-      expect(naps).toEqual([]);
+      expect(naps).toEqual([5000]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -793,7 +860,7 @@ describe("waitForHandover", () => {
     }
   });
 
-  test("a handover landing mid-wait ends the wait", () => {
+  test("a handover landing mid-wait ends the wait once settled", () => {
     const dir = tempDir();
     try {
       const wt = join(dir, "wt");
@@ -807,12 +874,134 @@ describe("waitForHandover", () => {
         (ms) => {
           naps.push(ms);
           now += ms;
-          writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+          if (!existsSync(join(wt, "HANDOVER.md"))) {
+            writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+          }
         },
         () => now,
       );
       expect(ok).toBe(true);
-      expect(naps).toEqual([5000]);
+      expect(naps).toEqual([5000, 5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a zero timeout naps past every deadline until the handover lands", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        0,
+        0,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          if (naps.length === 4) writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+        },
+        () => now,
+      );
+      expect(ok).toBe(true);
+      expect(naps).toEqual([5000, 5000, 5000, 5000, 5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a zero timeout with no handover never gives up on its own", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      let naps = 0;
+      expect(() =>
+        waitForHandover(
+          wt,
+          0,
+          0,
+          () => {
+            naps += 1;
+            if (naps === 5) throw new Error("still waiting");
+          },
+          () => 999999999,
+        ),
+      ).toThrow("still waiting");
+      expect(naps).toBe(5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("waitForMarker", () => {
+  test("a timeout waits once and returns its result", () => {
+    const seen: number[] = [];
+    const settled = waitForMarker(60, (seconds) => {
+      seen.push(seconds);
+      return { code: 3, out: "", err: "" };
+    });
+    expect(seen).toEqual([60]);
+    expect(settled.code).toBe(3);
+  });
+
+  test("a zero timeout waits in day chunks until the marker lands", () => {
+    const seen: number[] = [];
+    let calls = 0;
+    const settled = waitForMarker(0, (seconds) => {
+      seen.push(seconds);
+      calls += 1;
+      return calls < 3 ? { code: 3, out: "", err: "" } : { code: 0, out: "", err: "" };
+    });
+    expect(seen).toEqual([
+      UNLIMITED_WAIT_CHUNK_SECONDS,
+      UNLIMITED_WAIT_CHUNK_SECONDS,
+      UNLIMITED_WAIT_CHUNK_SECONDS,
+    ]);
+    expect(settled.code).toBe(0);
+  });
+
+  test("a zero timeout returns a failed wait instead of waiting on", () => {
+    const seen: number[] = [];
+    const settled = waitForMarker(0, (seconds) => {
+      seen.push(seconds);
+      return seen.length < 2 ? { code: 3, out: "", err: "" } : { code: 1, out: "", err: "broken" };
+    });
+    expect(seen).toEqual([UNLIMITED_WAIT_CHUNK_SECONDS, UNLIMITED_WAIT_CHUNK_SECONDS]);
+    expect(settled.code).toBe(1);
+  });
+});
+
+describe("sessionFolder", () => {
+  test("one surface keeps its own folder, several share one", () => {
+    expect(sessionFolder("/x/app", ["cli"])).toBe("verify-app");
+    expect(sessionFolder("/x/app", ["cli", "web"])).toBe("verifier");
+    expect(sessionFolder("/x/app", ["cli", "web", "library"])).toBe("verifier");
+  });
+});
+
+describe("presentVerifierFolders", () => {
+  test("no folder reports none", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      mkdirSync(repo, { recursive: true });
+      expect(presentVerifierFolders(repo)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("each folder reports its name, the shared one first", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      mkdirSync(join(repo, "verify-app"), { recursive: true });
+      mkdirSync(join(repo, "verifier"), { recursive: true });
+      expect(presentVerifierFolders(repo)).toEqual(["verifier", "verify-app"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1408,6 +1597,7 @@ describe("check and land args", () => {
         folder: "custom",
         timeout: 60,
         landing: "local",
+        wordGiven: false,
       },
     });
     const bare = parseArgs(["land", "/r", "verify-x", "--run", "/d", "--handover", "/h"]);
@@ -1422,7 +1612,30 @@ describe("check and land args", () => {
         folder: null,
         timeout: 3600,
         landing: null,
+        wordGiven: false,
       },
+    });
+  });
+
+  test("land takes --word; check refuses it", () => {
+    const word = parseArgs(["land", "/r", "verify-x", "--run", "/d", "--handover", "/h", "--word"]);
+    expect(word).toEqual({
+      ok: true,
+      req: {
+        cmd: "land",
+        repo: "/r",
+        branch: "verify-x",
+        dispatch: "/d",
+        handover: "/h",
+        folder: null,
+        timeout: 3600,
+        landing: null,
+        wordGiven: true,
+      },
+    });
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--word"])).toEqual({
+      ok: false,
+      error: "unknown flag for check: --word",
     });
   });
 
@@ -1653,6 +1866,14 @@ describe("mergeAuthorityOf and defaultLanding", () => {
     expect(defaultLanding(true)).toBe("pull-request");
     expect(defaultLanding(false)).toBe("local");
   });
+
+  test("only the setup kind is a setup dispatch", () => {
+    expect(isSetupDispatch('{"kind":"setup-verifiers"}')).toBe(true);
+    expect(isSetupDispatch('{"config":{}}')).toBe(false);
+    expect(isSetupDispatch('{"kind":"other"}')).toBe(false);
+    expect(isSetupDispatch("not json")).toBe(false);
+    expect(isSetupDispatch("")).toBe(false);
+  });
 });
 
 describe("timeoutMs and lastLine", () => {
@@ -1783,5 +2004,1572 @@ describe("acceptLine and refuseLine", () => {
     expect(refuseLine("verify-x", "no proven verifier (none named)")).toBe(
       "refuse: verify-x lands nothing: no proven verifier (none named)",
     );
+  });
+});
+
+describe("listArgs", () => {
+  test("list takes a repo alone", () => {
+    expect(parseArgs(["list", "/r"])).toEqual({ ok: true, req: { cmd: "list", repo: "/r" } });
+  });
+
+  test("list without a repo or with a third word fails", () => {
+    expect(parseArgs(["list"])).toEqual({ ok: false, error: "list takes a repo" });
+    expect(parseArgs(["list", "/r", "cli"])).toEqual({ ok: false, error: "list takes a repo" });
+  });
+});
+
+describe("kindProse", () => {
+  test("known kinds read in prose, unknown kinds read null", () => {
+    expect(kindProse("cli")).toBe("command line");
+    expect(kindProse("web")).toBe("web pages");
+    expect(kindProse("library")).toBe("library interface");
+    expect(kindProse("telegraph")).toBeNull();
+  });
+});
+
+describe("surfaceFromReadme", () => {
+  test("the H1 prose names the surface", () => {
+    expect(surfaceFromReadme("# todo on the command line\n")).toBe("command line");
+    expect(surfaceFromReadme("# Driving the web pages\n")).toBe("web pages");
+    expect(surfaceFromReadme("# Notes on the library interface\n")).toBe("library interface");
+  });
+
+  test("the earliest phrase wins over a later aside", () => {
+    expect(surfaceFromReadme("For the web pages, unlike the command line below")).toBe("web pages");
+    expect(surfaceFromReadme("On the command line, never the web pages")).toBe("command line");
+  });
+
+  test("a short token alone names its surface", () => {
+    expect(surfaceFromReadme("Run `bun src/cli.ts` with a fresh file.\n")).toBe("command line");
+  });
+
+  test("a token inside a longer word names nothing", () => {
+    expect(surfaceFromReadme("Click the button twice.\n")).toBeNull();
+  });
+
+  test("a bare library names nothing: it is usually the project's own code", () => {
+    expect(surfaceFromReadme("Driven through the project's own library.\n")).toBeNull();
+  });
+
+  test("past the head, and an empty file, name nothing", () => {
+    const buried = `${"filler\n".repeat(30)}on the command line\n`;
+    expect(surfaceFromReadme(buried)).toBeNull();
+    expect(surfaceFromReadme("")).toBeNull();
+  });
+});
+
+describe("featurePageNames", () => {
+  test("markdown besides the index, sorted", () => {
+    expect(featurePageNames(["list.md", "README.md", "helper.ts", "add.md"])).toEqual([
+      "add.md",
+      "list.md",
+    ]);
+    expect(featurePageNames(["README.md"])).toEqual([]);
+  });
+});
+
+describe("renderListing", () => {
+  test("no verifiers print the none line", () => {
+    expect(renderListing({ indexes: [], verifiers: [] })).toBe("verifiers: none");
+  });
+
+  test("one verifier prints its block under the index", () => {
+    expect(
+      renderListing({
+        indexes: ["verifier/README.md"],
+        verifiers: [
+          {
+            folder: "verifier/cli",
+            surface: "command line",
+            pages: ["verifier/cli/features/add.md", "verifier/cli/features/list.md"],
+          },
+        ],
+      }),
+    ).toBe(
+      [
+        "index: verifier/README.md",
+        "verifier: verifier/cli",
+        "surface: command line",
+        "features: verifier/cli/features/add.md verifier/cli/features/list.md",
+      ].join("\n"),
+    );
+  });
+
+  test("a verifier without pages prints features none", () => {
+    expect(
+      renderListing({
+        indexes: ["verify-app/README.md"],
+        verifiers: [{ folder: "verify-app", surface: "command line", pages: [] }],
+      }),
+    ).toContain("features: none");
+  });
+});
+
+describe("listVerifiers", () => {
+  const plant = (root: string, rel: string, text: string): void => {
+    const target = join(root, rel);
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, text);
+  };
+
+  test("multi: the index with one verifier per folder", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verifier/README.md", "# Verifiers\n");
+      plant(root, "verifier/cli/README.md", "# todo on the command line\n");
+      plant(root, "verifier/cli/features/add.md", "# add\n");
+      plant(root, "verifier/cli/features/README.md", "# features\n");
+      expect(listVerifiers(root)).toEqual({
+        indexes: ["verifier/README.md"],
+        verifiers: [
+          {
+            folder: "verifier/cli",
+            surface: "command line",
+            pages: ["verifier/cli/features/add.md"],
+          },
+        ],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("multi without the index: each verifier README is the read-first entry", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verifier/cli/README.md", "# todo on the command line\n");
+      expect(listVerifiers(root)).toEqual({
+        indexes: ["verifier/cli/README.md"],
+        verifiers: [{ folder: "verifier/cli", surface: "command line", pages: [] }],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("single: a verify- folder with a README", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verify-app/README.md", "Run `bun src/cli.ts`.\n");
+      plant(root, "verify-app/features/add.md", "# add\n");
+      expect(listVerifiers(root)).toEqual({
+        indexes: ["verify-app/README.md"],
+        verifiers: [
+          {
+            folder: "verify-app",
+            surface: "command line",
+            pages: ["verify-app/features/add.md"],
+          },
+        ],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a surface the README never states reads unstated", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verify-app/README.md", "# Notes\n\nDrive it somehow.\n");
+      expect(listVerifiers(root)?.verifiers[0]?.surface).toBe("unstated");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a verify- file, a README-less folder and a bare tree hold nothing", () => {
+    const root = tempDir();
+    try {
+      plant(root, "verify-notes.txt", "not a verifier\n");
+      mkdirSync(join(root, "verify-empty"));
+      expect(listVerifiers(root)).toEqual({ indexes: [], verifiers: [] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("upkeep args", () => {
+  test("upkeep takes a repo, a run, a timeout and a folder", () => {
+    expect(
+      parseArgs(["upkeep", "/r", "--run", "/d", "--timeout", "60", "--folder", "custom/"]),
+    ).toEqual({
+      ok: true,
+      req: { cmd: "upkeep", repo: "/r", dispatch: "/d", timeout: 60, folder: "custom" },
+    });
+    expect(parseArgs(["upkeep", "/r", "--run", "/d"])).toEqual({
+      ok: true,
+      req: { cmd: "upkeep", repo: "/r", dispatch: "/d", timeout: 3600, folder: null },
+    });
+  });
+
+  test("upkeep-prompt takes a repo, a headless flag and a folder", () => {
+    expect(parseArgs(["upkeep-prompt", "/r", "--headless", "--folder", "./v"])).toEqual({
+      ok: true,
+      req: { cmd: "upkeep-prompt", repo: "/r", headless: true, folder: "v" },
+    });
+    expect(parseArgs(["upkeep-prompt", "/r"])).toEqual({
+      ok: true,
+      req: { cmd: "upkeep-prompt", repo: "/r", headless: false, folder: null },
+    });
+  });
+
+  test("upkeep-report takes a repo, a run, a report and a folder", () => {
+    expect(
+      parseArgs(["upkeep-report", "/r", "--run", "/d", "--report", "/u", "--folder", "v/"]),
+    ).toEqual({
+      ok: true,
+      req: { cmd: "upkeep-report", repo: "/r", dispatch: "/d", report: "/u", folder: "v" },
+    });
+  });
+
+  test("a missing repo, run, report or flag value fails", () => {
+    expect(parseArgs(["upkeep"])).toEqual({ ok: false, error: "upkeep takes a repo" });
+    expect(parseArgs(["upkeep", "/r"])).toEqual({
+      ok: false,
+      error: "upkeep needs --run <dispatch>",
+    });
+    expect(parseArgs(["upkeep-report", "/r", "--run", "/d"])).toEqual({
+      ok: false,
+      error: "upkeep-report needs --report <file>",
+    });
+    expect(parseArgs(["upkeep-prompt", "/r", "--folder"])).toEqual({
+      ok: false,
+      error: "upkeep-prompt needs --folder <dir>",
+    });
+    expect(parseArgs(["upkeep", "/r", "--run"])).toEqual({
+      ok: false,
+      error: "upkeep needs --run <dispatch>",
+    });
+  });
+
+  test("a misplaced flag fails", () => {
+    expect(parseArgs(["upkeep", "/r", "--run", "/d", "--headless"])).toEqual({
+      ok: false,
+      error: "unknown flag for upkeep: --headless",
+    });
+    expect(parseArgs(["upkeep-prompt", "/r", "--run", "/d"])).toEqual({
+      ok: false,
+      error: "unknown flag for upkeep-prompt: --run",
+    });
+    expect(
+      parseArgs(["upkeep-report", "/r", "--run", "/d", "--report", "/u", "--timeout", "5"]),
+    ).toEqual({
+      ok: false,
+      error: "unknown flag for upkeep-report: --timeout",
+    });
+    expect(parseArgs(["upkeep", "/r", "--run", "/d", "--report", "/u"])).toEqual({
+      ok: false,
+      error: "unknown flag for upkeep: --report",
+    });
+    expect(parseArgs(["upkeep-prompt", "/r", "--fresh"])).toEqual({
+      ok: false,
+      error: "unknown flag for upkeep-prompt: --fresh",
+    });
+  });
+
+  test("a bad folder or timeout fails", () => {
+    expect(parseArgs(["upkeep", "/r", "--run", "/d", "--folder", "/abs"]).ok).toBe(false);
+    expect(parseArgs(["upkeep", "/r", "--run", "/d", "--timeout", "soon"]).ok).toBe(false);
+  });
+});
+
+describe("upkeep naming", () => {
+  test("the upkeep branch numbers past branches taken", () => {
+    expect(pickUpkeepBranch(() => false)).toBe("upkeep");
+    expect(pickUpkeepBranch((n) => n === "upkeep")).toBe("upkeep-2");
+    expect(pickUpkeepBranch((n) => n !== "upkeep-3")).toBe("upkeep-3");
+  });
+
+  test("the upkeep worktree sits beside the repo, numbered past paths taken", () => {
+    expect(pickUpkeepWorktree("/x/app", () => false)).toBe("/x/app-upkeep");
+    expect(pickUpkeepWorktree("/x/app", (p) => p === "/x/app-upkeep")).toBe("/x/app-upkeep-2");
+  });
+});
+
+describe("upkeepSendText", () => {
+  test("points the session at its instructions file", () => {
+    const text = upkeepSendText("/d/logs/verifier-upkeep-prompt.txt");
+    expect(text).toContain("/d/logs/verifier-upkeep-prompt.txt");
+    expect(text).toMatch(/upkeep pass/u);
+    expect(text.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("upkeep unasked rule", () => {
+  test("the headless rule files unasked questions in the report", () => {
+    expect(UPKEEP_HEADLESS_UNASKED).toContain("UPKEEP.md");
+    expect(UPKEEP_HEADLESS_UNASKED).toContain("## Unasked:");
+    expect(UPKEEP_HEADLESS_UNASKED).toContain("Needed:");
+  });
+});
+
+describe("waitForFile", () => {
+  test("a fresh file already there returns after one settle nap", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "UPKEEP.md"), "hi\n");
+      const naps: number[] = [];
+      expect(
+        waitForFile(
+          wt,
+          "UPKEEP.md",
+          0,
+          60,
+          (ms) => {
+            naps.push(ms);
+          },
+          () => 1000,
+        ),
+      ).toBe(true);
+      expect(naps).toEqual([5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file still being written waits for it to settle", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      let writes = 0;
+      const ok = waitForFile(
+        wt,
+        "UPKEEP.md",
+        0,
+        60,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          writes++;
+          // Grows every nap but the third: two writes may share an mtime,
+          // so the growing size is what keeps the wait from settling early.
+          if (writes <= 2)
+            writeFileSync(join(wt, "UPKEEP.md"), `part ${writes}\n${"x".repeat(writes)}`);
+        },
+        () => now,
+      );
+      expect(ok).toBe(true);
+      expect(naps).toEqual([5000, 5000, 5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file that never settles gives up at the timeout", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      let writes = 0;
+      const ok = waitForFile(
+        wt,
+        "UPKEEP.md",
+        0,
+        12,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          writes++;
+          writeFileSync(join(wt, "UPKEEP.md"), `${"x".repeat(writes)}\n`);
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 5000, 2000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a sibling file never counts, however long the wait", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "HANDOVER.md"), "wrong file\n");
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForFile(
+        wt,
+        "UPKEEP.md",
+        0,
+        6,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 1000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("upkeep scope", () => {
+  test("a feature page is markdown under its verifier's features folder, besides its index", () => {
+    expect(isFeaturePage("verify-app", "verify-app/features/a.md")).toBe(true);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/features/a.md")).toBe(true);
+    expect(isFeaturePage("verify-app", "verify-app/features/README.md")).toBe(false);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/features/README.md")).toBe(false);
+    expect(isFeaturePage("verify-app", "verify-app/README.md")).toBe(false);
+    expect(isFeaturePage("verify-app", "verify-app/features/helper.ts")).toBe(false);
+    expect(isFeaturePage("verify-app", "other/features/a.md")).toBe(false);
+    expect(isFeaturePage("verify-app", "verify-app/features.md")).toBe(false);
+    expect(isFeaturePage("verify-app", "verify-app/features-old/a.md")).toBe(false);
+  });
+
+  test("a nested page counts, as make counts it", () => {
+    expect(isFeaturePage("verify-app", "verify-app/features/deep/a.md")).toBe(true);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/features/deep/a.md")).toBe(true);
+  });
+
+  test("a features folder below a subdir is no verifier's, and the multi root is none", () => {
+    expect(isFeaturePage("verify-app", "verify-app/notes/features/a.md")).toBe(false);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/notes/features/a.md")).toBe(false);
+    expect(isFeaturePage("verifier", "verifier/cli/features/a.md")).toBe(false);
+  });
+
+  test("detectFolders spans every shape present, the single front page first", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      expect(detectFolders(repo, null)).toEqual([]);
+      expect(detectFolders(repo, "custom")).toEqual(["custom"]);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      commitAll(repo, "single");
+      expect(detectFolders(repo, null)).toEqual(["verify-app"]);
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      commitAll(repo, "multi");
+      expect(detectFolders(repo, null)).toEqual(["verify-app", "verifier"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("detectFolders reads the shapes a revision holds, never the branch", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      commitAll(repo, "single");
+      const base = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      commitAll(repo, "multi");
+      expect(detectFolders(repo, null, base)).toEqual(["verify-app"]);
+      expect(detectFolders(repo, null, "HEAD")).toEqual(["verify-app", "verifier"]);
+      expect(detectFolders(repo, "custom", base)).toEqual(["custom"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("scopeVdirs finds the folder's verifier dirs, and no subdir features", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verify-app/notes/features/stray.md", "# s\n");
+      writeRepoFile(repo, "verifier/README.md", "- cli\n- web\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/a.md", "# a\n");
+      writeRepoFile(repo, "verifier/web/README.md", "# w\n");
+      writeRepoFile(repo, "verifier/web/features/b.md", "# b\n");
+      writeRepoFile(repo, "verifier/empty/README.md", "# e\n");
+      commitAll(repo, "first");
+      expect(scopeVdirs(repo, "verify-app")).toEqual(["verify-app"]);
+      expect(scopeVdirs(repo, "verifier")).toEqual(["verifier/cli", "verifier/web"]);
+      expect(scopeVdirs(repo, "missing")).toEqual([]);
+      expect(scopeVdirs(join(dir, "nowhere"), "verify-app")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("featurePages lists the folder's pages at the current commit, sorted", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/README.md", "# i\n");
+      writeRepoFile(repo, "verify-app/features/b.md", "# b\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verify-app/control.ts", "// helper\n");
+      commitAll(repo, "first");
+      expect(featurePages(repo, "verify-app")).toEqual([
+        "verify-app/features/a.md",
+        "verify-app/features/b.md",
+      ]);
+      expect(featurePages(repo, "missing")).toEqual([]);
+      expect(featurePages(join(dir, "nowhere"), "verify-app")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("featurePages lists nested pages with the flat ones", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/README.md", "# i\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verify-app/features/deep/b.md", "# b\n");
+      commitAll(repo, "first");
+      expect(featurePages(repo, "verify-app")).toEqual([
+        "verify-app/features/a.md",
+        "verify-app/features/deep/b.md",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("featurePages unites a multi folder's kinds, skipping a stray features dir", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/b.md", "# b\n");
+      writeRepoFile(repo, "verifier/cli/features/a.md", "# a\n");
+      writeRepoFile(repo, "verifier/cli/notes/features/stray.md", "# s\n");
+      commitAll(repo, "first");
+      expect(featurePages(repo, "verifier")).toEqual([
+        "verifier/cli/features/a.md",
+        "verifier/cli/features/b.md",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("upkeepScope spans every detected folder's pages", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/old.md", "# o\n");
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/new.md", "# n\n");
+      commitAll(repo, "first");
+      expect(upkeepScope(repo, null)).toEqual({
+        folders: ["verify-app", "verifier"],
+        pages: ["verifier/cli/features/new.md", "verify-app/features/old.md"],
+      });
+      expect(upkeepScope(repo, "verifier")).toEqual({
+        folders: ["verifier"],
+        pages: ["verifier/cli/features/new.md"],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("upkeepScope refuses a repo with no verifiers, or a folder with no pages", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      expect(() => upkeepScope(repo, null)).toThrow(`no verifiers in ${repo}`);
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      commitAll(repo, "index without verifiers");
+      expect(() => upkeepScope(repo, null)).toThrow("no verifiers under verifier in");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseUpkeepReport", () => {
+  test("reads verifiers, features, claims and unasked questions in order", () => {
+    const text = [
+      "# Upkeep pass",
+      "",
+      "## Verifier: cli",
+      "Folder: verify-app",
+      "prose the parser skips",
+      "",
+      "## Feature: verify-app/features/add.md",
+      "Outcome: changed",
+      "",
+      "## Claim: add: one task",
+      "Page: verify-app/features/add.md",
+      "Verdict: stale",
+      "Stated: stdout is added 1",
+      "Found: stdout is added 2",
+      "",
+      "## Unasked: the token file",
+      "Needed: the login step",
+      "",
+    ].join("\n");
+    expect(parseUpkeepReport(text)).toEqual({
+      ok: true,
+      report: {
+        verifiers: [{ name: "cli", folder: "verify-app" }],
+        features: [{ page: "verify-app/features/add.md", outcome: "changed" }],
+        claims: [
+          {
+            name: "add: one task",
+            page: "verify-app/features/add.md",
+            verdict: "stale",
+            stated: "stdout is added 1",
+            found: "stdout is added 2",
+            because: null,
+          },
+        ],
+        unasked: [{ question: "the token file", needed: "the login step" }],
+      },
+    });
+  });
+
+  test("only the first labeled line of each kind is read", () => {
+    const text = [
+      "## Feature: p",
+      "Outcome: changed",
+      "Outcome: clean",
+      "",
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: first",
+      "Found: second",
+      "",
+    ].join("\n");
+    const parsed = parseUpkeepReport(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("the report should parse");
+    expect(parsed.report.features).toEqual([{ page: "p", outcome: "changed" }]);
+    expect(parsed.report.claims[0]?.found).toBe("first");
+  });
+
+  test("a missing folder, outcome, page, verdict, stated result, finding, reason or need fails", () => {
+    expect(parseUpkeepReport("## Verifier: cli\n")).toEqual({
+      ok: false,
+      error: "the report names no folder for cli",
+    });
+    expect(parseUpkeepReport("## Feature: p\n")).toEqual({
+      ok: false,
+      error: "the report names no outcome for p",
+    });
+    expect(parseUpkeepReport("## Claim: c\nVerdict: stale\nStated: s\nFound: f\n")).toEqual({
+      ok: false,
+      error: "the report names no page for c",
+    });
+    expect(parseUpkeepReport("## Claim: c\nPage: p\nStated: s\nFound: f\n")).toEqual({
+      ok: false,
+      error: "the report names no verdict for c",
+    });
+    expect(parseUpkeepReport("## Claim: c\nPage: p\nVerdict: stale\nFound: f\n")).toEqual({
+      ok: false,
+      error: "the report names no stated result for c",
+    });
+    expect(parseUpkeepReport("## Claim: c\nPage: p\nVerdict: stale\nStated: s\n")).toEqual({
+      ok: false,
+      error: "the report names no finding for c",
+    });
+    expect(parseUpkeepReport("## Claim: c\nPage: p\nVerdict: unchecked\nStated: s\n")).toEqual({
+      ok: false,
+      error: "the report names no reason for c",
+    });
+    expect(parseUpkeepReport("## Unasked: q\n")).toEqual({
+      ok: false,
+      error: "the report names nothing its unasked question needed: q",
+    });
+  });
+
+  test("an unknown outcome or verdict fails", () => {
+    expect(parseUpkeepReport("## Feature: p\nOutcome: stale\n")).toEqual({
+      ok: false,
+      error: "the outcome for p is not clean, changed or blocked: stale",
+    });
+    expect(parseUpkeepReport("## Claim: c\nPage: p\nVerdict: clean\nStated: s\n")).toEqual({
+      ok: false,
+      error: "the verdict for c is not stale or unchecked: clean",
+    });
+  });
+
+  test("a section with no name, and a name twice, fails", () => {
+    expect(parseUpkeepReport("## Claim:\n").ok).toBe(false);
+    const twice = [
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: f",
+      "",
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: f",
+      "",
+    ].join("\n");
+    expect(parseUpkeepReport(twice)).toEqual({
+      ok: false,
+      error: "the report names c twice",
+    });
+    expect(
+      parseUpkeepReport("## Feature: p\nOutcome: clean\n\n## Feature: p\nOutcome: clean\n"),
+    ).toEqual({ ok: false, error: "the report names p twice" });
+  });
+});
+
+describe("verdictUpkeep", () => {
+  const pages = ["v/features/a.md", "v/features/b.md"];
+  const verifiers = [{ name: "cli", folder: "v" }];
+  function report(over: Partial<UpkeepReport>): UpkeepReport {
+    return { verifiers, features: [], claims: [], unasked: [], ...over };
+  }
+
+  test("a clean report prints only the summary", () => {
+    const decided = verdictUpkeep(
+      pages,
+      ["v"],
+      report({ features: pages.map((page) => ({ page, outcome: "clean" as const })) }),
+    );
+    expect(decided).toEqual({
+      ok: true,
+      verdict: { lines: ["features driven: 2, stale: 0, unchecked: 0"], stale: 0, unchecked: 0 },
+    });
+  });
+
+  test("stale, unchecked and unasked print in report order with the summary", () => {
+    const decided = verdictUpkeep(
+      ["v/features/a.md"],
+      ["v"],
+      report({
+        features: [{ page: "v/features/a.md", outcome: "changed" }],
+        claims: [
+          {
+            name: "a: one",
+            page: "v/features/a.md",
+            verdict: "stale",
+            stated: "s1",
+            found: "f1",
+            because: null,
+          },
+        ],
+        unasked: [{ question: "q", needed: "n" }],
+      }),
+    );
+    expect(decided).toEqual({
+      ok: true,
+      verdict: {
+        lines: [
+          "stale: a: one (v/features/a.md)",
+          "  stated: s1",
+          "  found: f1",
+          "unasked: q",
+          "  needed: n",
+          "features driven: 1, stale: 1, unchecked: 0",
+        ],
+        stale: 1,
+        unchecked: 0,
+      },
+    });
+  });
+
+  test("no verifier, or one outside the folder, fails", () => {
+    expect(verdictUpkeep(pages, ["v"], report({ verifiers: [] }))).toEqual({
+      ok: false,
+      error: "the report names no verifier",
+    });
+    expect(
+      verdictUpkeep(pages, ["v"], report({ verifiers: [{ name: "cli", folder: "elsewhere" }] })),
+    ).toEqual({
+      ok: false,
+      error: "the report's verifier cli sits outside v: elsewhere",
+    });
+  });
+
+  test("a verifier under any spanned folder counts, outside every folder fails", () => {
+    const both = ["verify-app", "verifier"];
+    const ok = verdictUpkeep(
+      ["verify-app/features/a.md"],
+      both,
+      report({
+        verifiers: [{ name: "cli", folder: "verifier/cli" }],
+        features: [{ page: "verify-app/features/a.md", outcome: "clean" }],
+      }),
+    );
+    expect(ok).toEqual({
+      ok: true,
+      verdict: { lines: ["features driven: 1, stale: 0, unchecked: 0"], stale: 0, unchecked: 0 },
+    });
+    expect(
+      verdictUpkeep(
+        ["verify-app/features/a.md"],
+        both,
+        report({
+          verifiers: [{ name: "cli", folder: "elsewhere" }],
+          features: [{ page: "verify-app/features/a.md", outcome: "clean" }],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report's verifier cli sits outside verify-app, verifier: elsewhere",
+    });
+  });
+
+  test("a page without an outcome, or an outcome for a page not held, fails", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({ features: [{ page: "v/features/a.md", outcome: "clean" }] }),
+      ),
+    ).toEqual({ ok: false, error: "the report names no outcome for v/features/b.md" });
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "clean" },
+            { page: "v/features/b.md", outcome: "clean" },
+            { page: "v/features/c.md", outcome: "clean" },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names a page the verifiers do not hold: v/features/c.md",
+    });
+  });
+
+  test("a changed or blocked page without its claims fails", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "changed" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names no stale claim for its changed page v/features/a.md",
+    });
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "blocked" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names no unchecked claim for its blocked page v/features/a.md",
+    });
+  });
+
+  test("claims on a clean page, or on a page not held, fail", () => {
+    const claim = {
+      name: "a: one",
+      page: "v/features/a.md",
+      verdict: "stale" as const,
+      stated: "s",
+      found: "f",
+      because: null,
+    };
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: pages.map((page) => ({ page, outcome: "clean" as const })),
+          claims: [claim],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names claims for its clean page v/features/a.md",
+    });
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: pages.map((page) => ({ page, outcome: "clean" as const })),
+          claims: [{ ...claim, page: "v/features/c.md" }],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report's claim a: one sits on no page the verifiers hold: v/features/c.md",
+    });
+  });
+
+  test("a mixed page is blocked and lists both claims", () => {
+    const decided = verdictUpkeep(
+      pages,
+      ["v"],
+      report({
+        features: [
+          { page: "v/features/a.md", outcome: "blocked" },
+          { page: "v/features/b.md", outcome: "clean" },
+        ],
+        claims: [
+          {
+            name: "a: one",
+            page: "v/features/a.md",
+            verdict: "stale",
+            stated: "s1",
+            found: "f1",
+            because: null,
+          },
+          {
+            name: "a: two",
+            page: "v/features/a.md",
+            verdict: "unchecked",
+            stated: "s2",
+            found: null,
+            because: "b2",
+          },
+        ],
+      }),
+    );
+    expect(decided).toEqual({
+      ok: true,
+      verdict: {
+        lines: [
+          "stale: a: one (v/features/a.md)",
+          "  stated: s1",
+          "  found: f1",
+          "unchecked: a: two (v/features/a.md)",
+          "  because: b2",
+          "features driven: 2, stale: 1, unchecked: 1",
+        ],
+        stale: 1,
+        unchecked: 1,
+      },
+    });
+  });
+
+  test("a mixed page marked changed fails on the unchecked claim", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "changed" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+          claims: [
+            {
+              name: "a: one",
+              page: "v/features/a.md",
+              verdict: "stale",
+              stated: "s",
+              found: "f",
+              because: null,
+            },
+            {
+              name: "a: two",
+              page: "v/features/a.md",
+              verdict: "unchecked",
+              stated: "s",
+              found: null,
+              because: "b",
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report's changed page v/features/a.md carries an unchecked claim",
+    });
+  });
+
+  test("a stale claim alone on a blocked page still fails", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "blocked" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+          claims: [
+            {
+              name: "a: one",
+              page: "v/features/a.md",
+              verdict: "stale",
+              stated: "s",
+              found: "f",
+              because: null,
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names no unchecked claim for its blocked page v/features/a.md",
+    });
+  });
+
+  test("an unchecked claim alone on a changed page fails", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        ["v"],
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "changed" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+          claims: [
+            {
+              name: "a: two",
+              page: "v/features/a.md",
+              verdict: "unchecked",
+              stated: "s",
+              found: null,
+              because: "b",
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names no stale claim for its changed page v/features/a.md",
+    });
+  });
+});
+
+describe("correcting args", () => {
+  test("upkeep and upkeep-prompt take --correct, upkeep-report refuses it", () => {
+    expect(parseArgs(["upkeep", "/r", "--run", "/d", "--correct"])).toEqual({
+      ok: true,
+      req: {
+        cmd: "upkeep",
+        repo: "/r",
+        dispatch: "/d",
+        timeout: 3600,
+        folder: null,
+        correct: true,
+      },
+    });
+    expect(parseArgs(["upkeep-prompt", "/r", "--correct"])).toEqual({
+      ok: true,
+      req: { cmd: "upkeep-prompt", repo: "/r", headless: false, folder: null, correct: true },
+    });
+    expect(
+      parseArgs(["upkeep-report", "/r", "--run", "/d", "--report", "/u", "--correct"]),
+    ).toEqual({ ok: false, error: "unknown flag for upkeep-report: --correct" });
+  });
+
+  test("check and land take --report instead of --handover, never both", () => {
+    expect(parseArgs(["check", "/r", "upkeep", "--run", "/d", "--report", "/u"])).toEqual({
+      ok: true,
+      req: {
+        cmd: "check",
+        repo: "/r",
+        branch: "upkeep",
+        dispatch: "/d",
+        report: "/u",
+        folder: null,
+        timeout: 3600,
+      },
+    });
+    expect(
+      parseArgs(["land", "/r", "upkeep", "--run", "/d", "--report", "/u", "--landing", "local"]),
+    ).toEqual({
+      ok: true,
+      req: {
+        cmd: "land",
+        repo: "/r",
+        branch: "upkeep",
+        dispatch: "/d",
+        report: "/u",
+        folder: null,
+        timeout: 3600,
+        landing: "local",
+        wordGiven: false,
+      },
+    });
+    expect(
+      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--report", "/u"]),
+    ).toEqual({ ok: false, error: "check takes --handover or --report, not both" });
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--report"])).toEqual({
+      ok: false,
+      error: "check needs --report <file>",
+    });
+  });
+});
+
+describe("corrected claims", () => {
+  test("parseUpkeepReport reads the first Corrected: line, and none when absent", () => {
+    const text = [
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: f",
+      "Corrected: first",
+      "Corrected: second",
+      "",
+    ].join("\n");
+    const parsed = parseUpkeepReport(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("the report should parse");
+    expect(parsed.report.claims).toEqual([
+      {
+        name: "c",
+        page: "p",
+        verdict: "stale",
+        stated: "s",
+        found: "f",
+        because: null,
+        corrected: "first",
+      },
+    ]);
+    const bare = parseUpkeepReport("## Claim: c\nPage: p\nVerdict: stale\nStated: s\nFound: f\n");
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) throw new Error("the report should parse");
+    expect(bare.report.claims[0]).toEqual({
+      name: "c",
+      page: "p",
+      verdict: "stale",
+      stated: "s",
+      found: "f",
+      because: null,
+    });
+    expect("corrected" in (bare.report.claims[0] as object)).toBe(false);
+  });
+
+  test("correctedClaims keeps stale claims with a correction", () => {
+    expect(
+      correctedClaims([
+        {
+          name: "a",
+          page: "p",
+          verdict: "stale",
+          stated: "s",
+          found: "f",
+          because: null,
+          corrected: "x",
+        },
+        { name: "b", page: "p", verdict: "stale", stated: "s", found: "f", because: null },
+        { name: "c", page: "p", verdict: "unchecked", stated: "s", found: null, because: "b" },
+      ]).map((c) => c.name),
+    ).toEqual(["a"]);
+  });
+
+  test("a corrected stale claim prints its correction after its finding", () => {
+    const decided = verdictUpkeep(["v/features/a.md"], ["v"], {
+      verifiers: [{ name: "cli", folder: "v" }],
+      features: [{ page: "v/features/a.md", outcome: "changed" }],
+      claims: [
+        {
+          name: "a: one",
+          page: "v/features/a.md",
+          verdict: "stale",
+          stated: "s1",
+          found: "f1",
+          because: null,
+          corrected: "reworded and drove again",
+        },
+      ],
+      unasked: [],
+    });
+    expect(decided).toEqual({
+      ok: true,
+      verdict: {
+        lines: [
+          "stale: a: one (v/features/a.md)",
+          "  stated: s1",
+          "  found: f1",
+          "corrected: a: one (v/features/a.md)",
+          "  change: reworded and drove again",
+          "features driven: 1, stale: 1, unchecked: 0",
+        ],
+        stale: 1,
+        unchecked: 0,
+      },
+    });
+  });
+
+  test("a correction on an unchecked claim fails naming the claim", () => {
+    const decided = verdictUpkeep(["v/features/a.md"], ["v"], {
+      verifiers: [{ name: "cli", folder: "v" }],
+      features: [{ page: "v/features/a.md", outcome: "blocked" }],
+      claims: [
+        {
+          name: "u: one",
+          page: "v/features/a.md",
+          verdict: "unchecked",
+          stated: "s",
+          found: null,
+          because: "b",
+          corrected: "x",
+        },
+      ],
+      unasked: [],
+    });
+    expect(decided).toEqual({
+      ok: false,
+      error: "the report's unchecked claim u: one carries a correction",
+    });
+  });
+
+  test("a Corrected: line with no text fails naming the claim", () => {
+    const text = [
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: f",
+      "Corrected:",
+      "",
+    ].join("\n");
+    expect(parseUpkeepReport(text)).toEqual({
+      ok: false,
+      error: "the report names no correction for c",
+    });
+  });
+
+  test("correctedClaims drops an empty correction", () => {
+    expect(
+      correctedClaims([
+        {
+          name: "a",
+          page: "p",
+          verdict: "stale",
+          stated: "s",
+          found: "f",
+          because: null,
+          corrected: "",
+        },
+        {
+          name: "b",
+          page: "p",
+          verdict: "stale",
+          stated: "s",
+          found: "f",
+          because: null,
+          corrected: "x",
+        },
+      ]).map((c) => c.name),
+    ).toEqual(["b"]);
+  });
+});
+
+describe("outsideReason and acceptLineReport", () => {
+  test("no paths outside means no reason", () => {
+    expect(outsideReason([])).toBe(null);
+  });
+
+  test("outside paths refuse with the first ten named", () => {
+    expect(outsideReason(["AGENTS.md"])).toBe("outside the verifiers' folder: AGENTS.md");
+    const twelve = Array.from({ length: 12 }, (_, n) => `f${n}.md`);
+    expect(outsideReason(twelve)).toBe(
+      `outside the verifiers' folder: ${twelve.slice(0, 10).join(", ")} and 2 more`,
+    );
+  });
+
+  test("a pass branch lands with what its report corrected", () => {
+    expect(
+      acceptLineReport("upkeep", {
+        verifiers: [
+          { name: "cli", folder: "verify-app" },
+          { name: "web", folder: "verifier/web" },
+        ],
+        features: [],
+        claims: [
+          {
+            name: "a",
+            page: "p",
+            verdict: "stale",
+            stated: "s",
+            found: "f",
+            because: null,
+            corrected: "x",
+          },
+          { name: "b", page: "p", verdict: "stale", stated: "s", found: "f", because: null },
+          { name: "c", page: "p", verdict: "unchecked", stated: "s", found: null, because: "b" },
+        ],
+        unasked: [],
+      }),
+    ).toBe(
+      "accept: upkeep lands upkeep corrections for cli (verify-app), web (verifier/web); " +
+        "corrected: 1 of 2 stale, unchecked: 1",
+    );
+  });
+});
+
+describe("outsideFolders", () => {
+  test("paths under any folder stay in, the rest refuse in git order", () => {
+    expect(outsideFolders([], ["verify-app", "verifier"])).toEqual([]);
+    expect(
+      outsideFolders(
+        ["verify-app/features/a.md", "verifier/cli/features/b.md"],
+        ["verify-app", "verifier"],
+      ),
+    ).toEqual([]);
+    expect(
+      outsideFolders(
+        ["verifier/README.md", "AGENTS.md", "verify-app/features/a.md", "src/cli.ts"],
+        ["verify-app", "verifier"],
+      ),
+    ).toEqual(["AGENTS.md", "src/cli.ts"]);
+  });
+
+  test("one folder refuses the other shape", () => {
+    expect(
+      outsideFolders(["verifier/cli/features/a.md", "verify-app/features/a.md"], ["verify-app"]),
+    ).toEqual(["verifier/cli/features/a.md"]);
+  });
+});
+
+describe("untouchedCorrected", () => {
+  const mended = (name: string, page: string) => ({
+    name,
+    page,
+    verdict: "stale" as const,
+    stated: "s",
+    found: "f",
+    because: null,
+    corrected: "x",
+  });
+
+  test("a mended claim whose page the diff touches is held", () => {
+    expect(
+      untouchedCorrected(
+        ["v/features/a.md", "v/features/README.md"],
+        [mended("a", "v/features/a.md")],
+      ),
+    ).toEqual([]);
+  });
+
+  test("a mended claim whose page the diff never touched is hollow", () => {
+    expect(
+      untouchedCorrected(
+        ["v/features/README.md"],
+        [mended("a", "v/features/a.md"), mended("b", "v/features/b.md")],
+      ).map((c) => c.name),
+    ).toEqual(["a", "b"]);
+  });
+
+  test("a leading ./ never hides a touched page", () => {
+    expect(untouchedCorrected(["./v/features/a.md"], [mended("a", "v/features/a.md")])).toEqual([]);
+    expect(untouchedCorrected(["v/features/a.md"], [mended("a", "./v/features/a.md")])).toEqual([]);
+  });
+});
+
+describe("strayUncommitted", () => {
+  test("the report alone is clean", () => {
+    expect(strayUncommitted("?? UPKEEP.md\0", ["UPKEEP.md"])).toEqual([]);
+    expect(strayUncommitted("", ["UPKEEP.md"])).toEqual([]);
+  });
+
+  test("modified and untracked paths stray", () => {
+    expect(
+      strayUncommitted(" M verify-app/helper.ts\0?? notes.txt\0?? UPKEEP.md\0", ["UPKEEP.md"]),
+    ).toEqual(["verify-app/helper.ts", "notes.txt"]);
+  });
+
+  test("either side of a rename strays", () => {
+    expect(strayUncommitted("R  new.md\0old.md\0", ["UPKEEP.md"])).toEqual(["new.md", "old.md"]);
+  });
+});
+
+describe("index confirmation", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+
+  test("confirmedSha reads the sha lowered, or nothing when it names none", () => {
+    expect(confirmedSha(`Files: a. Confirmed: ${sha}.`)).toBe(sha);
+    // ASCII: the fixture sha is hex
+    expect(confirmedSha(`Confirmed: ${sha.toUpperCase()}`)).toBe(sha);
+    expect(confirmedSha("Files: a.")).toBe(null);
+    expect(confirmedSha(`confirmed: ${sha}`)).toBe(null);
+    expect(confirmedSha(`Confirmed: ${sha.slice(0, 39)}`)).toBe(null);
+    expect(confirmedSha(`Confirmed: ${sha}0`)).toBe(null);
+  });
+
+  test("indexBullets spans bullets to the next bullet or heading", () => {
+    expect(
+      indexBullets(
+        [
+          "# index",
+          "",
+          "- cli goes in verifier/cli/.",
+          "  continued",
+          "",
+          "- web goes in verifier/web/.",
+          "",
+          "## notes",
+          "",
+          "prose",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      ["- cli goes in verifier/cli/.", "  continued", ""],
+      ["- web goes in verifier/web/.", ""],
+    ]);
+  });
+
+  test("spanNamesDir matches the folder, never a longer kind", () => {
+    expect(
+      spanNamesDir(["- the command line (cli) verifier goes in verifier/cli/."], "verifier/cli"),
+    ).toBe(true);
+    expect(spanNamesDir(["- see [cli](cli/) for the driver"], "verifier/cli")).toBe(true);
+    expect(
+      spanNamesDir(
+        ["- the command line (cli) verifier goes in verifier/cli-extra/."],
+        "verifier/cli",
+      ),
+    ).toBe(false);
+    expect(
+      spanNamesDir(["- the web pages (web) verifier goes in verifier/web/."], "verifier/cli"),
+    ).toBe(false);
+  });
+
+  test("bulletConfirm reads the bullet's own confirmation", () => {
+    const index = [
+      `- cli goes in verifier/cli/. Confirmed: ${sha}`,
+      "- web goes in verifier/web/. Files: x.",
+      "",
+    ].join("\n");
+    expect(bulletConfirm(index, "verifier/cli")).toBe(sha);
+    expect(bulletConfirm(index, "verifier/web")).toBe(null);
+    expect(bulletConfirm(index, "verifier/missing")).toBe(null);
+  });
+
+  test("a wrapped bullet confirms from its continuation line", () => {
+    const index = [`- cli goes in verifier/cli/. Files: x.`, `  Confirmed: ${sha}`, ""].join("\n");
+    expect(bulletConfirm(index, "verifier/cli")).toBe(sha);
+  });
+
+  test("spanNamesDir reads the first line only, never the prose below", () => {
+    expect(
+      spanNamesDir(
+        ["- the command line (cli) verifier.", "  It shares its driver with verifier/web/."],
+        "verifier/web",
+      ),
+    ).toBe(false);
+  });
+
+  test("a mention in another bullet never claims a confirmation", () => {
+    const old = "0".repeat(40);
+    const refused = [
+      `- cli shares its driver with verifier/web/. Confirmed: ${old}`,
+      `- web goes in verifier/web/. Confirmed: ${sha}`,
+      "",
+    ].join("\n");
+    expect(bulletConfirm(refused, "verifier/web")).toBe(null);
+    const accepted = [
+      `- cli goes in verifier/cli/. Confirmed: ${sha}`,
+      "  It shares its driver with verifier/web/.",
+      "- web goes in verifier/web/. Files: x.",
+      "",
+    ].join("\n");
+    expect(bulletConfirm(accepted, "verifier/web")).toBe(null);
+  });
+
+  test("a paragraph after the list belongs to no bullet", () => {
+    expect(
+      indexBullets(
+        [
+          "- cli goes in verifier/cli/.",
+          "- web goes in verifier/web/.",
+          "",
+          `Confirmed: ${sha}`,
+          "",
+        ].join("\n"),
+      ),
+    ).toEqual([["- cli goes in verifier/cli/."], ["- web goes in verifier/web/.", ""]]);
+  });
+
+  test("a free-floating Confirmed: line confirms nothing", () => {
+    const index = [
+      "- cli goes in verifier/cli/. Files: x.",
+      "- web goes in verifier/web/. Files: y.",
+      "",
+      `Confirmed: ${sha}`,
+      "",
+    ].join("\n");
+    expect(bulletConfirm(index, "verifier/cli")).toBe(null);
+    expect(bulletConfirm(index, "verifier/web")).toBe(null);
+  });
+
+  test("featuresConfirm reads the whole features index", () => {
+    expect(featuresConfirm(`# map\n\nFiles: a.\nConfirmed: ${sha}\n`)).toBe(sha);
+    expect(featuresConfirm("# map\n\nFiles: a.\n")).toBe(null);
+  });
+
+  test("indexFileFor covers shared bullets and lone features indexes", () => {
+    expect(indexFileFor("verifier/cli", true)).toBe("verifier/README.md");
+    expect(indexFileFor("verify-app", true)).toBe("verify-app/features/README.md");
+    expect(indexFileFor("verifier/cli", false)).toBe("verifier/cli/features/README.md");
+    expect(indexFileFor("verifier", true)).toBe("verifier/features/README.md");
+  });
+});
+
+describe("scopeVdirs at a revision", () => {
+  test("reads the driven commit, not the current one", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/a.md", "# a\n");
+      commitAll(repo, "first");
+      const head = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+      writeRepoFile(repo, "verifier/web/README.md", "# w\n");
+      writeRepoFile(repo, "verifier/web/features/b.md", "# b\n");
+      commitAll(repo, "second");
+      expect(scopeVdirs(repo, "verifier", head)).toEqual(["verifier/cli"]);
+      expect(scopeVdirs(repo, "verifier")).toEqual(["verifier/cli", "verifier/web"]);
+      expect(scopeVdirs(repo, "missing", head)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("upkeepCorrectSendText", () => {
+  test("names the correcting pass and its instructions file", () => {
+    const text = upkeepCorrectSendText("/d/logs/verifier-upkeep-prompt.txt");
+    expect(text).toContain("/d/logs/verifier-upkeep-prompt.txt");
+    expect(text).toMatch(/correcting upkeep pass/u);
+    expect(text.endsWith("\n")).toBe(true);
   });
 });

@@ -36,8 +36,10 @@
 //     draft       the first non-empty line starts DRAFT:
 //
 // Notes, printed after the findings and never failing: the words in the plain part; the numbers of
-// criteria, decisions and technical notes; and each criterion or decision long enough to be more
-// than one idea (the limits are below).
+// criteria, decisions and technical notes; each criterion or decision long enough to be more
+// than one idea (the limits are below); and, when more than five criteria are counted, a note
+// saying so and what to do instead. The last criterion is not counted when it asks for a fixture
+// run; the counts note still counts every criterion.
 //
 // The ticket reads one file and contacts nothing.
 //
@@ -63,6 +65,9 @@ import {
 export const MAX_CRITERION_WORDS = 30;
 export const MAX_CRITERION_SENTENCES = 2;
 export const MAX_DECISION_WORDS = 60;
+// A ticket has at most five acceptance criteria. Above five the check warns, in a note that never
+// fails, so the clerk leaves work out or splits the ticket by outcome.
+export const MAX_CRITERIA = 5;
 
 export interface Finding {
   line: number;
@@ -228,6 +233,16 @@ function stripItemHead(item: Item): string {
     .replace(/^[0-9]+\.[ \t]+/u, "")
     .replace(/^[-*][ \t]+\*\*D[0-9]+[^*]*\*\*/u, "")
     .trim();
+}
+
+// The last criterion is set aside when it asks for a fixture run: its text says "fixture run" and
+// "scores clean", in any case. No other criterion is set aside, and at most one is: a fixture line
+// worded otherwise, or not last, is counted, so a mistake adds a warning and never hides one.
+function isFixtureLine(criterion: Item | undefined): boolean {
+  if (criterion === undefined) return false;
+  // LOWER: lowered for an ASCII phrase match; a miss only adds a warning
+  const text = stripItemHead(criterion).toLowerCase();
+  return text.includes("fixture run") && text.includes("scores clean");
 }
 
 // --- the check --------------------------------------------------------------------------------
@@ -403,6 +418,12 @@ export function analyze(text: string, final: boolean): Report | null {
   // The notes.
   notes.push(`plain part: ${plainWords} words`);
   notes.push(`criteria ${N}, decisions ${decisions.length}, technical notes ${noteCount}`);
+  const counted = N - (isFixtureLine(criteria[N - 1]) ? 1 : 0);
+  if (counted > MAX_CRITERIA) {
+    notes.push(
+      `more than five criteria: ${counted}: leave work out or split the ticket by outcome`,
+    );
+  }
   for (const c of criteria) {
     const body = stripItemHead(c);
     const words = wordCount(body);

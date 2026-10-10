@@ -1,4 +1,4 @@
-// Tests beside scripts/host.ts, moved from its --self-test on #109: 335 controls.
+// Tests beside scripts/host.ts, moved from its --self-test on #109: 337 controls.
 // host.ts's suite lives in ./host-self-test.ts's runControls (shared sequential fixture);
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. Portable process controls are below.
@@ -21,7 +21,32 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls, waitFor } from "./host-self-test.ts";
-import { runWorktreePaths } from "./host.ts";
+import { runTabLockOwnerAlive, runWorktreePaths } from "./host.ts";
+import {
+  SELF,
+  addWorktree,
+  calls,
+  freshHerdr,
+  freshTmux,
+  fxEnv,
+  makeFixtureRepo,
+  makeFx,
+  readHerdr,
+  saveHerdr,
+  saveTmux,
+  sh,
+  stubConfig,
+} from "./acceptance-373.ts";
+import { cleanup, placementRecords, runLaunch, runTabRecords } from "./acceptance-374.ts";
+import {
+  copyWatcher,
+  fixTabRecords,
+  headlessPostmaster,
+  mainRepoOf,
+  seedProjectSpace,
+  toolCheckout,
+  writeFixtureDispatch,
+} from "./acceptance-375.ts";
 import { bootId, processStart, processState } from "./lib/processes.ts";
 import { launchRound, type StepChild, type StepDeps } from "./review-round.ts";
 
@@ -30,8 +55,8 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "detect", count: 5 },
   { name: "launch labels and run identity", count: 31 },
   { name: "name: from the waybill, so no title is typed into a shell", count: 5 },
-  { name: "run, no host: headless launch", count: 16 },
-  { name: "a run launch without a named run space is refused", count: 1 },
+  { name: "run, no host: headless launch", count: 18 },
+  { name: "a run launch without a named run tab is refused", count: 3 },
   { name: "stop: owned process trees and refusal controls", count: 5 },
   { name: "stop: registry identity and process membership", count: 13 },
   { name: "run, Herdr (stub): pane placement and environment handover", count: 16 },
@@ -51,6 +76,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "review round 2 fixes, tmux (stub)", count: 1 },
   { name: "review round 4 fixes, Herdr (stub)", count: 16 },
   { name: "review round 4 fixes, tmux (stub)", count: 11 },
+  { name: "374 review round 1 fixes, Herdr (stub)", count: 8 },
   { name: "teardown reads only the round records", count: 16 },
   { name: "interactive sessions", count: 15 },
   { name: "clerk close", count: 6 },
@@ -1175,4 +1201,177 @@ test("close-run teardown finds reviewer worktrees from rows the launch wrote", (
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("run-state strips control characters from the ticket title", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runstate-")));
+  try {
+    const dispatch = join(dir, "dispatch");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Dispatch\nname: #1, Pro\x1b]0;spoofed\x07\x1b[2J title\nsynthesis worktree: /nowhere\n",
+    );
+    writeFileSync(join(dispatch, "manifest.json"), '{"stage":"review","leg":2,"lanes":{}}\n');
+    const result = spawnSync(join(import.meta.dir, "run"), ["host", "run-state", dispatch], {
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    const first = result.stdout.split("\n")[0] ?? "";
+    expect(first).not.toContain("\x1b");
+    expect(first).not.toContain("\x07");
+    expect(first).toContain("#1, Pro");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run-state reports an abandoned run as complete, not unknown", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runstate-")));
+  try {
+    const dispatch = join(dir, "dispatch");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Dispatch\nname: #1, Probe\nsynthesis worktree: /nowhere\n",
+    );
+    writeFileSync(join(dispatch, "manifest.json"), '{"stage":"abandoned","leg":2,"lanes":{}}\n');
+    const result = spawnSync(join(import.meta.dir, "run"), ["host", "run-state", dispatch], {
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("nothing — the run is complete");
+    expect(result.stdout).not.toContain("unknown — the run's records name no stage");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run-tab lock reads live only for its own started owner", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runlock-")));
+  try {
+    const lock = join(dir, ".lock");
+    mkdirSync(lock);
+    const start = processStart(process.pid);
+    expect(start).not.toBeNull();
+    writeFileSync(join(lock, "owner"), `${process.pid}\n${start ?? ""}\n`);
+    expect(runTabLockOwnerAlive(lock)).toBe(true);
+    const dead = spawnSync("true");
+    const deadPid = dead.pid ?? 0;
+    expect(deadPid).toBeGreaterThan(0);
+    expect(dead.status).toBe(0);
+    writeFileSync(join(lock, "owner"), `${deadPid}\nnot a start time\n`);
+    expect(runTabLockOwnerAlive(lock)).toBe(false);
+    writeFileSync(join(lock, "owner"), "not a pid\n");
+    expect(runTabLockOwnerAlive(lock)).toBe(false);
+    unlinkSync(join(lock, "owner"));
+    expect(runTabLockOwnerAlive(lock)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("375 review round 1 fixes", () => {
+  test("spawn on a fixture copy passes the caller POSTMASTER_* settings to its pane, and a run launch takes none", () => {
+    const fx = makeFx("375-spawn-env");
+    try {
+      const tool = toolCheckout();
+      const pmRoot = mainRepoOf(tool);
+      expect(pmRoot).not.toBe("");
+      const fix = makeFixtureRepo(fx, "fixcopy");
+      saveHerdr(fx, freshHerdr());
+      saveTmux(fx, freshTmux());
+      const config = stubConfig(fx);
+      const env = fxEnv(fx, { POSTMASTER_CONFIG: config });
+      const r = sh(
+        SELF,
+        ["host", "spawn", "pm-env", fix, "--label", "postmaster", "--", "true"],
+        env,
+        fx.caller,
+      );
+      expect(r.code).toBe(0);
+      // The spawn's pane is a split off the fixture tab: it carries the
+      // caller settings a fresh tab would, as hosts.md promises.
+      const splits = calls(fx, "herdr").filter((line) => line.startsWith("pane\tsplit\t"));
+      expect(splits.length).toBe(1);
+      const cells = splits[0]!.split("\t");
+      expect(cells).toContain("--env");
+      expect(cells).toContain(`POSTMASTER_CONFIG=${config}`);
+      // A run launch in the same tab takes no caller env, as before.
+      const synth = addWorktree(fix, "1", "1");
+      const dispatch = join(fx.root, "dispatch", "1");
+      writeFixtureDispatch(dispatch, synth, tool);
+      const marker = join(fx.logs, "coach.done");
+      const launched = runLaunch(fx, env, "coachman", synth, dispatch, marker);
+      expect(launched.code).toBe(0);
+      const splitsAfter = calls(fx, "herdr").filter((line) => line.startsWith("pane\tsplit\t"));
+      expect(splitsAfter.length).toBe(2);
+      expect(splitsAfter[1]!.includes("--env")).toBe(false);
+    } finally {
+      cleanup(fx);
+    }
+  });
+
+  test("close-run with a stale run record still closes the live fixture tab", async () => {
+    const fx = makeFx("375-close-stale");
+    try {
+      const tool = toolCheckout();
+      const pmRoot = mainRepoOf(tool);
+      expect(pmRoot).not.toBe("");
+      const fix = makeFixtureRepo(fx, "fixcopy");
+      const projSpace = seedProjectSpace(fx, pmRoot);
+      const seeded = readHerdr(fx);
+      const shellTab = seeded.spaces[projSpace]!.tabs[0]!;
+      const synth = addWorktree(fix, "1", "1");
+      const dispatch = join(fx.root, "dispatch", "1");
+      writeFixtureDispatch(dispatch, synth, tool);
+      const env = fxEnv(fx, {
+        POSTMASTER_CONFIG: stubConfig(fx),
+        POSTMASTER_HOST_FINISH_DELAY: "3600",
+      });
+      const pmMarker = join(fx.logs, "pm.done");
+      expect(headlessPostmaster(fx, env, fix, pmMarker).code).toBe(0);
+      const coachMarker = join(fx.logs, "coach.done");
+      expect(runLaunch(fx, env, "coachman", synth, dispatch, coachMarker).code).toBe(0);
+      for (const marker of [pmMarker, coachMarker])
+        expect(await waitFor(() => existsSync(marker), 30)).toBe(true);
+      const before = readHerdr(fx);
+      const dead = before.spaces[projSpace]!.tabs.find(
+        (tab) => before.tabs[tab]!.label === "fixture · fixcopy",
+      );
+      expect(dead).not.toBeUndefined();
+      const tabPanes = before.spaces[projSpace]!.panes.filter(
+        (pane) => before.panes[pane]!.tab === dead,
+      );
+      expect(tabPanes.length).toBe(3);
+      expect(runTabRecords(fx).map((item) => item.tab)).toEqual([dead]);
+      expect(fixTabRecords(fx).map((item) => item.tab)).toEqual([dead]);
+      // Every pane of the tab closed by hand: the tab is gone, while both
+      // records still name it.
+      const stubHerdr = join(fx.bin, "herdr");
+      for (const pane of tabPanes)
+        expect(sh(stubHerdr, ["pane", "close", pane], env, fx.caller).code).toBe(0);
+      const emptied = readHerdr(fx);
+      expect(emptied.spaces[projSpace]!.tabs).toEqual([shellTab]);
+      // A copy-level launch recreates the tab; only the fixture record
+      // follows it, and the run record still names the dead tab.
+      const watchMarker = join(fx.logs, "watch.done");
+      expect(copyWatcher(fx, env, fix, watchMarker).code).toBe(0);
+      expect(await waitFor(() => existsSync(watchMarker), 30)).toBe(true);
+      const live = fixTabRecords(fx).map((item) => item.tab);
+      expect(live.length).toBe(1);
+      expect(live[0]).not.toBe(dead);
+      expect(runTabRecords(fx).map((item) => item.tab)).toEqual([dead]);
+      const closed = sh(SELF, ["host", "close-run", dispatch], env, fx.root);
+      expect(closed.code).toBe(0);
+      const after = readHerdr(fx);
+      expect(after.spaces[projSpace]).not.toBeUndefined();
+      expect(after.spaces[projSpace]!.tabs).toEqual([shellTab]);
+      expect(placementRecords(fx)).toEqual([]);
+      expect(runTabRecords(fx)).toEqual([]);
+      expect(fixTabRecords(fx)).toEqual([]);
+    } finally {
+      cleanup(fx);
+    }
+  }, 600000);
 });
