@@ -25,6 +25,7 @@ import {
   decideChecks,
   defaultBase,
   defaultLanding,
+  deliverInstructions,
   dirLines,
   failureOutcome,
   featurePageNames,
@@ -38,6 +39,7 @@ import {
   lastLine,
   listVerifiers,
   mergeAuthorityOf,
+  modeBlocks,
   normalizeFolder,
   orderKinds,
   outsideAdded,
@@ -58,6 +60,9 @@ import {
   repoTop,
   roleHarness,
   scrubGitEnv,
+  sendText,
+  sendVerdict,
+  spawnCommand,
   strayVerifierPaths,
   surfaceFromReadme,
   surfaceKind,
@@ -66,7 +71,9 @@ import {
   UPKEEP_LINE,
   unlistedSentence,
   unrunProject,
+  verifierHandle,
   verifyDirName,
+  waitForHandover,
   wallInStream,
 } from "./verifier.ts";
 
@@ -81,22 +88,22 @@ describe("parseArgs", () => {
   test("prompt takes a repo and a surface", () => {
     expect(parseArgs(["prompt", "/r", "cli"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"] },
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"], headless: false },
     });
   });
 
   test("prompt takes several surfaces as distinct kinds in canonical order", () => {
     expect(parseArgs(["prompt", "/r", "web", "cli"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surfaces: ["cli", "web"] },
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli", "web"], headless: false },
     });
     expect(parseArgs(["prompt", "/r", "cli", "cli-examples"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"] },
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"], headless: false },
     });
     expect(parseArgs(["prompt", "/r", "browser-suite", "web-journey"])).toEqual({
       ok: true,
-      req: { cmd: "prompt", repo: "/r", surfaces: ["web"] },
+      req: { cmd: "prompt", repo: "/r", surfaces: ["web"], headless: false },
     });
   });
 
@@ -125,8 +132,16 @@ describe("parseArgs", () => {
     }
   });
 
-  test("prompt takes no flags", () => {
-    expect(parseArgs(["prompt", "/r", "cli", "--run", "/d"])).toEqual({
+  test("prompt takes --headless and refuses any other flag", () => {
+    expect(parseArgs(["prompt", "/r", "cli", "--headless"])).toEqual({
+      ok: true,
+      req: { cmd: "prompt", repo: "/r", surfaces: ["cli"], headless: true },
+    });
+    expect(parseArgs(["prompt", "/r", "cli", "--fresh"])).toEqual({
+      ok: false,
+      error: "unknown flag for prompt: --fresh",
+    });
+    expect(parseArgs(["prompt", "/r", "cli", "--headless", "--headless"])).toEqual({
       ok: false,
       error: "prompt takes a repo and a surface",
     });
@@ -186,14 +201,20 @@ describe("surfaces", () => {
 
 describe("renderPrompt", () => {
   test("fills every placeholder", () => {
-    const out = renderPrompt("{{REPO}} {{SURFACE}} {{SURFACE_PROSE}} {{VERIFY_DIR}} {{BASE}}", {
-      repo: "/r",
-      surface: "cli",
-      surfaceProse: "command line",
-      verifyDir: "verify-app",
-      base: "origin/main",
-    });
-    expect(out).toBe("/r cli command line verify-app origin/main");
+    const out = renderPrompt(
+      "{{REPO}} {{SURFACE}} {{SURFACE_PROSE}} {{VERIFY_DIR}} {{BASE}} {{ASK_RULE}} {{SECRETS_RULE}} {{HANDOVER_UNASKED}}",
+      {
+        repo: "/r",
+        surface: "cli",
+        surfaceProse: "command line",
+        verifyDir: "verify-app",
+        base: "origin/main",
+        askRule: "ask",
+        secretsRule: "secrets",
+        handoverUnasked: "unasked",
+      },
+    );
+    expect(out).toBe("/r cli command line verify-app origin/main ask secrets unasked");
   });
 
   test("dollar patterns in a value copy literally", () => {
@@ -203,6 +224,9 @@ describe("renderPrompt", () => {
       surfaceProse: "command line",
       verifyDir: "verify-$&-'",
       base: "main",
+      askRule: "ask",
+      secretsRule: "secrets",
+      handoverUnasked: "",
     });
     expect(out).toBe("/x/app$$x verify-$&-'");
   });
@@ -214,6 +238,9 @@ describe("renderPrompt", () => {
       surfaceProse: "command line",
       verifyDir: "verify-app",
       base: "origin/main",
+      askRule: "ask",
+      secretsRule: "secrets",
+      handoverUnasked: "",
     });
     expect(out).toBe("/x/{{BASE}}-app origin/main");
     const unknown = renderPrompt("{{REPO}}", {
@@ -222,6 +249,9 @@ describe("renderPrompt", () => {
       surfaceProse: "command line",
       verifyDir: "verify-app",
       base: "main",
+      askRule: "ask",
+      secretsRule: "secrets",
+      handoverUnasked: "",
     });
     expect(unknown).toBe("/x/{{NAME}}-app");
   });
@@ -234,8 +264,27 @@ describe("renderPrompt", () => {
         surfaceProse: "command line",
         verifyDir: "verify-app",
         base: "main",
+        askRule: "ask",
+        secretsRule: "secrets",
+        handoverUnasked: "",
       }),
     ).toThrow("unknown placeholder in the prompt template: {{NOPE}}");
+  });
+});
+
+describe("modeBlocks", () => {
+  test("the interactive session asks and names secret files", () => {
+    const blocks = modeBlocks(false);
+    expect(blocks.askRule).toContain("ask the user only what you cannot observe");
+    expect(blocks.secretsRule).toContain("name of the file that holds it");
+    expect(blocks.handoverUnasked).toBe("");
+  });
+
+  test("the headless session cannot ask and lists what it could not", () => {
+    const blocks = modeBlocks(true);
+    expect(blocks.askRule).toContain("cannot ask anyone anything");
+    expect(blocks.secretsRule).toContain("Never invent a value");
+    expect(blocks.handoverUnasked).toContain("Unasked questions");
   });
 });
 
@@ -257,6 +306,160 @@ describe("naming", () => {
     expect(pickWorktree("/x/app", "cli", (p) => p === "/x/app-verify-cli")).toBe(
       "/x/app-verify-cli-2",
     );
+  });
+
+  test("the handle names the repo and the branch, tagged by its path", () => {
+    expect(verifierHandle("/x/app", "verify-cli")).toMatch(
+      /^verifier-app-verify-cli-[0-9a-f]{8}$/u,
+    );
+    expect(verifierHandle("/x/app", "verify-cli-2")).toMatch(
+      /^verifier-app-verify-cli-2-[0-9a-f]{8}$/u,
+    );
+  });
+
+  test("the same directory name in different parents gets different handles", () => {
+    const a = verifierHandle("/x/app", "verify-cli");
+    expect(verifierHandle("/x/app", "verify-cli")).toBe(a);
+    expect(verifierHandle("/y/app", "verify-cli")).not.toBe(a);
+  });
+});
+
+describe("sendText", () => {
+  test("points the session at its instructions file", () => {
+    const text = sendText("/d/logs/verifier-verify-cli-prompt.txt");
+    expect(text).toContain("/d/logs/verifier-verify-cli-prompt.txt");
+    expect(text.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("spawnCommand", () => {
+  test("starts the form in the worktree explicitly, then execs it", () => {
+    expect(spawnCommand("/wt", ["muse", "--model", "probe-model"])).toEqual([
+      "bash",
+      "-c",
+      `cd -- '/wt' && exec "$@"`,
+      "_",
+      "muse",
+      "--model",
+      "probe-model",
+    ]);
+  });
+
+  test("quotes spaces and single quotes in the worktree path", () => {
+    expect(spawnCommand("/o'brien/r e", ["muse"])[2]).toBe(
+      "cd -- '/o'\\''brien/r e' && exec \"$@\"",
+    );
+  });
+});
+
+describe("sendVerdict", () => {
+  test("settled and still-working both count as delivered", () => {
+    expect(sendVerdict(0, "sent 10 bytes to h, and it settled")).toBe("sent");
+    expect(sendVerdict(3, "sent; h did not settle within 60s")).toBe("sent");
+  });
+
+  test("no turn started retries, anything else fails", () => {
+    expect(sendVerdict(3, "h got the message, but Herdr saw no turn start")).toBe("retry");
+    expect(sendVerdict(1, "herdr could not prompt h")).toBe("failed");
+    expect(sendVerdict(3, "no Herdr or tmux here")).toBe("failed");
+  });
+
+  test("a block after accepting keeps the prompt; a block before accepting fails", () => {
+    expect(sendVerdict(3, "sent; h stopped at an approval or a question")).toBe("sent");
+    expect(
+      sendVerdict(3, "h is at an approval or a question; the user answers it in Herdr first"),
+    ).toBe("failed");
+  });
+});
+
+describe("deliverInstructions", () => {
+  type Run = { code: number; out: string; err: string };
+  const sent: Run = { code: 0, out: "sent 10 bytes to h, and it settled", err: "" };
+  const stalled: Run = { code: 3, out: "", err: "h got the message, but Herdr saw no turn start" };
+  const readOk: Run = { code: 0, out: "You are making a verifier", err: "" };
+
+  test("a first-try send makes no other call", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        return sent;
+      },
+      "h",
+      "/f",
+    );
+    expect(r).toEqual({ delivered: true, attempts: 1, lastError: "" });
+    expect(calls).toEqual([["host", "send", "h", "/f", "--wait", "60"]]);
+  });
+
+  test("a dropped prompt is read and resent", () => {
+    const calls: string[][] = [];
+    let sends = 0;
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        if (args[1] === "read") return readOk;
+        sends++;
+        return sends === 1 ? stalled : sent;
+      },
+      "h",
+      "/f",
+    );
+    expect(r).toEqual({ delivered: true, attempts: 2, lastError: "" });
+    expect(calls).toEqual([
+      ["host", "send", "h", "/f", "--wait", "60"],
+      ["host", "read", "h", "20"],
+      ["host", "send", "h", "/f", "--wait", "60"],
+    ]);
+  });
+
+  test("a failure that is not a drop stops at once", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        return { code: 1, out: "", err: "herdr could not prompt h" };
+      },
+      "h",
+      "/f",
+    );
+    expect(r.delivered).toBe(false);
+    expect(r.attempts).toBe(1);
+    expect(r.lastError).toContain("could not prompt");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("drops past the bound fail with the last send's error", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        return args[1] === "read" ? readOk : stalled;
+      },
+      "h",
+      "/f",
+    );
+    expect(r.delivered).toBe(false);
+    expect(r.attempts).toBe(3);
+    expect(r.lastError).toContain("no turn start");
+    expect(calls.filter((c) => c[1] === "send")).toHaveLength(3);
+    expect(calls.filter((c) => c[1] === "read")).toHaveLength(2);
+  });
+
+  test("a handle the read cannot reach fails without another send", () => {
+    const calls: string[][] = [];
+    const r = deliverInstructions(
+      (args) => {
+        calls.push(args);
+        if (args[1] === "read") return { code: 1, out: "", err: "no live Herdr agent named h" };
+        return stalled;
+      },
+      "h",
+      "/f",
+    );
+    expect(r.delivered).toBe(false);
+    expect(r.lastError).toContain("never registered");
+    expect(calls.filter((c) => c[1] === "send")).toHaveLength(1);
   });
 });
 
@@ -518,6 +721,106 @@ describe("handoverFresh", () => {
     expect(handoverFresh(2000, 1000)).toBe(true);
     expect(handoverFresh(1000, 1000)).toBe(true);
     expect(handoverFresh(999, 1000)).toBe(false);
+  });
+});
+
+describe("waitForHandover", () => {
+  test("a fresh handover already there returns at once, with no sleep", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+      const naps: number[] = [];
+      expect(
+        waitForHandover(
+          wt,
+          0,
+          60,
+          (ms) => {
+            naps.push(ms);
+          },
+          () => 1000,
+        ),
+      ).toBe(true);
+      expect(naps).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("no handover sleeps in short naps until the timeout, then gives up", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        0,
+        12,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 5000, 2000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a stale handover never counts, however long the wait", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "HANDOVER.md"), "old\n");
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        999999999999999,
+        6,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 1000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a handover landing mid-wait ends the wait", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      const ok = waitForHandover(
+        wt,
+        0,
+        60,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+        },
+        () => now,
+      );
+      expect(ok).toBe(true);
+      expect(naps).toEqual([5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

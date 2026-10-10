@@ -12,7 +12,6 @@ import {
   BOUND_L,
   BOUND_R,
   D_CLASS,
-  DOT_ALL,
   digitValue,
   literalI,
   PY_DOT,
@@ -524,7 +523,7 @@ const SKIP_SECTIONS = ["not issues"];
 /** The one findings list among candidates: non-empty and holding an object. Scalar or
  * empty lists say nothing; two findings lists fail loudly rather than guessing. */
 function pickFindings(found: unknown[][]): unknown[] | null {
-  const candidates = found.filter((v) => v.length > 0 && v.some((item) => isObj(item)));
+  const candidates = found.filter((v) => v.some((item) => isObj(item)));
   if (candidates.length > 1) {
     fail(
       `review output holds ${candidates.length} JSON finding lists; refusing to guess which holds the findings`,
@@ -564,14 +563,14 @@ function claudeJson(ntext: string): [unknown[], string] | null {
     }
     const objectLists = scanSpans(ntext)
       .map((s) => s.value as unknown[])
-      .filter((v) => Array.isArray(v) && v.length > 0 && v.some((item) => isObj(item)));
+      .filter((v) => Array.isArray(v) && v.some((item) => isObj(item)));
     const picked = pickFindings(objectLists);
     if (picked === null) fail("cannot parse review output from claude");
     return [picked, exciseFirst(ntext, picked)];
   }
   const objectLists = scanSpans(ntext)
     .map((s) => s.value as unknown[])
-    .filter((v) => Array.isArray(v) && v.length > 0 && v.some((item) => isObj(item)));
+    .filter((v) => Array.isArray(v) && v.some((item) => isObj(item)));
   const picked = pickFindings(objectLists);
   if (picked === null) return null;
   return [picked, exciseFirst(ntext, picked)];
@@ -709,7 +708,7 @@ function checkOutside(outside: string, filed: Finding[], scratch: string): void 
   const targets = new Set(filed.map((f) => `${f.file}\0${f.line}`));
   for (const span of scanSpans(outside)) {
     const v = span.value;
-    if (Array.isArray(v) && v.length > 0 && v.some((item) => isObj(item))) {
+    if (Array.isArray(v) && v.some((item) => isObj(item))) {
       fail("review output holds a second findings list outside its filed findings");
     }
   }
@@ -1371,7 +1370,7 @@ export function harvest(
 
 // --- entry ------------------------------------------------------------------------------
 function main(argv: string[]): number {
-  if (argv.length > 0 && argv[0] === "normalize" && argv.length >= 6) {
+  if (argv[0] === "normalize" && argv.length >= 6) {
     const lane = argv[1]!;
     const scratch = argv[2]!;
     const eventsPath = argv[3]!;

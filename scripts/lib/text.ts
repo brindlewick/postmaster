@@ -880,7 +880,7 @@ export function goldenCases(): GoldenCase[] {
     ndSamples.push(...samples);
     if (NEW_ND.has(first)) for (const ch of samples) ndDivergent.add(ch);
   }
-  for (const ch of [...INT_NO_CHARS]) cases.push({ op: "isdigit", s: ch });
+  for (const ch of INT_NO_CHARS) cases.push({ op: "isdigit", s: ch });
   for (const s of [
     ...ndSamples,
     "",
@@ -1059,7 +1059,7 @@ export function scanSource(name: string, src: string): GuardHit[] {
       }
       if (ch === "'" || ch === '"') {
         // A RegExp("...") argument is pattern text: scan its inside.
-        const isArg = /RegExp\($/u.test(code.replace(/\s+$/u, ""));
+        const isArg = code.replace(/\s+$/u, "").endsWith("RegExp(");
         i++;
         let inner = "";
         while (i < raw.length && raw[i] !== ch) {

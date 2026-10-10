@@ -27,7 +27,6 @@ import {
   processStart,
   processState,
 } from "./lib/processes.ts";
-import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const SELF = join(HERE, "run");
@@ -87,6 +86,7 @@ interface HerdrStubState {
   tabs: Record<string, StubTab>;
   open: Record<string, string>;
   agents: Array<string | undefined>;
+  agentPanes: Record<string, string>;
   prompt?: string[][];
 }
 // The stub tmux server's state file.
@@ -284,8 +284,26 @@ function herdrStubInner(args: string[], stateDir: string): void {
     tab_n: {},
     open: {},
     agents: [],
+    agentPanes: {},
     prompt: [],
   });
+  if (!Array.isArray(st.agents)) st.agents = [];
+  // The file's content is untrusted, so the shape check reads through unknown.
+  const panes: unknown = st.agentPanes;
+  if (panes === null || typeof panes !== "object" || Array.isArray(panes)) st.agentPanes = {};
+  // An agent name follows its pane's occupant and clears when that pane goes,
+  // as the server does; a spawn under the freed handle starts a new session.
+  const dropAgents = (): void => {
+    st.agents = st.agents.filter((name: string | undefined) => {
+      if (typeof name !== "string") return false;
+      const pane = st.agentPanes[name];
+      if (typeof pane !== "string" || !(pane in st.panes)) {
+        delete st.agentPanes[name];
+        return false;
+      }
+      return true;
+    });
+  };
   const command = args.slice(0, 2).join(" ");
   if (command === "workspace list") {
     out({ workspaces: Object.keys(st.spaces).map((workspace_id) => ({ workspace_id })) });
@@ -355,6 +373,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       delete st.panes[t.pane];
       if (!st.spaces[ws].tabs.length) destroySpace(st, ws);
     }
+    dropAgents();
     save(path, st);
     return;
   }
@@ -365,7 +384,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     if (p) {
       const ws = p.ws;
       st.spaces[ws].panes = st.spaces[ws].panes.filter((id: string) => id !== pane);
-      for (const tab of [...st.spaces[ws].tabs]) {
+      for (const tab of st.spaces[ws].tabs) {
         const kept = Object.values(st.panes).some((q) => q.ws === ws && (q.tab || tab) === tab);
         if (!kept) {
           st.spaces[ws].tabs = st.spaces[ws].tabs.filter((id: string) => id !== tab);
@@ -374,6 +393,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
       }
       if (!st.spaces[ws].tabs.length) destroySpace(st, ws);
     }
+    dropAgents();
     save(path, st);
     return;
   }
@@ -391,7 +411,10 @@ function herdrStubInner(args: string[], stateDir: string): void {
     if (flag(join(stateDir, "wsget.succeed-once")))
       rmSync(join(stateDir, "wsget.succeed-once"), { force: true });
     else if (flag(join(stateDir, "wsget.fail"))) throw new StubFail(1);
-    const w = st.spaces[args[2]!] ?? {};
+    const w = st.spaces[args[2]!];
+    // As the server does, getting a space Herdr destroyed fails: closes tell
+    // a gone space from one they must not touch by this failure.
+    if (!w) fail("workspace_not_found");
     out({
       workspace: {
         workspace_id: args[2],
@@ -420,6 +443,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     return;
   }
   if (command === "pane get") {
+    if (!st.panes[args[2]!]) fail("pane_not_found");
     out({ pane: { pane_id: args[2], agent: null } });
     return;
   }
@@ -468,8 +492,28 @@ function herdrStubInner(args: string[], stateDir: string): void {
   if (command === "agent start") {
     if (st.agents.includes(args[2])) fail("agent_name_taken");
     st.agents.push(args[2]);
+    st.agentPanes[args[2]!] = opt(args, "--pane") ?? "";
     save(path, st);
     if (flag(join(stateDir, "agent.notready"))) fail("agent_not_ready");
+    return;
+  }
+  if (command === "agent rename") {
+    const pane = args[2] ?? "";
+    const name = args[3] ?? "";
+    // The name follows the pane's occupant: whatever it was called before is freed.
+    // A pane with no agent takes no name: the server registers nothing there, so a
+    // shell spawn stays unregistered, as on the live server.
+    let hosted = false;
+    for (const [known, at] of Object.entries(st.agentPanes)) {
+      if (at === pane) {
+        hosted = true;
+        st.agents = st.agents.filter((entry: string | undefined) => entry !== known);
+        delete st.agentPanes[known];
+      }
+    }
+    if (hosted && name && !st.agents.includes(name)) st.agents.push(name);
+    if (hosted && name) st.agentPanes[name] = pane;
+    save(path, st);
     return;
   }
   if (command === "agent prompt") {
@@ -480,11 +524,13 @@ function herdrStubInner(args: string[], stateDir: string): void {
     return;
   }
   if (command === "agent wait") {
+    if (!st.agents.includes(args[2])) fail("agent_not_found");
     if (flag(join(stateDir, "agent.blocked"))) fail("agent_blocked");
     out({ settled: true });
     return;
   }
   if (command === "agent read") {
+    if (!st.agents.includes(args[2])) fail("agent_not_found");
     console.log(`stub screen of ${args[2]}`);
     return;
   }
@@ -624,7 +670,11 @@ function tmuxStubInner(args: string[], stateDir: string): void {
     if (stateFlag("tmux.dead") || stateFlag("windows.fail")) throw new StubFail(1);
     for (const [win, value] of Object.entries(st.windows)) {
       if (flag("-a")) {
-        if (fmt.includes("#{@postmaster_run}"))
+        if (fmt.includes("#{@postmaster_handle}"))
+          console.log(
+            `${win}\t${value.name}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_handle"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
+          );
+        else if (fmt.includes("#{@postmaster_run}"))
           console.log(
             `${win}\t${value.opts["@postmaster_cwd"] ?? ""}\t${value.opts["@postmaster_run"] ?? ""}\t${value.opts["@postmaster_pane"] ?? ""}`,
           );
@@ -692,7 +742,7 @@ function host(
   };
   return exec(SELF, ["host", ...args], { cwd, env: environment });
 }
-function testStopFinishers(root: string): void {
+export function testStopFinishers(root: string): void {
   const path = join(root, "finishers");
   if (!existsSync(path)) return;
   for (const line of readFileSync(path, "utf8").split("\n")) {
@@ -2841,6 +2891,7 @@ export async function runControls(): Promise<number> {
           tabs: {},
           open: {},
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         [luna, sol, revBugLuna, f.clone].forEach((cwd, i) => {
@@ -3384,6 +3435,7 @@ export async function runControls(): Promise<number> {
           },
           open: { [solReal]: "w9" },
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         save(join(stub, "herdr.json"), st);
@@ -3610,6 +3662,7 @@ export async function runControls(): Promise<number> {
           tabs: { "w9:t1": { ws: "w9", pane: "p9", cwd: lunaReal, label: "finished" } },
           open: { [lunaReal]: "w9" },
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         save(join(stub, "herdr.json"), st);
@@ -3679,6 +3732,7 @@ export async function runControls(): Promise<number> {
           tabs: { "w9:t2": { ws: "w9", pane: "p9", cwd: lunaReal, label: "finished" } },
           open: { [lunaReal]: "w9" },
           agents: [],
+          agentPanes: {},
           tab_n: {},
         };
         save(join(stub, "herdr.json"), st);
@@ -4316,6 +4370,119 @@ export async function runControls(): Promise<number> {
         calls(root, "tmux").some((line) => line === "capture-pane\t-p\t-J\t-S\t-7\t-t\t@1") &&
         tmuxRead.code === 0,
     );
+
+    console.log("clerk close");
+    const writeClerkRecord = (repo: string, id: string, handle: string): void => {
+      const dir = join(repo, ".postmaster", "runs", "postmaster", "clerks");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, `${id}.json`),
+        `${JSON.stringify({ ticket: `#${id}, x`, brief: join(repo, "b.md"), handle, opened: "2026-10-09T00:00:00.000Z" })}\n`,
+      );
+    };
+    const recordedClerkHandle = (repo: string, id: string): string => {
+      try {
+        const raw = JSON.parse(
+          readFileSync(
+            join(repo, ".postmaster", "runs", "postmaster", "clerks", `${id}.json`),
+            "utf8",
+          ),
+        ) as { handle?: unknown };
+        return typeof raw.handle === "string" ? raw.handle : "";
+      } catch {
+        return "";
+      }
+    };
+    resetHarness(root);
+    const shellSpawn = execHost(["spawn", "clerk-shell", f.repo, "--", "true"], stubs, root);
+    const shellTab = kvOf(shellSpawn.out, "tab");
+    const shellRead = execHost(["read", "clerk-shell", "5"], stubs, root);
+    await pass(
+      "a shell spawn registers no agent, as on the live server",
+      () => shellSpawn.code === 0 && shellRead.code !== 0,
+      `${shellSpawn.out}\n${shellRead.err}`,
+    );
+    writeClerkRecord(f.repo, "9", "clerk-shell");
+    const shellClose = execHost(["_clerk-close", f.repo, "9", "clerk-shell"], stubs, root);
+    const shellState = json(join(stub, "herdr.json"), { tabs: {} });
+    await pass(
+      "the closer leaves an agentless live session open and fails, keeping its record",
+      () =>
+        shellClose.code !== 0 &&
+        shellState.tabs[shellTab] !== undefined &&
+        recordedClerkHandle(f.repo, "9") === "clerk-shell",
+      `${shellClose.out}\n${shellClose.err}`,
+    );
+    const shellGone = execHost(["close-handle", "clerk-shell"], stubs, root);
+    const shellReap = execHost(["_clerk-close", f.repo, "9", "clerk-shell"], stubs, root);
+    await pass(
+      "once its pane is gone the closer reports gone and drops the record",
+      () =>
+        shellGone.code === 0 &&
+        shellReap.code === 0 &&
+        shellReap.out.includes("already gone") &&
+        recordedClerkHandle(f.repo, "9") === "",
+      `${shellReap.out}\n${shellReap.err}`,
+    );
+    resetHarness(root);
+    const keptSpawn = execHost(["spawn", "clerk-kept", f.repo, "--", "claude"], stubs, root);
+    const keptTab = kvOf(keptSpawn.out, "tab");
+    writeClerkRecord(f.repo, "7", "clerk-kept");
+    const staleClose = execHost(["_clerk-close", f.repo, "7", "clerk-stale"], stubs, root);
+    const keptState = json(join(stub, "herdr.json"), { tabs: {}, agents: [] });
+    await pass(
+      "a closer bound to a replaced handle touches neither the new session nor its record",
+      () =>
+        staleClose.code === 0 &&
+        keptState.tabs[keptTab] !== undefined &&
+        (keptState.agents as string[]).includes("clerk-kept") &&
+        recordedClerkHandle(f.repo, "7") === "clerk-kept",
+      `${staleClose.out}\n${staleClose.err}`,
+    );
+    resetHarness(root);
+    const renamedSpawn = execHost(["spawn", "clerk-renamed", f.repo, "--", "true"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const renamedWin = kvOf(renamedSpawn.out, "window");
+    updateTmuxJson(root, (st) => {
+      if (st.windows[renamedWin]) st.windows[renamedWin].name = "user words";
+    });
+    writeClerkRecord(f.repo, "8", "clerk-renamed");
+    const renamedClose = execHost(["_clerk-close", f.repo, "8", "clerk-renamed"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const renamedState = json(join(stub, "tmux.json"), { windows: {} });
+    await pass(
+      "a renamed tmux window still reads present, and the closer leaves it open",
+      () =>
+        renamedClose.code !== 0 &&
+        renamedState.windows[renamedWin] !== undefined &&
+        renamedState.windows[renamedWin].name === "user words" &&
+        recordedClerkHandle(f.repo, "8") === "clerk-renamed",
+      `${renamedClose.out}\n${renamedClose.err}`,
+    );
+    resetHarness(root);
+    const squatSpawn = execHost(["spawn", "clerk-squat", f.repo, "--", "true"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const squatWin = kvOf(squatSpawn.out, "window");
+    updateTmuxJson(root, (st) => {
+      if (st.windows[squatWin]) delete st.windows[squatWin].opts["@postmaster_handle"];
+    });
+    writeClerkRecord(f.repo, "6", "clerk-squat");
+    const squatClose = execHost(["_clerk-close", f.repo, "6", "clerk-squat"], stubs, root, {
+      POSTMASTER_HOST: "tmux",
+    });
+    const squatState = json(join(stub, "tmux.json"), { windows: {} });
+    await pass(
+      "a refused close in the gone branch fails instead of dropping the record",
+      () =>
+        squatClose.code === 2 &&
+        squatState.windows[squatWin] !== undefined &&
+        recordedClerkHandle(f.repo, "6") === "clerk-squat",
+      `${squatClose.out}\n${squatClose.err}`,
+    );
+    resetHarness(root);
 
     console.log("run role: the explicit host role");
     const capDispatch = join(root, "cap-dispatch");
@@ -7279,6 +7446,58 @@ export async function live(): Promise<void> {
           existsSync(join(f.logs, "l3.err")) &&
           readFileSync(join(f.logs, "direct.out")).equals(readFileSync(join(f.logs, "l3.out"))) &&
           readFileSync(join(f.logs, "direct.err")).equals(readFileSync(join(f.logs, "l3.err"))),
+      );
+
+      console.log("close-handle, the positive control");
+      const liveHandle = `liveclose-${process.pid % 100000}`;
+      const spawned = liveHost(
+        ["spawn", liveHandle, f.repo, "--label", "live close probe", "--", "sh"],
+        f.caller,
+        root,
+      );
+      const placed = spawned.out.trim();
+      const liveSpace = kvOf(placed, "space");
+      const liveTab = kvOf(placed, "tab");
+      if (liveSpace) opened.push(liveSpace);
+      const tabsBefore = liveHerdr("tab", "list", "--workspace", liveSpace);
+      await pass(
+        "spawn places the session in its own tab",
+        () =>
+          spawned.code === 0 &&
+          Boolean(liveSpace) &&
+          Boolean(liveTab) &&
+          tabsBefore.out.includes(liveTab),
+        `${placed}\n${tabsBefore.out}`,
+      );
+      // A shell pane hosts no agent, so no name registers; the close below
+      // works from the placement record, never from the agent list.
+      await pass(
+        "a shell pane hosts no agent",
+        () => liveHerdr("agent", "get", liveHandle).code !== 0,
+      );
+      const closed = liveHost(["close-handle", liveHandle], f.caller, root);
+      const tabsAfter = liveHerdr("tab", "list", "--workspace", liveSpace);
+      await pass(
+        "close-handle closes its tab",
+        () =>
+          closed.code === 0 &&
+          closed.out.includes(`closed ${liveHandle}`) &&
+          !tabsAfter.out.includes(liveTab),
+        `${closed.out}\n${closed.err}\n${tabsAfter.out}`,
+      );
+      const respawned = liveHost(["spawn", liveHandle, f.repo, "--", "sh"], f.caller, root);
+      await pass("the handle spawns again", () => respawned.code === 0, respawned.out);
+      const closedAgain = liveHost(["close-handle", liveHandle], f.caller, root);
+      await pass("closing it again leaves nothing behind", () => closedAgain.code === 0);
+      const missing = liveHost(
+        ["close-handle", `never-spawned-${process.pid % 100000}`],
+        f.caller,
+        root,
+      );
+      await pass(
+        "an unknown handle reports no session, exit 0",
+        () => missing.code === 0 && missing.out.includes("no session"),
+        missing.out,
       );
     } else {
       console.log("Herdr: no server answers here; its controls are skipped");
