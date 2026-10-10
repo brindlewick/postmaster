@@ -514,9 +514,9 @@ Whatever the lane writes there is its own word.
 
 A local route to most of this exists without Cloudflare. [#203, Cut each lane as a shared clone of the repository, so it cannot
 read another lane's commits](https://github.com/brindlewick/postmaster/issues/203) and [#221, Run every lane with only the
-files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) are filed, as is
-[#342, Every reviewer works in its own copy of the repository](https://github.com/brindlewick/postmaster/issues/342), and
-[the confinement page](lane-confinement.md) records that a sandbox around the harness stopped every reach in its trial. A
+files, hosts and sockets it needs, on Linux and macOS](https://github.com/brindlewick/postmaster/issues/221) are filed and
+open, and [#342, Every reviewer works in its own copy of the repository](https://github.com/brindlewick/postmaster/issues/342)
+has landed (closed 2026-10-09). [The confinement page](lane-confinement.md) records that a sandbox around the harness stopped every reach in its trial. A
 virtual machine per lane on any provider gives the same isolation properties; nothing in this section is special to Cloudflare.
 
 ## What limits concurrency, and what a cloud would lift
@@ -795,7 +795,7 @@ command, streaming its output and reading its exit code, as Cloudflare's `exec()
    contributor tier, 63% on its standard tier.
 5. **The gate is timed on a machine with 4 vCPU and nothing else running.** Any cloud machine will do. It separates the
    gate's own time from the machine's load. #362 times a lane, not the gate.
-6. **Not new: finish #203, #221 and #342 first.** They give most of the isolation locally and are filed.
+6. **Not new: finish #203 and #221.** They give most of the isolation locally and are filed and open; #342 has landed.
 
 Not a ticket: ask Anthropic and OpenAI, in writing, whether a person's own subscription login may be held by their
 own Worker and used from their own containers. Only the user can ask.
