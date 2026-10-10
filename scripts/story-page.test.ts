@@ -246,7 +246,14 @@ describe("scrubStory", () => {
       title: "Ask " + "a@b" + ".co anything",
       sections: [{ id: "open", label: "Start", title: "Mail " + "c@d" + ".co here" }],
       scenes: [
-        { id: "d", kind: "diagram", label: "D", chip: "e@f" + ".co", svg: "d.svg", states: ["all"] },
+        {
+          id: "d",
+          kind: "diagram",
+          label: "D",
+          chip: "e@f" + ".co",
+          svg: "d.svg",
+          states: ["all"],
+        },
         { id: "r", kind: "ref", file: "f.ts", from: 1, to: 2 },
       ],
       steps: [
