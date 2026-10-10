@@ -21,8 +21,8 @@
 //   exit 1  a harness was named that is not on PATH, the coachman shares a lane's model, fewer
 //           than two lanes were given, a reviewer is not a lane, an answer was missing, a round
 //           time limit was not a whole number of seconds from 1 to 86400, a planning review link
-//           omitted {path}, a mode other than synthesis, single-thread or alternate, or an
-//           existing config was not overwritten
+//           omitted {path}, a mode other than synthesis, single-thread or alternate, a
+//           ticket_notes other than given or held-back, or an existing config was not overwritten
 //
 // Control: the written file is parsed back as TOML where a parser is available, and its reviewer
 // lanes are resolved through scripts/run reviewers, so a config that would fail to load is never
@@ -366,6 +366,7 @@ clerk.effort?              (none)
 clerk.env_file?            (none)             env file for its key or backend
 max_runs                   2                  concurrent runs per project
 mode                       synthesis          dispatch mode: synthesis, single-thread or alternate
+ticket_notes               given              ticket notes for lanes: given or held-back
 poll_seconds               120                postmaster poll interval${
       onLinux
         ? `
@@ -772,6 +773,15 @@ const MODE = ask(
 if (MODE !== "" && MODE !== "synthesis" && MODE !== "single-thread" && MODE !== "alternate") {
   die(`setup: mode must be synthesis, single-thread or alternate, not ${MODE}`, 1);
 }
+const TICKET_NOTES = ask(
+  "  ticket notes for the coachman and workhorses (given or held-back)",
+  "given",
+  "ticket_notes",
+  opts,
+);
+if (TICKET_NOTES !== "" && TICKET_NOTES !== "given" && TICKET_NOTES !== "held-back") {
+  die(`setup: ticket_notes must be given or held-back, not ${TICKET_NOTES}`, 1);
+}
 const PS = ask(
   "  postmaster poll interval, seconds",
   PROJECT !== "" ? "" : "120",
@@ -1010,6 +1020,7 @@ if (PROJECT !== "") {
   }
   if (MR !== "") teamParts.push(`max_runs = ${MR}`);
   if (MODE !== "") teamParts.push(`mode = "${MODE}"`);
+  if (TICKET_NOTES !== "") teamParts.push(`ticket_notes = "${TICKET_NOTES}"`);
   if (teamParts.length > 0) sections.push(`[team]\n${teamParts.join("\n")}\n`);
   if (LENS_TABLE !== "") sections.push(`${LENS_TABLE.replace(/^\n/u, "")}\n`);
   let limitsSec = "";
@@ -1256,6 +1267,7 @@ postmaster = { harness = "${PH}", model = "${PM}"${roleExtra(PE, PEF)} }
 clerk = { harness = "${CLH}", model = "${CLM}"${roleExtra(CLE, CLEF)} }
 max_runs = ${MR}
 mode = "${MODE}"
+ticket_notes = "${TICKET_NOTES}"
 ${LENS_TABLE}
 
 ${LIMITS_BLOCK}[postmaster]
