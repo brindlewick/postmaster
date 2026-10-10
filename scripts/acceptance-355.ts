@@ -25,13 +25,15 @@ export const PSTACK_URL =
 export const ISSUE_273_URL = "https://github.com/brindlewick/postmaster/issues/273";
 
 // The rule Stage G step 3 of the postmaster's runbook carries, word for word
-// (line wrapping aside): after a landing, one stale call at the merge, and an
-// upkeep pass offered for each verifier it marks. Deliberately not imported
-// from the change: the tests fail when the runbook stops carrying it.
+// (line wrapping aside): after a landing, the checkout advanced to the merge,
+// one stale call at it, and an upkeep pass offered for each verifier it marks.
+// Deliberately not imported from the change: the tests fail when the runbook
+// stops carrying it.
 export const POSTMASTER_OFFER =
-  "Then check whether any verifier may have gone stale on the landing: run " +
-  "`<tool>/scripts/run verifier stale <repo> --at <merge>` once with the landed merge " +
-  "commit; for each verifier it marks, offer the upkeep pass " +
+  "Then check whether any verifier may have gone stale on the landing: advance " +
+  "`<repo>`'s checkout of the default branch to the landed merge commit first, so the " +
+  "stale query reads the landing's own index, then run `<tool>/scripts/run verifier " +
+  "stale <repo> --at <merge>` once; for each verifier it marks, offer the upkeep pass " +
   "(`run verifier upkeep <repo> --run <dispatch>`), naming the changed files, and a yes " +
   "starts the pass; a landing it clears offers nothing.";
 

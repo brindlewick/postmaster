@@ -182,6 +182,89 @@ describe("C1: the stale mark", () => {
     }
   });
 
+  test("a rename of a depended file marks the verifier", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      const first = headOf(repo, "HEAD");
+      plantSingle(repo, { files: "src/cli.ts", confirmed: first });
+      gitOrThrow(repo, "mv", "src/cli.ts", "src/cli2.ts");
+      commitAll(repo, "rename the cli");
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("stale: verify-app: src/cli.ts");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("an entry confirmed at a non-commit object counts as unconfirmed", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      const blob = gitOrThrow(repo, "hash-object", "src/cli.ts").trim();
+      plantSingle(repo, { files: "src/cli.ts", confirmed: blob });
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe(`stale: verify-app: unconfirmed (unknown commit ${blob})`);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("multi: a folder last in the bullet still marks", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      const first = headOf(repo, "HEAD");
+      plantMulti(
+        repo,
+        [bullet("cli", "command line", { files: "src/cli.ts, src/", confirmed: first })],
+        ["cli"],
+      );
+      changeFile(repo, "src/store.ts", "change the store");
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("stale: verifier/cli: src/store.ts");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("multi: a verifier missing from the shared index counts as not in it", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      const first = headOf(repo, "HEAD");
+      plantMulti(
+        repo,
+        [bullet("web", "web pages", { files: "src/store.ts", confirmed: first })],
+        ["cli"],
+      );
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("stale: verifier/cli: unconfirmed (not in the shared index)");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("multi: a verifier named twice counts as ambiguous", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      const first = headOf(repo, "HEAD");
+      plantMulti(
+        repo,
+        [
+          bullet("cli", "command line", { files: "src/cli.ts", confirmed: first }),
+          bullet("cli", "command line again", { files: "src/store.ts", confirmed: first }),
+        ],
+        ["cli"],
+      );
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("stale: verifier/cli: unconfirmed (ambiguous shared index entry)");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
   test("--at pins the comparison commit", () => {
     const { dir, repo } = freshScratch();
     try {
