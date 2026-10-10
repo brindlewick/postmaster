@@ -267,261 +267,26 @@ function hasKey(file: string, key: string): boolean {
 
 // --- project merge -------------------------------------------------------------------------------
 // A second setup run merges its answers into the existing file instead of
-// replacing it, so the settings grow over several runs. Text surgery keeps
-// what this run did not touch byte for byte: unknown sections, comments and
-// hand formatting survive. Only answered keys move.
-interface TomlSection {
-  header: string;
-  key: string;
-  body: string[];
+// replacing it, so the settings grow over several runs. Both sides parse to
+// objects and merge by the precedence rule: a table merges setting by
+// setting, a list or a single value is replaced whole. Comments do not
+// survive a rewrite; the data does.
+function isTomlTable(v: unknown): v is Rec {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const proto: unknown = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
 }
 
-function splitSections(text: string): { preamble: string[]; sections: TomlSection[] } {
-  const preamble: string[] = [];
-  const sections: TomlSection[] = [];
-  let current: TomlSection | null = null;
-  for (const line of text.split("\n")) {
-    const m = /^[ \t]*\[([^\]]+)\][ \t]*(?:#.*)?$/u.exec(line);
-    if (m?.[1] !== undefined) {
-      current = { header: line, key: m[1].trim(), body: [] };
-      sections.push(current);
-    } else if (current === null) {
-      preamble.push(line);
-    } else {
-      current.body.push(line);
-    }
-  }
-  return { preamble, sections };
-}
-
-function keyOf(line: string): string | null {
-  const m = /^[ \t]*([^= \t][^=]*?)[ \t]*=/u.exec(line);
-  return m?.[1] === undefined ? null : m[1].trim();
-}
-
-// parseInlinePairs <text>: the flat pairs inside the first braces. Comments
-// run to the end of their line, and either quote shields a comma; anything
-// else falls back to null, and the caller keeps the whole line.
-function parseInlinePairs(text: string): Array<[string, string]> | null {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end < start) return null;
-  const inner = text.slice(start + 1, end);
-  const pairs: Array<[string, string]> = [];
-  let depth = 0;
-  let quote: string | null = null;
-  let escaped = false;
-  let current = "";
-  const parts: string[] = [];
-  for (let i = 0; i < inner.length; i++) {
-    const ch = inner[i] as string;
-    if (quote !== null) {
-      current += ch;
-      if (escaped) escaped = false;
-      else if (ch === "\\" && quote === '"') escaped = true;
-      else if (ch === quote) quote = null;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-      current += ch;
-    } else if (ch === "#") {
-      while (i < inner.length && inner[i] !== "\n") i++;
-    } else if (ch === "[" || ch === "{") {
-      depth += 1;
-      current += ch;
-    } else if (ch === "]" || ch === "}") {
-      depth -= 1;
-      current += ch;
-    } else if (ch === "," && depth === 0) {
-      parts.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  parts.push(current);
-  for (const part of parts) {
-    if (part.trim() === "") continue;
-    const eq = part.indexOf("=");
-    if (eq < 0) return null;
-    const k = part.slice(0, eq).trim();
-    const v = part.slice(eq + 1).trim();
-    if (k === "" || v === "" || v.startsWith("{") || v.startsWith("[")) return null;
-    pairs.push([k, v]);
-  }
-  return pairs;
-}
-
-// Merge one inline table line (`coachman = { harness = "x" }`) key-wise, so a
-// run answering one role key keeps the keys an earlier run set. Flat pairs
-// only; anything else falls back to the whole line.
-function mergeInlineLine(oldLine: string, newLine: string): string {
-  const oldPairs = parseInlinePairs(oldLine);
-  const newPairs = parseInlinePairs(newLine);
-  if (oldPairs === null || newPairs === null) return newLine;
-  const merged: Array<[string, string]> = [...oldPairs];
-  for (const [k, v] of newPairs) {
-    const at = merged.findIndex(([ek]) => ek === k);
-    if (at >= 0) merged[at] = [k, v];
-    else merged.push([k, v]);
-  }
-  const key = keyOf(newLine) ?? keyOf(oldLine) ?? "";
-  return `${key} = { ${merged.map(([k, v]) => `${k} = ${v}`).join(", ")} }`;
-}
-
-// valueSpan <body> <at>: how many lines the value starting on body[at] runs.
-// A TOML value spans lines inside brackets or triple-quoted strings; the old
-// side alone needs the span, since setup only ever writes single-line values.
-function valueSpan(body: string[], at: number): number {
-  let depth = 0;
-  let quote: string | null = null;
-  let triple: string | null = null;
-  let escaped = false;
-  let n = 0;
-  for (let i = at; i < body.length; i++) {
-    n += 1;
-    const line = `${body[i] as string}\n`;
-    const scan = i === at ? line.slice(line.indexOf("=") + 1) : line;
-    for (let c = 0; c < scan.length; c++) {
-      const ch = scan[c] as string;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (quote !== null) {
-        if (triple !== null) {
-          if (scan.startsWith(triple, c)) {
-            quote = null;
-            triple = null;
-            c += 2;
-          }
-        } else if (ch === "\\" && quote === '"') {
-          escaped = true;
-        } else if (ch === quote || ch === "\n") {
-          quote = null;
-        }
-        continue;
-      }
-      if (ch === '"' || ch === "'") {
-        const q3 = ch.repeat(3);
-        if (scan.startsWith(q3, c)) {
-          quote = ch;
-          triple = q3;
-          c += 2;
-        } else {
-          quote = ch;
-        }
-      } else if (ch === "[" || ch === "{") {
-        depth += 1;
-      } else if (ch === "]" || ch === "}") {
-        depth -= 1;
-      } else if (ch === "#") {
-        // A comment runs to the end of its line inside brackets too; its
-        // brackets must not count, or the span swallows the following keys.
-        break;
-      }
-    }
-    if (depth <= 0 && quote === null) return n;
-  }
-  return n;
-}
-
-// findKeyLine <body> <key>: the assignment line for a key, skipping the
-// spans of multiline values, whose string bodies may hold key-shaped lines.
-function findKeyLine(body: string[], key: string): number {
-  let i = 0;
-  while (i < body.length) {
-    const line = body[i] as string;
-    if (keyOf(line) === key) return i;
-    i += keyOf(line) === null ? 1 : valueSpan(body, i);
-  }
-  return -1;
-}
-
-/** mergeSettings <existing> <out>: this run's TOML over the existing file:
- * answered keys replaced or added, everything else kept verbatim. */
-function mergeSettings(existing: string, out: string): string {
-  const oldFile = splitSections(existing);
-  const newFile = splitSections(out);
-  const merged: TomlSection[] = oldFile.sections.map((s) => ({ ...s, body: [...s.body] }));
-  // A role this run answers inline folds into an existing child table for
-  // that role instead of redeclaring it: `[team.coachman]` keeps its form.
-  const ROLE_KEYS = ["coachman", "coachman_fallback", "postmaster", "clerk"];
-  const newTeam = newFile.sections.find((s) => s.key === "team");
-  if (newTeam !== undefined) {
-    newTeam.body = newTeam.body.flatMap((line) => {
-      const key = keyOf(line);
-      if (key === null || !ROLE_KEYS.includes(key) || !line.includes("{")) return [line];
-      const child = merged.find((s) => s.key === `team.${key}`);
-      if (child === undefined) return [line];
-      const pairs = parseInlinePairs(line);
-      if (pairs === null) return [line];
-      for (const [k, v] of pairs) {
-        const at = findKeyLine(child.body, k);
-        if (at < 0) child.body.push(`${k} = ${v}`);
-        else child.body.splice(at, valueSpan(child.body, at), `${k} = ${v}`);
-      }
-      return [];
-    });
-  }
-  for (const section of newFile.sections) {
-    let target = merged.find((s) => s.key === section.key);
-    let created = false;
-    if (target === undefined) {
-      target = { header: section.header, key: section.key, body: [] };
-      merged.push(target);
-      created = true;
-    }
-    for (const line of section.body) {
-      if (line.trim() === "") continue;
-      const key = keyOf(line);
-      if (key === null) {
-        target.body.push(line);
-        continue;
-      }
-      const at = findKeyLine(target.body, key);
-      if (at < 0) {
-        target.body.push(line);
-      } else {
-        const oldLine = target.body[at] as string;
-        const span = valueSpan(target.body, at);
-        if (oldLine.includes("{") && line.includes("{")) {
-          const oldText = target.body.slice(at, at + span).join("\n");
-          target.body.splice(at, span, mergeInlineLine(oldText, line));
-        } else {
-          target.body.splice(at, span, line);
-        }
-      }
-    }
-    // A section whose lines all folded into child tables leaves no header.
-    if (created && target.body.length === 0) merged.splice(merged.indexOf(target), 1);
-  }
-  // Top-level assignments from the new preamble merge into the old preamble
-  // the same way: replaced where the key exists, appended where it does not.
-  const preamble = [...oldFile.preamble];
-  for (const line of newFile.preamble) {
-    if (line.startsWith("# Written by ") || line.trim() === "") continue;
-    const key = keyOf(line);
-    if (key === null) {
-      preamble.push(line);
-      continue;
-    }
-    const at = findKeyLine(preamble, key);
-    if (at < 0) preamble.push(line);
-    else preamble.splice(at, valueSpan(preamble, at), line);
-  }
-  // The header names the latest write; any other preamble lines stay.
-  const outHeader = newFile.preamble.find((l) => l.startsWith("# Written by "));
-  const writtenBy = "# Written by scripts/run setup --project";
-  const at = preamble.findIndex((l) => l.startsWith(writtenBy));
-  if (outHeader !== undefined) {
-    if (at >= 0) preamble[at] = outHeader;
-    else preamble.unshift(outHeader);
-  }
-  const lines = [...preamble];
-  for (const section of merged) {
-    lines.push(section.header, ...section.body);
-  }
-  return `${lines.join("\n").replace(/\n+$/u, "")}\n`;
+// mergeTables <base> <overlay>: the overlay's keys over the base's, tables
+// merging recursively and every other value replaced whole. Fresh objects
+// throughout, built without indexed assignment, so a `__proto__` key in a
+// hand-edited file stays data.
+function mergeTables(base: Rec, overlay: Rec): Rec {
+  const over = Object.entries(overlay).map(([k, v]) => {
+    const bv = Object.hasOwn(base, k) ? base[k] : undefined;
+    return [k, isTomlTable(bv) && isTomlTable(v) ? mergeTables(bv, v) : v] as const;
+  });
+  return { ...base, ...Object.fromEntries(over) };
 }
 
 // Report whether git ignores the settings from git itself, not from the
@@ -734,13 +499,10 @@ if (PROJECT !== "") {
   if (existsSync(PROJECT_SETTINGS)) {
     PROJECT_BACKUP = readFileSync(PROJECT_SETTINGS, "utf8");
     try {
-      EXISTING = asTable(
-        parseTomlStrict(PROJECT_BACKUP, "existing project settings"),
-        "existing project settings",
-      );
+      EXISTING = Bun.TOML.parse(PROJECT_BACKUP);
     } catch (e) {
       die(
-        `setup: the existing ${PROJECT_SETTINGS} does not parse${isDie(e) ? `: ${e.message}` : ""}; fix or remove it before setting more`,
+        `setup: the existing ${PROJECT_SETTINGS} does not parse: ${String(e)}; fix or remove it before setting more`,
         1,
       );
     }
@@ -1285,13 +1047,20 @@ if (PROJECT !== "") {
     }
     die("setup: no project settings given", 1);
   }
-  const projectDate = new Date().toISOString().slice(0, 10);
-  const OUT = `# Written by scripts/run setup --project on ${projectDate}. Only what was set for this project.\n${sections.join("\n")}`;
+  const OUT = sections.join("\n");
 
   // This run's answers over the existing file, read up front, so the
   // settings grow over several runs; a first run writes its answers alone.
+  // Both sides parse and merge as objects, and the file is rewritten whole,
+  // so comments do not survive it.
   const backup = PROJECT_BACKUP;
-  const fileText = backup === null ? OUT : mergeSettings(backup, OUT);
+  let answers: Rec = {};
+  try {
+    answers = Bun.TOML.parse(OUT);
+  } catch (e) {
+    die(`setup: this run's answers do not form valid TOML: ${String(e)}`, 1);
+  }
+  const fileText = Bun.TOML.stringify(backup === null ? answers : mergeTables(EXISTING, answers));
 
   // The merged view, global with the file as written: every list below
   // resolves against it, as the readers will read it. The shared file never

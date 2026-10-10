@@ -660,13 +660,25 @@ review_link = ""
     return readFileSync(join(repo, ".postmaster", "settings.toml"), "utf8");
   }
 
+  // The merge is judged on the parsed result: key order, table form and
+  // comments are the emitter's, not the test's.
+  function settingsData(repo: string): Record<string, unknown> {
+    return Bun.TOML.parse(settingsOf(repo));
+  }
+
+  function tableOf(v: unknown): Record<string, unknown> {
+    return typeof v === "object" && v !== null && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : {};
+  }
+
   test("blank answers-file values are left unset, like blank interactive answers", () => {
     const s = stageProject();
     const r = runProject(s.repo, s.config, "lanes=\ntracker=local");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('kind = "local"');
-    expect(written).not.toContain("[lanes.");
+    const data = settingsData(s.repo);
+    expect(tableOf(data.tracker).kind).toBe("local");
+    expect(Object.hasOwn(data, "lanes")).toBe(false);
   });
 
   test("a second run merges: earlier settings stay, new answers land", () => {
@@ -675,12 +687,14 @@ review_link = ""
     expect(first.code).toBe(0);
     const second = runProject(s.repo, s.config, "tracker=local\noverwrite=yes");
     expect(second.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('workhorses = ["alpha", "beta"]');
-    expect(written).toContain('kind = "local"');
+    const data = settingsData(s.repo);
+    expect(tableOf(data.team).workhorses).toEqual(["alpha", "beta"]);
+    expect(tableOf(data.team).reviewers).toEqual(["alpha", "beta"]);
+    expect(tableOf(data.tracker).kind).toBe("local");
+    expect(Object.keys(data).sort()).toEqual(["team", "tracker"]);
   });
 
-  test("merging keeps role keys, unknown sections and comments verbatim", () => {
+  test("merging keeps role keys and unknown sections as data, and drops comments", () => {
     const s = stageProject();
     const dir = join(s.repo, ".postmaster");
     mkdirSync(dir, { recursive: true });
@@ -691,10 +705,10 @@ review_link = ""
     );
     const r = runProject(s.repo, s.config, "coachman.model=m-x\noverwrite=yes");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('coachman = { harness = "claude", model = "m-x" }');
-    expect(written).toContain("[roles]");
-    expect(written).toContain("# hand note");
+    const data = settingsData(s.repo);
+    expect(tableOf(tableOf(data.team).coachman)).toEqual({ harness: "claude", model: "m-x" });
+    expect(tableOf(data.roles).workhorses).toEqual(["alpha"]);
+    expect(settingsOf(s.repo)).not.toContain("# hand note");
   });
 
   test("a lane with no harness is refused before anything is written", () => {
@@ -742,17 +756,16 @@ review_link = ""
     expect(ignored.code).toBe(0);
   });
 
-  test("a top-level answer on a second run replaces the old line", () => {
+  test("a top-level answer on a second run replaces the old value", () => {
     const s = stageProject();
     const first = runProject(s.repo, s.config, "tracker=local\nconfine=off");
     expect(first.code).toBe(0);
-    expect(settingsOf(s.repo)).toContain('confine = "off"');
+    expect(settingsData(s.repo).confine).toBe("off");
     const second = runProject(s.repo, s.config, "confine=on\noverwrite=yes");
     expect(second.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('confine = "on"');
-    expect(written).not.toContain('confine = "off"');
-    expect(written).toContain('kind = "local"');
+    const data = settingsData(s.repo);
+    expect(data.confine).toBe("on");
+    expect(tableOf(data.tracker).kind).toBe("local");
   });
 
   test("a second run answers team lists against the existing file's lanes", () => {
@@ -767,7 +780,9 @@ review_link = ""
     const missing = join(tmp, `proj-${projCounter}.missing.toml`);
     const r = runProject(s.repo, missing, "workhorses=alpha, beta\noverwrite=yes");
     expect(r.code).toBe(0);
-    expect(settingsOf(s.repo)).toContain('workhorses = ["alpha", "beta"]');
+    const data = settingsData(s.repo);
+    expect(tableOf(data.team).workhorses).toEqual(["alpha", "beta"]);
+    expect(Object.keys(tableOf(data.lanes)).sort()).toEqual(["alpha", "beta"]);
   });
 
   test("re-answering tracker=plane keeps the saved workspace", () => {
@@ -787,9 +802,9 @@ review_link = ""
     );
     const r = runProject(s.repo, lanesOnly, "tracker=plane\noverwrite=yes");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('kind = "plane"');
-    expect(written).toContain('workspace = "ws"');
+    const tracker = tableOf(settingsData(s.repo).tracker);
+    expect(tracker.kind).toBe("plane");
+    expect(tracker.workspace).toBe("ws");
   });
 
   test("a dry run with only ignore_settings=yes writes nothing", () => {
@@ -815,7 +830,7 @@ review_link = ""
     expect(existsSync(join(dir, "settings.toml"))).toBe(false);
   });
 
-  test("a multiline value is replaced whole, not line by line", () => {
+  test("a multiline list is replaced whole, not line by line", () => {
     const s = stageProject();
     const dir = join(s.repo, ".postmaster");
     mkdirSync(dir, { recursive: true });
@@ -826,9 +841,9 @@ review_link = ""
     );
     const r = runProject(s.repo, s.config, "reviewers=alpha\noverwrite=yes");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('reviewers = ["alpha"]');
-    expect(written).not.toContain('"beta"');
+    const data = settingsData(s.repo);
+    expect(tableOf(data.team).reviewers).toEqual(["alpha"]);
+    expect(JSON.stringify(data)).not.toContain("beta");
   });
 
   test("a half-answered postmaster is refused before anything is written", () => {
@@ -855,10 +870,13 @@ review_link = ""
     const s = stageProject();
     const r = runProject(s.repo, lanesOnly, "postmaster.harness=claude\npostmaster.model=m-p");
     expect(r.code).toBe(0);
-    expect(settingsOf(s.repo)).toContain('postmaster = { harness = "claude", model = "m-p" }');
+    expect(tableOf(tableOf(settingsData(s.repo).team).postmaster)).toEqual({
+      harness: "claude",
+      model: "m-p",
+    });
   });
 
-  test("brackets in comments do not stretch a multiline value's span", () => {
+  test("a comment with brackets and a multiline list merge as data, comments gone", () => {
     const s = stageProject();
     const dir = join(s.repo, ".postmaster");
     mkdirSync(dir, { recursive: true });
@@ -869,13 +887,14 @@ review_link = ""
     );
     const r = runProject(s.repo, s.config, "workhorses=alpha,beta\noverwrite=yes");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('workhorses = ["alpha", "beta"]');
-    expect(written).toContain("max_runs = 7");
-    expect(written).toContain('mode = "synthesis"');
+    const team = tableOf(settingsData(s.repo).team);
+    expect(team.workhorses).toEqual(["alpha", "beta"]);
+    expect(team.max_runs).toBe(7);
+    expect(team.mode).toBe("synthesis");
+    expect(settingsOf(s.repo)).not.toContain("see notes");
   });
 
-  test("an answered role folds into an existing child table", () => {
+  test("an answered role merges into an existing child table", () => {
     const s = stageProject();
     const dir = join(s.repo, ".postmaster");
     mkdirSync(dir, { recursive: true });
@@ -886,12 +905,9 @@ review_link = ""
     );
     const r = runProject(s.repo, s.config, "coachman.model=m-new\noverwrite=yes");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain("[team.coachman]");
-    expect(written).toContain('model = "m-new"');
-    expect(written).toContain('harness = "claude"');
-    expect(written).not.toContain("coachman = {");
-    expect(written).not.toContain("[team]\n");
+    const data = settingsData(s.repo);
+    expect(tableOf(tableOf(data.team).coachman)).toEqual({ harness: "claude", model: "m-new" });
+    expect(settingsOf(s.repo)).not.toContain("m-old");
   });
 
   test("a blank link answer clears the inherited link", () => {
@@ -899,10 +915,10 @@ review_link = ""
     const r = runProject(s.repo, s.config, "tracker=local\nreview_link=");
     expect(r.code).toBe(0);
     expect(r.out).toContain("(cleared)");
-    expect(settingsOf(s.repo)).toContain('review_link = ""');
+    expect(tableOf(settingsData(s.repo).ship).review_link).toBe("");
   });
 
-  test("a key-shaped line inside a multiline string is left alone", () => {
+  test("a multiline string survives a merge as data", () => {
     const s = stageProject();
     const dir = join(s.repo, ".postmaster");
     mkdirSync(dir, { recursive: true });
@@ -913,9 +929,9 @@ review_link = ""
     );
     const r = runProject(s.repo, s.config, "tracker=local\noverwrite=yes");
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('kind = "not-a-key"');
-    expect(written).toContain('kind = "local"');
+    const tracker = tableOf(settingsData(s.repo).tracker);
+    expect(tracker.kind).toBe("local");
+    expect(tracker.name).toBe('kind = "not-a-key"\n');
   });
 
   test("an interactive blank link answer clears it too", () => {
@@ -933,8 +949,46 @@ review_link = ""
       input: `${input}\n`,
     });
     expect(r.code).toBe(0);
-    const written = settingsOf(s.repo);
-    expect(written).toContain('kind = "local"');
-    expect(written).toContain('review_link = ""');
+    const data = settingsData(s.repo);
+    expect(tableOf(data.tracker).kind).toBe("local");
+    expect(tableOf(data.ship).review_link).toBe("");
+  });
+
+  test("a dry run prints the merged settings and writes nothing", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    const before = "[team]\nmax_runs = 5\n";
+    writeFileSync(join(dir, "settings.toml"), before, "utf8");
+    const r = runProject(s.repo, s.config, "lane.alpha.model=model-x", ["--dry-run"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("model-x");
+    expect(r.out).toContain("max_runs");
+    expect(settingsOf(s.repo)).toBe(before);
+    expect(existsSync(join(dir, ".gitignore"))).toBe(false);
+  });
+
+  test("a failed reviewer check restores the previous file", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "settings.toml"), '[team]\nreviewers = ["gamma"]\n', "utf8");
+    const r = runProject(s.repo, s.config, "workhorses=alpha,beta\noverwrite=yes");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("do not resolve");
+    expect(settingsData(s.repo)).toEqual({ team: { reviewers: ["gamma"] } });
+  });
+
+  test("a __proto__ key in a hand-edited lane entry stays data", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "settings.toml"), '[lanes.alpha]\n"__proto__" = 1\n', "utf8");
+    const r = runProject(s.repo, s.config, "lane.alpha.model=model-x\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const alpha = tableOf(tableOf(settingsData(s.repo).lanes).alpha);
+    expect(Object.hasOwn(alpha, "__proto__")).toBe(true);
+    expect(alpha["__proto__"]).toBe(1);
+    expect(alpha.model).toBe("model-x");
   });
 });

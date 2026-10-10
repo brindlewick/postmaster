@@ -11,11 +11,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ROOT,
   checkIgnore,
   checkSetup,
   initRepo,
   projectSettings,
+  ROOT,
   setupNext,
   setupProject,
   stubBin,
@@ -102,6 +102,14 @@ function answers(dir: string, name: string, text: string): string {
   const path = join(dir, `${name}.answers`);
   writeFileSync(path, `${text}\n`);
   return path;
+}
+
+// Settings files are judged parsed: setup rewrites the file whole, so key
+// order, table form and comments are the emitter's, not the oracle's.
+function tableOf(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
 }
 
 describe("C1: no global config offers setup or skip, then the project step", () => {
@@ -253,10 +261,11 @@ describe("C3: project settings hold only what the user changed", () => {
       const r = setupProject(s.repo, s.configPath, s.bin, ["--answers", file]);
       expect(r.code).toBe(0);
       const written = readFileSync(join(s.repo, ".postmaster", "settings.toml"), "utf8");
-      expect(written.endsWith('[lanes.alpha]\nmodel = "model-x"\n')).toBe(true);
-      expect(written).not.toContain("[lanes.beta]");
-      expect(written).not.toContain("[team]");
-      expect(written).not.toContain("confine");
+      const fileData = Bun.TOML.parse(written);
+      expect(Object.keys(fileData)).toEqual(["lanes"]);
+      const lanes = tableOf(fileData.lanes);
+      expect(Object.keys(lanes)).toEqual(["alpha"]);
+      expect(tableOf(lanes.alpha)).toEqual({ model: "model-x" });
       const merged = projectSettings(s.repo, s.configPath, s.bin, ["effective", s.repo]);
       expect(merged.code).toBe(0);
       const parsed = JSON.parse(merged.out) as Record<
@@ -278,23 +287,30 @@ describe("C3: project settings hold only what the user changed", () => {
       const r = setupProject(s.repo, s.configPath, s.bin, ["--answers", file]);
       expect(r.code).toBe(0);
       const written = readFileSync(join(s.repo, ".postmaster", "settings.toml"), "utf8");
-      for (const needle of [
-        '[lanes.alpha]\nharness = "stub-harness-a"\nmodel = "model-a"',
-        '[lanes.beta]\nharness = "stub-harness-b"\nmodel = "model-b"',
-        'workhorses = ["alpha", "beta"]',
-        'coachman = { harness = "stub-harness-c", model = "model-c" }',
-        'postmaster = { harness = "stub-harness-c", model = "model-c" }',
-        "max_runs = 5",
-        'mode = "single-thread"',
-        'kind = "local"',
-        'confine = "off"',
-        "round_timeout_seconds = 600",
-        'merge_authority = "postmaster"',
-        'checkpoint_mode = "consult"',
-      ]) {
-        expect(written).toContain(needle);
-      }
-      expect(written).not.toContain("projects_roots");
+      const fileData = Bun.TOML.parse(written);
+      const lanes = tableOf(fileData.lanes);
+      expect(tableOf(lanes.alpha)).toEqual({ harness: "stub-harness-a", model: "model-a" });
+      expect(tableOf(lanes.beta)).toEqual({ harness: "stub-harness-b", model: "model-b" });
+      const team = tableOf(fileData.team);
+      expect(team.workhorses).toEqual(["alpha", "beta"]);
+      expect(team.reviewers).toEqual(["alpha", "beta"]);
+      expect(tableOf(team.coachman)).toEqual({ harness: "stub-harness-c", model: "model-c" });
+      expect(tableOf(team.coachman_fallback)).toEqual({
+        harness: "stub-harness-c",
+        model: "model-c",
+      });
+      expect(tableOf(team.postmaster)).toEqual({ harness: "stub-harness-c", model: "model-c" });
+      expect(tableOf(team.clerk)).toEqual({ harness: "stub-harness-c", model: "model-c" });
+      expect(team.max_runs).toBe(5);
+      expect(team.mode).toBe("single-thread");
+      expect(tableOf(fileData.postmaster).poll_seconds).toBe(60);
+      expect(tableOf(fileData.tracker).kind).toBe("local");
+      expect(tableOf(fileData.tracker).postmaster_may_create).toBe(true);
+      expect(fileData.confine).toBe("off");
+      expect(tableOf(fileData.review).round_timeout_seconds).toBe(600);
+      expect(tableOf(fileData.ship).merge_authority).toBe("postmaster");
+      expect(tableOf(fileData.ship).checkpoint_mode).toBe("consult");
+      expect(Object.hasOwn(fileData, "projects_roots")).toBe(false);
       const check = checkSetup(s.repo, s.configPath, s.bin);
       expect(check.code).toBe(0);
       expect(check.out.startsWith("set up: ")).toBe(true);
@@ -372,8 +388,9 @@ describe("C3: project settings hold only what the user changed", () => {
       const merged = setupProject(s.repo, s.configPath, s.bin, ["--answers", fileYes]);
       expect(merged.code).toBe(0);
       const written = readFileSync(join(s.repo, ".postmaster", "settings.toml"), "utf8");
-      expect(written).toContain('model = "model-x"');
-      expect(written).toContain("max_runs = 5");
+      const fileData = Bun.TOML.parse(written);
+      expect(tableOf(tableOf(fileData.lanes).alpha).model).toBe("model-x");
+      expect(tableOf(fileData.team).max_runs).toBe(5);
     } finally {
       cleanup(s);
     }
