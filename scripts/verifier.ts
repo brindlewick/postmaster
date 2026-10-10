@@ -1,10 +1,12 @@
 // Make verifiers for a project's surfaces: one model session, in a worktree of its
 // own, writes one verifier per surface and proves each once before handing over.
 // One surface keeps #323's shape; several share a folder with an index (#324).
-// Land what a session made only when the project's own checks pass with it in
-// place (#325).
+// The session is interactive: it opens in a tab of its own where the user watches
+// and answers it, asking only what the project does not show and taking secrets by
+// file name (#344). Land what a session made only when the project's own checks pass
+// with it in place (#325).
 //
-//   run verifier prompt <repo> <surface>...
+//   run verifier prompt <repo> <surface>... [--headless]
 //   run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
 //   run verifier check <repo> <branch> --run <dispatch> --handover <file>
 //     [--folder <dir>] [--timeout <seconds>]
@@ -15,13 +17,19 @@
 //              web-journey, library-tests. cli-examples is the command line,
 //              browser-suite and web-journey are web pages, library-tests is
 //              the library interface; names of one surface make one verifier.
-//   prompt     print the session's instructions for the repo and surfaces
+//   prompt     print the session's instructions for the repo and surfaces, the
+//              interactive form, or with --headless the no-host form, which lists
+//              each question it could not ask in HANDOVER.md instead of asking
 //   make       cut a worktree on a branch of its own beside the repo, removed again
-//              when make fails before any session starts, render the prompt,
-//              launch the coachman role headless through run launch under run host, wait,
-//              fall back to coachman_fallback on a provider wall read from the session
-//              stream, stop the session at the limit by the pid host recorded, and log
-//              one dispatch action per launch
+//              when make fails before any session starts, render the prompt, and open
+//              the coachman role's interactive form through run launch in a fresh tab
+//              through run host spawn, the way the booking clerk opens; send it the
+//              instructions and wait for HANDOVER.md, leaving the tab open when done.
+//              With no session host (spawn exits 3) run headless instead: launch the
+//              coachman role through run launch under run host, wait, fall back to
+//              coachman_fallback on a provider wall read from the session stream,
+//              stop the session at the limit by the pid host recorded, and log one
+//              dispatch action per launch either way
 //   check      decide whether the branch lands: its proven verifiers pass the project's
 //              checks on a scratch, its diff touches only the verifiers' folder, and
 //              every failed verifier's folder is absent. Prints one accept: or refuse:
@@ -39,7 +47,8 @@
 //              for (check, land); past it the branch lands nothing (default 3600 each,
 //              at most 9 digits)
 //
-//   exit 0  prompt printed; make: the session ended with no wall and HANDOVER.md present;
+//   exit 0  prompt printed; make: HANDOVER.md validated, the interactive session
+//           left open in its tab, the headless one ended with no wall;
 //           check: the branch lands; land: merged, or the pull request waits for the word
 //   exit 1  make failed: the launch would not start, the session was still running at the
 //           limit, both roles walled, the handover, commit, verifier, upkeep line or
@@ -47,9 +56,10 @@
 //           verifier files landed outside the folder, or the action was not logged;
 //           check, land: the branch lands nothing, or the landing failed after it
 //           was accepted
-//   exit 2  usage: an unknown command or surface, a missing argument, a bad timeout, a path
-//           that is not a git repository or not its top, a repo holding no commit, no
-//           run at the dispatch, or a branch that is not a verifier branch
+//   exit 2  usage: an unknown command or surface, a missing argument, a bad flag or
+//           timeout, a path that is not a git repository or not its top, a repo holding
+//           no commit, no run at the dispatch, or a branch that is not a verifier branch
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -62,12 +72,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { splitCommand } from "./clerk.ts";
 import { endingWallMessage, isWallMessage } from "./launch.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 import { RESULT_RE } from "./verify.ts";
 
-const USAGE = `usage: run verifier prompt <repo> <surface>...
+const USAGE = `usage: run verifier prompt <repo> <surface>... [--headless]
        run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
        run verifier check <repo> <branch> --run <dispatch> --handover <file>
          [--folder <dir>] [--timeout <seconds>]
@@ -129,6 +140,7 @@ export interface ParsedPrompt {
   cmd: "prompt";
   repo: string;
   surfaces: Surface[];
+  headless: boolean;
 }
 
 export interface ParsedMake {
@@ -200,8 +212,12 @@ export function parseArgs(argv: string[]): Parsed {
     }
     const surfaces = orderKinds(kinds);
     if (cmd === "prompt") {
-      if (i !== argv.length) return { ok: false, error: "prompt takes a repo and a surface" };
-      return { ok: true, req: { cmd, repo, surfaces } };
+      const rest = argv.slice(i);
+      if (rest.length > 1) return { ok: false, error: "prompt takes a repo and a surface" };
+      if (rest.length === 1 && rest[0] !== "--headless") {
+        return { ok: false, error: `unknown flag for prompt: ${rest[0]}` };
+      }
+      return { ok: true, req: { cmd, repo, surfaces, headless: rest.length === 1 } };
     }
     let dispatch: string | null = null;
     let timeout = DEFAULT_TIMEOUT;
@@ -286,6 +302,9 @@ export interface PromptVars {
   surfaceProse: string;
   verifyDir: string;
   base: string;
+  askRule: string;
+  secretsRule: string;
+  handoverUnasked: string;
   handoverRule?: string;
 }
 
@@ -309,6 +328,9 @@ export function renderPrompt(template: string, vars: PromptVars): string {
     SURFACE_PROSE: vars.surfaceProse,
     VERIFY_DIR: vars.verifyDir,
     BASE: vars.base,
+    ASK_RULE: vars.askRule,
+    SECRETS_RULE: vars.secretsRule,
+    HANDOVER_UNASKED: vars.handoverUnasked,
   };
   if (vars.handoverRule !== undefined) known.HANDOVER_RULE = vars.handoverRule;
   return renderTemplate(template, known);
@@ -339,6 +361,63 @@ export function indexNames(text: string, kind: Surface): boolean {
     // never reads as the cli verifier, or a relative folder link [cli](cli/).
     return new RegExp(`verifier/${kind}(?![A-Za-z0-9_-])|\\]\\( *${kind}/`, "u").test(lower);
   });
+}
+
+/**
+ * What the session may ask, in the tool's own words from pstack's first step:
+ * the project first, the user only for what it does not show. The headless
+ * session cannot ask at all, so it records each open question for HANDOVER.md.
+ */
+export const INTERACTIVE_ASK_RULE =
+  "Learn the project from its files first, and ask the user only what you cannot observe there. " +
+  "A question the working copy answers is never asked; the user sits behind this session and answers " +
+  "what the project does not show.";
+
+export const HEADLESS_ASK_RULE =
+  "Learn the project from its files, never from the user: this session cannot ask anyone anything. " +
+  "For every question below the working copy does not answer, record it for HANDOVER.md's unasked list " +
+  "instead of asking: what you needed, and what it would have taken.";
+
+/**
+ * A secret reaches the session as the name of the file that holds it, which the
+ * user fills in themselves, as setup takes a tracker key; the value never passes
+ * through the conversation, the hand-over or the verifiers. Headless, the need
+ * joins the unasked list and no value is ever invented.
+ */
+export const INTERACTIVE_SECRETS_RULE =
+  "When a step needs a secret — a login, a token or a key — ask the user for the name of the file " +
+  "that holds it, never the value itself. The user fills that file in themselves; the verifier reads " +
+  "the file when it drives the app. The value never appears in this conversation, in HANDOVER.md or in " +
+  "the verifier: only the file's name does.";
+
+export const HEADLESS_SECRETS_RULE =
+  "When a step needs a secret — a login, a token or a key — record the file you would have asked the user " +
+  "to name in the unasked list, with what the value unlocks. Never invent a value, and never write a " +
+  "guessed one into the verifier: no value reaches HANDOVER.md or the verifier.";
+
+/** The hand-over's extra section with no host; the interactive hand-over needs none. */
+export const HEADLESS_HANDOVER_UNASKED =
+  " It also carries an Unasked questions section: each question you could not ask, with what it would " +
+  "have needed — the file, the value's purpose, the step it blocked.";
+
+/** The template's mode blocks: the interactive session's, or the headless one's. */
+export function modeBlocks(headless: boolean): {
+  askRule: string;
+  secretsRule: string;
+  handoverUnasked: string;
+} {
+  if (headless) {
+    return {
+      askRule: HEADLESS_ASK_RULE,
+      secretsRule: HEADLESS_SECRETS_RULE,
+      handoverUnasked: HEADLESS_HANDOVER_UNASKED,
+    };
+  }
+  return {
+    askRule: INTERACTIVE_ASK_RULE,
+    secretsRule: INTERACTIVE_SECRETS_RULE,
+    handoverUnasked: "",
+  };
 }
 
 /** The kinds as prose for the multi header: "command line, web pages". */
@@ -407,6 +486,29 @@ export function pickWorktree(
     n++;
   }
   return wt;
+}
+
+/**
+ * The spawn handle: the repo, the session's branch, and a tag from the repo's
+ * path, since both hosts check session names globally: the branch numbers
+ * past sessions taken in one repo, and the tag keeps two checkouts that share
+ * a directory name apart.
+ */
+export function verifierHandle(repo: string, branch: string): string {
+  const tag = createHash("sha256").update(resolve(repo)).digest("hex").slice(0, 8);
+  return `verifier-${basename(repo)}-${branch}-${tag}`;
+}
+
+/**
+ * The short first message the tab gets, clerk-style: the full instructions live
+ * in the prompt file, and the session reads them there.
+ */
+export function sendText(promptFile: string): string {
+  return (
+    "You are making a verifier for one surface of a project. " +
+    `Read your instructions at ${promptFile}, then follow them. ` +
+    "This directory is your working copy.\n"
+  );
 }
 
 /** The remote branch origin/HEAD names, or null when it names none. */
@@ -481,6 +583,33 @@ function handoverMtimeMs(path: string): number | null {
     return statSync(path).mtimeMs;
   } catch {
     return null;
+  }
+}
+
+/** Naps between handover checks: short enough that a small timeout keeps its shape. */
+export const HANDOVER_NAP_SECONDS = 5;
+
+/**
+ * True once the worktree holds a HANDOVER.md this session wrote. An interactive
+ * session has no marker, so its arrival is the completion signal; the prompt
+ * orders the commit before it. The clock and the sleep are injected for tests.
+ */
+export function waitForHandover(
+  wt: string,
+  cutMs: number,
+  timeoutSec: number,
+  sleepMs: (ms: number) => void = (ms) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  },
+  nowMs: () => number = Date.now,
+): boolean {
+  const deadline = nowMs() + timeoutSec * 1000;
+  for (;;) {
+    const written = handoverMtimeMs(join(wt, "HANDOVER.md"));
+    if (written !== null && handoverFresh(written, cutMs)) return true;
+    const left = deadline - nowMs();
+    if (left <= 0) return false;
+    sleepMs(Math.min(left, HANDOVER_NAP_SECONDS * 1000));
   }
 }
 
@@ -881,7 +1010,12 @@ function readMultiTemplate(): string {
 }
 
 /** The session prompt: one body for one surface, a header plus one body per kind. */
-function renderSessionPrompt(repo: string, surfaces: Surface[], base: string): string {
+function renderSessionPrompt(
+  repo: string,
+  surfaces: Surface[],
+  base: string,
+  headless: boolean,
+): string {
   const body = readTemplate();
   if (surfaces.length === 1) {
     const kind = surfaces[0] as Surface;
@@ -892,6 +1026,7 @@ function renderSessionPrompt(repo: string, surfaces: Surface[], base: string): s
       verifyDir: verifyDirName(repo),
       base,
       handoverRule: SINGLE_HANDOVER_RULE,
+      ...modeBlocks(headless),
     });
   }
   const bodies = surfaces.map((kind) => ({
@@ -903,6 +1038,7 @@ function renderSessionPrompt(repo: string, surfaces: Surface[], base: string): s
       verifyDir: `verifier/${kind}`,
       base,
       handoverRule: MULTI_HANDOVER_RULE,
+      ...modeBlocks(headless),
     }),
   }));
   return renderTemplate(readMultiTemplate(), {
@@ -920,7 +1056,7 @@ function runPrompt(req: ParsedPrompt): number {
   if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
   const base = defaultBase(repo);
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
-  process.stdout.write(renderSessionPrompt(repo, req.surfaces, base));
+  process.stdout.write(renderSessionPrompt(repo, req.surfaces, base, req.headless));
   return 0;
 }
 
@@ -1171,6 +1307,64 @@ function runMake(req: ParsedMake): number {
   }
 }
 
+/** Seconds one send waits for the session's turn, and how many sends before make gives up. */
+export const SEND_WAIT_SECONDS = 60;
+export const SEND_ATTEMPTS = 3;
+
+/** What a `host send --wait` result means for delivery. */
+export type SendVerdict = "sent" | "retry" | "failed";
+
+/**
+ * Read a `host send --wait` result. Exit 0 settled, and exit 3 short of
+ * settling still received the instructions, so both proceed; exit 3 with no
+ * turn started means the prompt was dropped and the send goes again; a
+ * session that took the prompt and then stopped at an approval or a question
+ * keeps its instructions while the user answers in the watched tab, so it
+ * proceeds too. A block met before the prompt was accepted never received
+ * it. Anything else failed.
+ */
+export function sendVerdict(code: number, output: string): SendVerdict {
+  if (code === 0) return "sent";
+  if (code === 3 && output.includes("did not settle")) return "sent";
+  if (code === 3 && output.includes("no turn start")) return "retry";
+  if (code === 3 && output.includes("stopped at an approval or a question")) return "sent";
+  return "failed";
+}
+
+/**
+ * Send the instructions with receipt confirmation: `host send --wait` reports
+ * a dropped prompt as no turn started, and the send goes again, bounded, with
+ * a read first (hosts.md). A handle the read cannot reach never registered,
+ * so retrying is futile and the failure says so. The runner is injected for
+ * tests. Tmux panes exec the harness directly, so the paste waits in the pty
+ * buffer until the harness reads it; no readiness check is needed there.
+ */
+export function deliverInstructions(
+  runFn: (args: string[]) => { code: number; out: string; err: string },
+  handle: string,
+  sendFile: string,
+): { delivered: boolean; attempts: number; lastError: string } {
+  let lastError = "";
+  for (let attempt = 1; attempt <= SEND_ATTEMPTS; attempt++) {
+    const sent = runFn(["host", "send", handle, sendFile, "--wait", String(SEND_WAIT_SECONDS)]);
+    const text = `${sent.out}\n${sent.err}`;
+    const verdict = sendVerdict(sent.code, text);
+    if (verdict === "sent") return { delivered: true, attempts: attempt, lastError: "" };
+    lastError = text.trim() || `exit ${sent.code}`;
+    if (verdict === "failed") return { delivered: false, attempts: attempt, lastError };
+    if (attempt === SEND_ATTEMPTS) return { delivered: false, attempts: attempt, lastError };
+    const read = runFn(["host", "read", handle, "20"]);
+    if (read.code !== 0) {
+      return {
+        delivered: false,
+        attempts: attempt,
+        lastError: `the session never registered under ${handle}: ${(read.out + read.err).trim() || `exit ${read.code}`}`,
+      };
+    }
+  }
+  return { delivered: false, attempts: SEND_ATTEMPTS, lastError };
+}
+
 /** What the session added: every multi verifier complete, nothing unlisted or outside. */
 export function checkMultiVerifiers(
   repo: string,
@@ -1238,13 +1432,181 @@ function runMakeLaunches(
   const logs = join(dispatch, "logs");
   mkdirSync(logs, { recursive: true });
   const promptFile = join(logs, `verifier-${branch}-prompt.txt`);
-  writeFileSync(promptFile, renderSessionPrompt(repo, req.surfaces, base));
+  writeFileSync(promptFile, renderSessionPrompt(repo, req.surfaces, base, false));
   const label = req.surfaces.join("-");
   const named = run(RUN, ["host", "name", dispatch, "role", `verifier-${label}`]);
   if (named.code !== 0) {
     throw new RunError(`the launch could not be named: ${named.err.trim() || named.out.trim()}`);
   }
   const name = named.out.trim();
+  const form = formOrNull(wt, name);
+  const handle = verifierHandle(repo, branch);
+  const spawned =
+    form === null
+      ? null
+      : run(RUN, ["host", "spawn", handle, wt, "--label", name, "--", ...spawnCommand(wt, form)]);
+  if (spawned === null || spawned.code === 3) {
+    // No session host keeps an interactive session: run headless, as #323 did,
+    // with the no-host instructions, which report what could not be asked. The
+    // prompt file holds what the session read either way.
+    writeFileSync(promptFile, renderSessionPrompt(repo, req.surfaces, base, true));
+    return runHeadless(
+      req,
+      dispatch,
+      base,
+      branch,
+      wt,
+      vdir,
+      name,
+      logs,
+      promptFile,
+      sessionStarted,
+      cutAt,
+    );
+  }
+  if (spawned.code !== 0) {
+    throw new RunError(
+      `the verifier session could not start: ${(spawned.out + spawned.err).trim() || `exit ${spawned.code}`}`,
+    );
+  }
+  if (!spawned.out.includes("handle=")) {
+    throw new RunError(
+      `the verifier session started but the host did not confirm its handle (${spawned.out.trim()})`,
+    );
+  }
+  sessionStarted.started = true;
+  const sendFile = join(logs, `verifier-${branch}-send.txt`);
+  writeFileSync(sendFile, sendText(promptFile));
+  const delivery = deliverInstructions((args) => run(RUN, args), handle, sendFile);
+  if (!delivery.delivered) {
+    const tries =
+      delivery.attempts === 1
+        ? "could not be sent"
+        : `could not be sent after ${delivery.attempts} tries`;
+    const failed = `the instructions ${tries}: ${delivery.lastError}; the session was left open in ${handle}`;
+    logInteractive(dispatch, label, branch, handle, failed);
+    throw new RunError(`${failed}; read the session and resend if it is idle`);
+  }
+  logInteractive(dispatch, label, branch, handle, "");
+  if (!waitForHandover(wt, cutAt, req.timeout)) {
+    const failed = `the verifier session is still running after ${req.timeout} seconds; it was left open in ${handle}`;
+    logInteractive(dispatch, label, branch, handle, failed);
+    throw new RunError(failed);
+  }
+  try {
+    validateSession(wt, base, branch, vdir, cutAt, req.surfaces);
+  } catch (e) {
+    logInteractive(dispatch, label, branch, handle, e instanceof Error ? e.message : String(e));
+    throw e;
+  }
+  for (const line of [
+    `branch ${branch}`,
+    `base ${base}`,
+    `worktree ${wt}`,
+    `role coachman`,
+    `handle ${handle}`,
+    `prompt ${promptFile}`,
+    `handover ${join(wt, "HANDOVER.md")}`,
+  ]) {
+    console.log(line);
+  }
+  return 0;
+}
+
+/**
+ * The coachman role's interactive form, split for spawn. The form comes from the
+ * live global config, as the clerk's does: run launch interactive takes no --run.
+ * The leg is synthesis, as on the headless path, so a per-leg coachman agrees.
+ */
+function interactiveForm(wt: string, name: string): string[] {
+  const printed = run(RUN, [
+    "launch",
+    "interactive",
+    "coachman",
+    "--project",
+    wt,
+    "--name",
+    name,
+    "--leg",
+    "synthesis",
+  ]);
+  const form = printed.code === 0 ? splitCommand(printed.out) : [];
+  if (form.length === 0) {
+    throw new RunError(
+      `run launch printed no interactive command for the coachman${printed.code === 0 ? "" : `: ${(printed.out + printed.err).trim() || `exit ${printed.code}`}`}`,
+    );
+  }
+  return form;
+}
+
+/** Single-quote a word for sh, the twin of host.ts's quote, which stays there. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
+/**
+ * The argv spawn runs: the form wrapped so it starts in the worktree even when
+ * the pane opens elsewhere. host spawn may place a linked worktree's pane at
+ * the repo root instead (tool-fault, run 344), so the wrapper cds explicitly,
+ * as host run's own pane line does, and execs the form, so the pane lists the
+ * session itself, with the harness as the pane's own process as before.
+ */
+export function spawnCommand(wt: string, form: string[]): string[] {
+  return ["bash", "-c", `cd -- ${shellQuote(wt)} && exec "$@"`, "_", ...form];
+}
+
+/**
+ * The interactive form, or null when it would not print and no host could take
+ * it: the form is only needed for the spawn, so with no host a broken coachman
+ * entry still runs headless on the run's recorded config.
+ */
+function formOrNull(wt: string, name: string): string[] | null {
+  try {
+    return interactiveForm(wt, name);
+  } catch (e) {
+    if (!(e instanceof RunError)) throw e;
+    const detected = run(RUN, ["host", "detect"]);
+    if (detected.code === 0 && detected.out.trim() === "none") return null;
+    throw e;
+  }
+}
+
+/** One dispatch line for the interactive session, on success and past the spawn. */
+function logInteractive(
+  dispatch: string,
+  surface: string,
+  branch: string,
+  handle: string,
+  failed: string,
+): void {
+  const detail =
+    `interactive handle ${handle} branch ${branch}` + (failed === "" ? "" : ` failed: ${failed}`);
+  const r = run(RUN, [
+    "log-action",
+    dispatch,
+    "coachman",
+    "dispatch",
+    `verifier-${surface}`,
+    detail,
+  ]);
+  if (r.code !== 0)
+    throw new RunError(`the launch was not logged: ${r.err.trim() || r.out.trim()}`);
+}
+
+/** The no-host session: the headless launches, as #323 ran them. */
+function runHeadless(
+  req: ParsedMake,
+  dispatch: string,
+  base: string,
+  branch: string,
+  wt: string,
+  vdir: string,
+  name: string,
+  logs: string,
+  promptFile: string,
+  sessionStarted: { started: boolean },
+  cutAt: number,
+): number {
   const first = attempt(
     {
       role: "coachman",
@@ -1253,7 +1615,7 @@ function runMakeLaunches(
       name,
       logs,
       branch,
-      surface: label,
+      surface: req.surfaces.join("-"),
       promptFile,
       dispatch,
       timeout: req.timeout,
@@ -1270,7 +1632,7 @@ function runMakeLaunches(
         name,
         logs,
         branch,
-        surface: label,
+        surface: req.surfaces.join("-"),
         promptFile,
         dispatch,
         timeout: req.timeout,
@@ -1284,6 +1646,34 @@ function runMakeLaunches(
     }
     final = second;
   }
+  validateSession(wt, base, branch, vdir, cutAt, req.surfaces);
+  for (const line of [
+    `branch ${branch}`,
+    `base ${base}`,
+    `worktree ${wt}`,
+    `role ${final.role}`,
+    `thread ${final.thread}`,
+    `prompt ${promptFile}`,
+    `stream ${final.stream}`,
+    `handover ${join(wt, "HANDOVER.md")}`,
+  ]) {
+    console.log(line);
+  }
+  return 0;
+}
+
+/**
+ * The session's deliverables, on either path: a fresh handover, commits past the
+ * base, the verifier's front page and at least three feature pages.
+ */
+function validateSession(
+  wt: string,
+  base: string,
+  branch: string,
+  vdir: string,
+  cutAt: number,
+  surfaces: Surface[],
+): void {
   const handover = join(wt, "HANDOVER.md");
   const written = handoverMtimeMs(handover);
   if (written === null) {
@@ -1299,7 +1689,7 @@ function runMakeLaunches(
   if (made === 0) {
     throw new RunError(`the session committed nothing on ${branch}`);
   }
-  if (req.surfaces.length === 1) {
+  if (surfaces.length === 1) {
     if (!branchHasPath(wt, branch, `${vdir}/README.md`)) {
       throw new RunError(`the session left no ${vdir}/README.md committed on ${branch}`);
     }
@@ -1308,21 +1698,8 @@ function runMakeLaunches(
       throw new RunError(`the session left fewer than 3 feature pages committed on ${branch}`);
     }
   } else {
-    checkMultiVerifiers(wt, branch, base, req.surfaces);
+    checkMultiVerifiers(wt, branch, base, surfaces);
   }
-  for (const line of [
-    `branch ${branch}`,
-    `base ${base}`,
-    `worktree ${wt}`,
-    `role ${final.role}`,
-    `thread ${final.thread}`,
-    `prompt ${promptFile}`,
-    `stream ${final.stream}`,
-    `handover ${handover}`,
-  ]) {
-    console.log(line);
-  }
-  return 0;
 }
 
 /** The ticket the project's checks read: none, so ticket checks report not run. */
