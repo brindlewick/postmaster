@@ -279,4 +279,21 @@ describe("C4: Socket's scanner checks every package before it is taken", () => {
       cleanup(fx.dir, root);
     }
   });
+
+  test("the refresh announces a recorded verdict", () => {
+    const fx = makeRefreshFixture();
+    const root = makeTempDir("postmaster-425-root-");
+    try {
+      const scan = writeScanFixture(fx.dir, {});
+      const r = runRefresh([fx.oldVersion], {
+        POSTMASTER_REFRESH_FIXTURE: fx.dir,
+        POSTMASTER_REFRESH_ROOT: root,
+        POSTMASTER_SCAN_FIXTURE: scan,
+      });
+      expect(r.code).toBe(0);
+      expect(r.err).toContain("recorded verdict");
+    } finally {
+      cleanup(fx.dir, root);
+    }
+  });
 });
