@@ -175,19 +175,36 @@ test("mergeSpans joins overlapping, nested, adjacent and identical spans", () =>
   // Review round 14 (bug-83): the detector never emits touching or
   // identical spans, so the merge takes them synthetic; disjoint spans
   // pass through as the negative control.
-  expect(mergeSpans([{ start: 2, end: 13 }, { start: 11, end: 43 }])).toEqual([
-    { start: 2, end: 43 },
-  ]);
-  expect(mergeSpans([{ start: 0, end: 49 }, { start: 0, end: 35 }])).toEqual([
-    { start: 0, end: 49 },
-  ]);
-  expect(mergeSpans([{ start: 0, end: 5 }, { start: 5, end: 10 }])).toEqual([
-    { start: 0, end: 10 },
-  ]);
-  expect(mergeSpans([{ start: 3, end: 9 }, { start: 3, end: 9 }])).toEqual([
-    { start: 3, end: 9 },
-  ]);
-  expect(mergeSpans([{ start: 0, end: 5 }, { start: 10, end: 15 }])).toEqual([
+  expect(
+    mergeSpans([
+      { start: 2, end: 13 },
+      { start: 11, end: 43 },
+    ]),
+  ).toEqual([{ start: 2, end: 43 }]);
+  expect(
+    mergeSpans([
+      { start: 0, end: 49 },
+      { start: 0, end: 35 },
+    ]),
+  ).toEqual([{ start: 0, end: 49 }]);
+  expect(
+    mergeSpans([
+      { start: 0, end: 5 },
+      { start: 5, end: 10 },
+    ]),
+  ).toEqual([{ start: 0, end: 10 }]);
+  expect(
+    mergeSpans([
+      { start: 3, end: 9 },
+      { start: 3, end: 9 },
+    ]),
+  ).toEqual([{ start: 3, end: 9 }]);
+  expect(
+    mergeSpans([
+      { start: 0, end: 5 },
+      { start: 10, end: 15 },
+    ]),
+  ).toEqual([
     { start: 0, end: 5 },
     { start: 10, end: 15 },
   ]);
