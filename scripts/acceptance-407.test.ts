@@ -536,7 +536,7 @@ describe("readers agree: parts, cut and premises read every ready variant alike"
       },
       {
         name: "big",
-        text: base.replace("## For the agents", `${filler}## For the agents`, 1),
+        text: base.replace("## For the agents", `${filler}## For the agents`),
         count: 1,
       },
     ];
