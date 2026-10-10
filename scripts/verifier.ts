@@ -1706,6 +1706,7 @@ export function outsideReason(outside: string[]): string | null {
 }
 
 /** The confirmation a pass writes: the driven commit as a full sha. */
+// ASCII: spacing around a hex-only sha; a wider match still needs the 40 hex
 const CONFIRMED_RE = /Confirmed:\s*([0-9a-fA-F]{40})\b/u;
 
 /**
@@ -1715,11 +1716,14 @@ const CONFIRMED_RE = /Confirmed:\s*([0-9a-fA-F]{40})\b/u;
  */
 export function confirmedSha(span: string): string | null {
   const m = CONFIRMED_RE.exec(span);
+  // ASCII: the sha matched hex-only
   return m === null ? null : (m[1] as string).toLowerCase();
 }
 
 /** A bullet starts a span; a heading ends whatever bullet is open. */
+// ASCII: indentation and the gap after the marker are plain spaces
 const BULLET_START_RE = /^\s*[-*+]\s/u;
+// ASCII: indentation and the gap after the hashes are plain spaces
 const HEADING_RE = /^\s*#{1,6}\s/u;
 
 /**
@@ -2436,6 +2440,7 @@ function validateCorrectingBranch(
           `the index for ${vdir} names no confirmed commit (expected Confirmed: ${head} in ${indexFile})`,
         );
       }
+      // ASCII: the driven head is a hex sha
       if (sha !== head.toLowerCase()) {
         throw new RunError(
           `the index for ${vdir} records ${sha}, not the driven commit ${head} (in ${indexFile})`,
