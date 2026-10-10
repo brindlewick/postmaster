@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   firstLine,
   lastLine,
+  logVerdict,
   parseArgs,
   parseMakeOutput,
   runJsonDoc,
@@ -141,5 +145,28 @@ describe("runJsonDoc", () => {
     expect(doc.target).toBe("/r");
     expect(doc.config).toEqual({ team: {} });
     expect(typeof doc.written).toBe("string");
+  });
+});
+
+describe("logVerdict", () => {
+  test("a writable dispatch logs the note", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "setup-verdict-")));
+    try {
+      expect(logVerdict(dir, "landed verify-cli")).toBe(true);
+      expect(readFileSync(join(dir, "actions.jsonl"), "utf8")).toContain("landed verify-cli");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an unwritable dispatch fails", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "setup-verdict-")));
+    try {
+      const file = join(dir, "file");
+      writeFileSync(file, "not a dispatch");
+      expect(logVerdict(file, "landed verify-cli")).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -27,7 +27,8 @@
 //   exit 1  given up: make or land failed; setup goes on without verifiers
 //   exit 2  usage: bad arguments, a fixture copy, verifiers already held, a path that is
 //           not the top of a git repository, no dispatch, no effective config, a host
-//           that cannot be detected, or a make call that misused its own command
+//           that cannot be detected, a make call that misused its own command, or a
+//           verdict that could not be logged
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
@@ -167,6 +168,20 @@ function usageError(message: string): never {
   throw new Error("unreachable");
 }
 
+/**
+ * Log the setup verdict to the run's actions and the project ledger. False
+ * when the audit line could not be written: an unlogged verdict stops setup
+ * rather than go on unrecorded.
+ */
+export function logVerdict(dispatch: string, note: string): boolean {
+  const logged = run(RUN, ["log-action", dispatch, "postmaster", "note", "setup-verifiers", note]);
+  if (logged.code !== 0) {
+    console.error(`setup-verifiers: the verdict was not logged: ${logged.err.trim() || "exit 1"}`);
+    return false;
+  }
+  return true;
+}
+
 function withoutPrefix(line: string): string {
   return line.replace(/^verifier: /u, "");
 }
@@ -286,33 +301,11 @@ function main(argv: string[]): number {
     }
   }
   if (verdict === "") {
-    const logged = run(RUN, [
-      "log-action",
-      dispatch,
-      "postmaster",
-      "note",
-      "setup-verifiers",
-      `landed ${landed}`,
-    ]);
-    if (logged.code !== 0) {
-      console.error(
-        `setup-verifiers: the verdict was not logged: ${logged.err.trim() || "exit 1"}`,
-      );
-    }
+    if (!logVerdict(dispatch, `landed ${landed}`)) return 2;
     return 0;
   }
   console.log(`given up: ${verdict}`);
-  const logged = run(RUN, [
-    "log-action",
-    dispatch,
-    "postmaster",
-    "note",
-    "setup-verifiers",
-    `given up: ${verdict}`,
-  ]);
-  if (logged.code !== 0) {
-    console.error(`setup-verifiers: the verdict was not logged: ${logged.err.trim() || "exit 1"}`);
-  }
+  if (!logVerdict(dispatch, `given up: ${verdict}`)) return 2;
   return 1;
 }
 
