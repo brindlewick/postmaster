@@ -715,9 +715,7 @@ function tokenFindings(line: string, out: Finding[]): void {
     if (!quoted && (property || callOrExpression) && !CREDENTIAL_SHAPED.test(value)) continue;
     if (
       kind === "account-id" &&
-      (!new RegExp(`^${SPACE}*(?:\\{|["'][A-Za-z][A-Za-z0-9_-]*["']?${SPACE}*:)`, "u").test(
-        line,
-      ) ||
+      (!new RegExp(`^${SPACE}*(?:\\{|["'][A-Za-z][A-Za-z0-9_-]*["']?${SPACE}*:)`, "u").test(line) ||
         new RegExp(`^${SPACE}*(?:const|let|var|return|export)${BOUND_R}`, "u").test(line))
     )
       continue;

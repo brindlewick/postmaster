@@ -686,7 +686,19 @@ test("a private-domain email reports the whole address, not just its host", () =
   const ip = joined("contact ", "alice", "@", "10", ".", "0", ".", "0", ".", "2", " for x");
   expect(rules(ip)).toContain("email");
   expect(rules(ip)).toContain("private-host");
-  const bracketed = joined("contact ", "alice", "@[", "10", ".", "0", ".", "0", ".", "2", "] for x");
+  const bracketed = joined(
+    "contact ",
+    "alice",
+    "@[",
+    "10",
+    ".",
+    "0",
+    ".",
+    "0",
+    ".",
+    "2",
+    "] for x",
+  );
   expect(rules(bracketed)).toContain("email");
   expect(rules(bracketed)).toContain("private-host");
   const pub = joined("contact ", "alice", "@northstar.", "org", " for x");

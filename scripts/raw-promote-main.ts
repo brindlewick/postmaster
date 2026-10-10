@@ -30,13 +30,7 @@ import {
   transformReasoning,
   WHOLE_JSON_CAP,
 } from "./scrub-reasoning.ts";
-import {
-  errorText,
-  fail,
-  findingRow,
-  logFinding,
-  safePath,
-} from "./scrub-report.ts";
+import { errorText, fail, findingRow, logFinding, safePath } from "./scrub-report.ts";
 
 const USAGE = "usage: run raw-promote <src> <dest> | --help";
 
