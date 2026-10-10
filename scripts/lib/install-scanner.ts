@@ -94,7 +94,10 @@ export const scanner: Scanner = {
   version: "1",
   async scan({ packages }) {
     const fixture = process.env["POSTMASTER_SCAN_FIXTURE"];
-    if (fixture !== undefined) return recordedScan(fixture, packages);
+    if (fixture !== undefined) {
+      console.error(`install-scanner: using the recorded verdict at ${fixture}`);
+      return recordedScan(fixture, packages);
+    }
     // #424 adds the ticket-approval scan here, concatenated after Socket's.
     return socketScan(packages);
   },
