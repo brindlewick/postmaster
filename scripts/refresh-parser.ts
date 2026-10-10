@@ -242,7 +242,7 @@ async function main(argv: string[], root: string): Promise<number> {
       fixture === undefined
         ? await fetchJson(REGISTRY)
         : (JSON.parse(readFileSync(join(fixture, "packument.json"), "utf8")) as unknown);
-    const version = resolveVersion(options.version, packumentLatest(doc));
+    const version = resolveVersion(options.version, options.version ?? packumentLatest(doc));
     const take = packumentTake(doc, version);
     assertOldEnough(version, take.publishedAt, Date.now(), options.waiver);
     await assertScanned(version);
