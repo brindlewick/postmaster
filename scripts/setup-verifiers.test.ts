@@ -10,6 +10,7 @@ import {
   parseArgs,
   parseMakeOutput,
   runJsonDoc,
+  setupConfig,
   timeoutForHost,
 } from "./setup-verifiers.ts";
 import { commitAll, gitOrThrow, initRepo, writeRepoFile } from "./acceptance-323.ts";
@@ -185,6 +186,36 @@ describe("landingCheckout", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("setupConfig", () => {
+  test("project-relative env files resolve against the project root", () => {
+    const kept = setupConfig({
+      config: { team: { coachman: { harness: "muse", env_file: "coach.env" } } },
+      notice: null,
+      error: null,
+      local: { team: { coachman: { env_file: "coach.env" } } },
+      globalPath: "/g/config.toml",
+      projectFile: "/r/.postmaster/settings.toml",
+      projectAlone: false,
+    });
+    expect(kept).toEqual({
+      team: { coachman: { harness: "muse", env_file: "/r/coach.env" } },
+    });
+  });
+
+  test("no project file keeps the config as merged", () => {
+    const kept = setupConfig({
+      config: { team: { coachman: { harness: "muse", env_file: "coach.env" } } },
+      notice: null,
+      error: null,
+      local: {},
+      globalPath: "/g/config.toml",
+      projectFile: null,
+      projectAlone: false,
+    });
+    expect(kept).toEqual({ team: { coachman: { harness: "muse", env_file: "coach.env" } } });
   });
 });
 

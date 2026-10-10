@@ -32,8 +32,14 @@
 //           be detected, a make call that misused its own command, or a verdict that
 //           could not be logged
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
+import { dirname, join, resolve } from "node:path";
+import {
+  absolutizeProjectEnvFiles,
+  effectiveConfigForProject,
+  globalConfigPath,
+  type EffectiveResult,
+  type Rec,
+} from "./lib/effective-config.ts";
 import { isFixtureCopy } from "./lib/fixture-mark.ts";
 import { beside } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
@@ -191,6 +197,19 @@ export function landingCheckout(repo: string): string | null {
 }
 
 /**
+ * The config the setup record keeps: the effective config with project-set
+ * relative env files resolved against the project root, as run-meta records
+ * them, so a later --run launch finds the same files.
+ */
+export function setupConfig(resolved: EffectiveResult): Rec {
+  const config = JSON.parse(JSON.stringify(resolved.config)) as Rec;
+  if (resolved.projectFile !== null) {
+    absolutizeProjectEnvFiles(config, resolved.local, dirname(dirname(resolved.projectFile)));
+  }
+  return config;
+}
+
+/**
  * Log the setup verdict to the run's actions and the project ledger. False
  * when the audit line could not be written: an unlogged verdict stops setup
  * rather than go on unrecorded.
@@ -236,7 +255,7 @@ function main(argv: string[]): number {
   }
   writeFileSync(
     join(dispatch, "run.json"),
-    `${JSON.stringify(runJsonDoc(repo, resolved.config), null, 2)}\n`,
+    `${JSON.stringify(runJsonDoc(repo, setupConfig(resolved)), null, 2)}\n`,
   );
   const detected = run(RUN, ["host", "detect"]);
   if (detected.code !== 0) {
