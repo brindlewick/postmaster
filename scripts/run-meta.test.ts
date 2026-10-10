@@ -2313,6 +2313,13 @@ describe("dispatch mode", () => {
       seedRun(m.runsRoot, "T1-old", "2026-02-01T00:00:00Z", { mode: "synthesis" });
       expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
       expect(recordOf(m.dispatch).mode).toBe("single-thread");
+
+      // (f) a setup record newer than every ticket run is not a run and is skipped
+      m = machine(tmp, "alt-setup", 'mode = "alternate"\n');
+      seedRun(m.runsRoot, "T0", "2026-01-01T00:00:00Z", { mode: "single-thread" });
+      seedRun(m.runsRoot, "postmaster", "2026-06-01T00:00:00Z", { kind: "setup-verifiers" });
+      expect(run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env }).code).toBe(0);
+      expect(recordOf(m.dispatch).mode).toBe("synthesis");
     });
   }, 120000);
 
