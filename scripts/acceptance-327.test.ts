@@ -1,8 +1,9 @@
 // Oracle for #327, committed before the change: the clerk's brief lists the
 // project's checks beside its verifiers, the runbook drives checks through the
 // verifier, and discovery names the verifiers' index among the docs to read
-// first. Every case plants a scratch app (a copy of fixtures/app) and drives
-// git or scripts/run as a subprocess. The live clerk session behind C2 and C3
+// first. Every case plants a scratch app (a copy of fixtures/app), except the
+// undeclared-gate case, which plants a bare repo, and drives git or
+// scripts/run as a subprocess. The live clerk session behind C2 and C3
 // needs a user to sign off, so it stays hand-verified like #324's model cases:
 // what runs here pins the runbook sentence that session follows, and the run
 // record carries a drive of the scratch verifier with its proof.
@@ -12,6 +13,7 @@ import { join } from "node:path";
 import {
   cleanup,
   docsOf,
+  freshBareScratch,
   freshScratch,
   localTicket,
   plantMultiVerifier,
@@ -92,6 +94,17 @@ describe("C1: the brief lists the checks beside the verifiers", () => {
       expect(brief).toContain("Verifiers: none.");
       expect(brief).not.toContain("verifier/");
       expect(brief).not.toContain("verify-app");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("without a declared gate: the brief shows the gate discovery finds", () => {
+    const { dir, repo } = freshBareScratch();
+    try {
+      const { brief } = briefOrThrow(repo, "No declared gate", dir);
+      expect(brief).toContain("## Checks and verifiers");
+      expect(brief).toContain("gate\tdefault:gate\tcargo test");
     } finally {
       cleanup(dir);
     }

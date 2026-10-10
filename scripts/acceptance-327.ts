@@ -91,6 +91,17 @@ export function cleanup(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
+/** A bare scratch repo with no declared checks: gate discovery finds cargo test. */
+export function freshBareScratch(): { dir: string; repo: string } {
+  const dir = mkdtempSync(join(tmpdir(), "acceptance-327-"));
+  const repo = join(dir, "app");
+  mkdirSync(repo, { recursive: true });
+  initRepo(repo);
+  writeRepoFile(repo, "Cargo.toml", '[package]\nname = "app"\n');
+  commitAll(repo, "first");
+  return { dir, repo };
+}
+
 /** Commit files on the checkout's branch. */
 export function plantFiles(repo: string, files: Record<string, string>, message: string): void {
   for (const [rel, text] of Object.entries(files)) writeRepoFile(repo, rel, text);
