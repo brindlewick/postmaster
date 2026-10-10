@@ -45,7 +45,8 @@
 //   check      decide whether the branch lands: with a hand-over, its proven verifiers
 //              pass the project's checks on a scratch, its diff touches only the
 //              verifiers' folder, and every failed verifier's folder is absent; with
-//              a report, a correcting pass's branch lands on the folder rule and the
+//              a report, a correcting pass's branch lands on the folder rule, over
+//              every shape the repo holds unless --folder names one, and the
 //              project's checks alone. Prints one accept: or refuse: line and logs
 //              the same line
 //   land       check, then land an accepted branch once: local merges with git merge
@@ -1341,7 +1342,7 @@ export interface UpkeepClaim {
   found: string | null;
   /** Why the claim could not be checked; unchecked claims only. */
   because: string | null;
-  /** What the correcting pass changed; set only with a Corrected: line. */
+  /** What the correcting pass changed; set only with a non-empty Corrected: line. */
   corrected?: string;
 }
 
@@ -1443,6 +1444,9 @@ export function parseUpkeepReport(
       }
       if (current.verdict === "unchecked" && (current.because === null || current.because === "")) {
         return { ok: false, error: `the report names no reason for ${current.name}` };
+      }
+      if (current.corrected !== null && current.corrected === "") {
+        return { ok: false, error: `the report names no correction for ${current.name}` };
       }
       const claim: UpkeepClaim = {
         name: current.name,
@@ -1693,8 +1697,12 @@ export function verdictUpkeep(
 
 /** The diff paths outside the verifiers' folder, in the order git listed them. */
 export function outsidePaths(paths: string[], folder: string): string[] {
-  const prefix = `${folder}/`;
-  return paths.filter((p) => !p.startsWith(prefix));
+  return outsideFolders(paths, [folder]);
+}
+
+/** The diff paths outside every verifiers' folder, in the order git listed them. */
+export function outsideFolders(paths: string[], folders: string[]): string[] {
+  return paths.filter((p) => !folders.some((f) => p.startsWith(`${f}/`)));
 }
 
 /** The folder-rule refusal for paths outside the verifiers' folder, or null. */
@@ -1747,14 +1755,19 @@ export function indexBullets(text: string): string[][] {
   return bullets;
 }
 
-/** A bullet span names a verifier dir when one of its lines names the dir's folder. */
+/**
+ * A bullet span names a verifier dir when its first line names the dir's
+ * folder. A mention deeper in the prose names nothing, so one verifier's
+ * aside never claims another's confirmation.
+ */
 export function spanNamesDir(span: string[], vdir: string): boolean {
+  const first = span[0] ?? "";
   const seg = vdir.split("/").pop() ?? vdir;
   const esc = seg.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   // The folder path bounded past the kind, as indexNames reads it, or a
   // relative folder link [kind](kind/).
   const re = new RegExp(`verifier/${esc}(?![A-Za-z0-9_-])|\\]\\( *${esc}/`, "iu");
-  return span.some((line) => re.test(line));
+  return re.test(first);
 }
 
 /** The sha a features index confirms for its one verifier, or null. */
@@ -1762,12 +1775,15 @@ export function featuresConfirm(text: string): string | null {
   return confirmedSha(text);
 }
 
-/** The sha the shared index's bullet for a verifier dir confirms, or null. */
+/**
+ * The sha the shared index's bullet for a verifier dir confirms, or null.
+ * Null when no bullet names the dir, and when several do: an ambiguous
+ * index refuses rather than attribute one verifier's confirmation to another.
+ */
 export function bulletConfirm(text: string, vdir: string): string | null {
-  for (const span of indexBullets(text)) {
-    if (spanNamesDir(span, vdir)) return confirmedSha(span.join("\n"));
-  }
-  return null;
+  const spans = indexBullets(text).filter((span) => spanNamesDir(span, vdir));
+  if (spans.length !== 1) return null;
+  return confirmedSha((spans[0] ?? []).join("\n"));
 }
 
 /**
@@ -1937,9 +1953,11 @@ export function acceptLineReport(branch: string, report: UpkeepReport): string {
   );
 }
 
-/** The stale claims a correcting pass mended: verdict stale with a Corrected: line. */
+/** The stale claims a correcting pass mended: verdict stale with a non-empty Corrected: line. */
 export function correctedClaims(claims: UpkeepClaim[]): UpkeepClaim[] {
-  return claims.filter((c) => c.verdict === "stale" && c.corrected !== undefined);
+  return claims.filter(
+    (c) => c.verdict === "stale" && c.corrected !== undefined && c.corrected !== "",
+  );
 }
 
 /** One line saying nothing lands, and why. */
@@ -2392,34 +2410,53 @@ function decideUpkeep(
   pages: string[],
   folders: string[],
   text: string,
-): { verdict: UpkeepVerdict; corrected: number } {
+): { verdict: UpkeepVerdict; mended: UpkeepClaim[] } {
   const parsed = parseUpkeepReport(text);
   if (!parsed.ok) throw new RunError(parsed.error);
   const decided = verdictUpkeep(pages, folders, parsed.report);
   if (!decided.ok) throw new RunError(decided.error);
-  return { verdict: decided.verdict, corrected: correctedClaims(parsed.report.claims).length };
+  return { verdict: decided.verdict, mended: correctedClaims(parsed.report.claims) };
+}
+
+/**
+ * The mended claims whose page the branch never touched: a correction with no
+ * change behind it is hollow, however the report describes it.
+ */
+export function untouchedCorrected(diff: string[], mended: UpkeepClaim[]): UpkeepClaim[] {
+  const bare = (p: string): string => (p.startsWith("./") ? p.slice("./".length) : p);
+  const touched = new Set(diff.map(bare));
+  return mended.filter((c) => !touched.has(bare(c.page)));
 }
 
 /**
  * The correcting pass's branch: its diff past the driven commit touches only
- * the verifiers' folders, and every verifier the pass drove is confirmed on
- * the branch at the driven commit, with corrections or without. A verifier
- * dir the branch no longer holds is left to the user's review of the diff.
+ * the verifiers' folders, every mended claim's page is among the touched
+ * files, and every verifier the pass drove is confirmed on the branch at the
+ * driven commit, with corrections or without. A verifier dir the branch no
+ * longer holds is left to the user's review of the diff.
  */
 function validateCorrectingBranch(
   repo: string,
   head: string,
   branch: string,
   folders: string[],
+  mended: UpkeepClaim[],
 ): void {
   const diff = branchDiffPaths(repo, head, branch);
   if (diff === null) {
     throw new RunError(`the pass branch ${branch} could not be compared with ${head}`);
   }
-  const outside = diff.filter((p) => !folders.some((f) => p.startsWith(`${f}/`)));
+  const outside = outsideFolders(diff, folders);
   const reason = outsideReason(outside);
   if (reason !== null) {
     throw new RunError(`the pass changed files ${reason} on ${branch}`);
+  }
+  const untouched = untouchedCorrected(diff, mended);
+  if (untouched.length > 0) {
+    const first = untouched[0] as UpkeepClaim;
+    throw new RunError(
+      `the branch leaves ${first.page} unchanged for its corrected claim ${first.name}`,
+    );
   }
   const shared = branchHasPath(repo, branch, "verifier/README.md");
   for (const folder of folders) {
@@ -2516,8 +2553,8 @@ function runUpkeepLaunches(
     validate: () => {
       const judged = decideUpkeep(scope.pages, scope.folders, validateUpkeepFresh(wt, cutAt));
       decided = judged.verdict;
-      corrected = judged.corrected;
-      if (correcting) validateCorrectingBranch(repo, head, branch, scope.folders);
+      corrected = judged.mended.length;
+      if (correcting) validateCorrectingBranch(repo, head, branch, scope.folders, judged.mended);
     },
     print: ({ final, handle, promptFile }) => {
       const verdict = decided as UpkeepVerdict;
@@ -3216,6 +3253,8 @@ interface Validated {
   branch: string;
   dispatch: string;
   folder: string;
+  /** The report path's folders: every shape held, unless --folder names one. */
+  folders: string[];
   deliverable: { kind: "handover"; text: string } | { kind: "report"; text: string };
 }
 
@@ -3243,6 +3282,7 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
         branch: req.branch,
         dispatch,
         folder: req.folder ?? verifyDirName(repo),
+        folders: req.folder !== null ? [req.folder] : [verifyDirName(repo), "verifier"],
         deliverable: { kind: "report", text },
       };
     } catch {
@@ -3257,6 +3297,7 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
         branch: req.branch,
         dispatch,
         folder: req.folder ?? verifyDirName(repo),
+        folders: [req.folder ?? verifyDirName(repo)],
         deliverable: { kind: "handover", text },
       };
     } catch {
@@ -3268,6 +3309,7 @@ function validateLanding(req: ParsedCheck | ParsedLand): Validated {
 
 /**
  * A pass branch lands on the folder rule and the project's checks alone: the
+ * rule covers every shape the repo holds unless --folder names one, and the
  * report must be well formed, but how much of it the pass corrected is the
  * user's to judge from the proposal, never a refusal. Partial corrections
  * land like whole ones.
@@ -3276,7 +3318,7 @@ function decideReportBranch(o: {
   repo: string;
   branch: string;
   dispatch: string;
-  folder: string;
+  folders: string[];
   timeout: number;
   report: UpkeepReport;
   compareBase: string;
@@ -3285,7 +3327,7 @@ function decideReportBranch(o: {
   if (diff === null) {
     return refused(o.branch, [], "the branch could not be compared");
   }
-  const reason = outsideReason(outsidePaths(diff, o.folder));
+  const reason = outsideReason(outsideFolders(diff, o.folders));
   if (reason !== null) return refused(o.branch, [], reason);
   const outcome = runProjectChecks(o);
   const checksReason = decideChecks(outcome);
@@ -3313,7 +3355,7 @@ function decideFromValidated(v: Validated, timeout: number): Decided {
       repo: v.repo,
       branch: v.branch,
       dispatch: v.dispatch,
-      folder: v.folder,
+      folders: v.folders,
       timeout,
       report: parsed.report,
       compareBase: base,
@@ -3370,7 +3412,7 @@ function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
   // The report is what was judged: the command cuts no branch to name.
   const target = resolve(req.report);
   for (const line of judged.verdict.lines) logVerdict(dispatch, target, "note", line);
-  return judged.verdict.unchecked + (judged.verdict.stale - judged.corrected) > 0 ? 1 : 0;
+  return judged.verdict.unchecked + (judged.verdict.stale - judged.mended.length) > 0 ? 1 : 0;
 }
 
 function landLocal(

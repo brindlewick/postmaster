@@ -53,6 +53,7 @@ import {
   normalizeFolder,
   orderKinds,
   outsideAdded,
+  outsideFolders,
   outsidePaths,
   outsideReason,
   parseArgs,
@@ -87,6 +88,7 @@ import {
   UPKEEP_LINE,
   unlistedSentence,
   unrunProject,
+  untouchedCorrected,
   type UpkeepReport,
   upkeepCorrectSendText,
   upkeepScope,
@@ -3056,6 +3058,47 @@ describe("corrected claims", () => {
       error: "the report's unchecked claim u: one carries a correction",
     });
   });
+
+  test("a Corrected: line with no text fails naming the claim", () => {
+    const text = [
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: f",
+      "Corrected:",
+      "",
+    ].join("\n");
+    expect(parseUpkeepReport(text)).toEqual({
+      ok: false,
+      error: "the report names no correction for c",
+    });
+  });
+
+  test("correctedClaims drops an empty correction", () => {
+    expect(
+      correctedClaims([
+        {
+          name: "a",
+          page: "p",
+          verdict: "stale",
+          stated: "s",
+          found: "f",
+          because: null,
+          corrected: "",
+        },
+        {
+          name: "b",
+          page: "p",
+          verdict: "stale",
+          stated: "s",
+          found: "f",
+          because: null,
+          corrected: "x",
+        },
+      ]).map((c) => c.name),
+    ).toEqual(["b"]);
+  });
 });
 
 describe("outsideReason and acceptLineReport", () => {
@@ -3098,6 +3141,65 @@ describe("outsideReason and acceptLineReport", () => {
       "accept: upkeep lands upkeep corrections for cli (verify-app), web (verifier/web); " +
         "corrected: 1 of 2 stale, unchecked: 1",
     );
+  });
+});
+
+describe("outsideFolders", () => {
+  test("paths under any folder stay in, the rest refuse in git order", () => {
+    expect(outsideFolders([], ["verify-app", "verifier"])).toEqual([]);
+    expect(
+      outsideFolders(
+        ["verify-app/features/a.md", "verifier/cli/features/b.md"],
+        ["verify-app", "verifier"],
+      ),
+    ).toEqual([]);
+    expect(
+      outsideFolders(
+        ["verifier/README.md", "AGENTS.md", "verify-app/features/a.md", "src/cli.ts"],
+        ["verify-app", "verifier"],
+      ),
+    ).toEqual(["AGENTS.md", "src/cli.ts"]);
+  });
+
+  test("one folder refuses the other shape", () => {
+    expect(
+      outsideFolders(["verifier/cli/features/a.md", "verify-app/features/a.md"], ["verify-app"]),
+    ).toEqual(["verifier/cli/features/a.md"]);
+  });
+});
+
+describe("untouchedCorrected", () => {
+  const mended = (name: string, page: string) => ({
+    name,
+    page,
+    verdict: "stale" as const,
+    stated: "s",
+    found: "f",
+    because: null,
+    corrected: "x",
+  });
+
+  test("a mended claim whose page the diff touches is held", () => {
+    expect(
+      untouchedCorrected(
+        ["v/features/a.md", "v/features/README.md"],
+        [mended("a", "v/features/a.md")],
+      ),
+    ).toEqual([]);
+  });
+
+  test("a mended claim whose page the diff never touched is hollow", () => {
+    expect(
+      untouchedCorrected(
+        ["v/features/README.md"],
+        [mended("a", "v/features/a.md"), mended("b", "v/features/b.md")],
+      ).map((c) => c.name),
+    ).toEqual(["a", "b"]);
+  });
+
+  test("a leading ./ never hides a touched page", () => {
+    expect(untouchedCorrected(["./v/features/a.md"], [mended("a", "v/features/a.md")])).toEqual([]);
+    expect(untouchedCorrected(["v/features/a.md"], [mended("a", "./v/features/a.md")])).toEqual([]);
   });
 });
 
@@ -3166,6 +3268,32 @@ describe("index confirmation", () => {
   test("a wrapped bullet confirms from its continuation line", () => {
     const index = [`- cli goes in verifier/cli/. Files: x.`, `  Confirmed: ${sha}`, ""].join("\n");
     expect(bulletConfirm(index, "verifier/cli")).toBe(sha);
+  });
+
+  test("spanNamesDir reads the first line only, never the prose below", () => {
+    expect(
+      spanNamesDir(
+        ["- the command line (cli) verifier.", "  It shares its driver with verifier/web/."],
+        "verifier/web",
+      ),
+    ).toBe(false);
+  });
+
+  test("a mention in another bullet never claims a confirmation", () => {
+    const old = "0".repeat(40);
+    const refused = [
+      `- cli shares its driver with verifier/web/. Confirmed: ${old}`,
+      `- web goes in verifier/web/. Confirmed: ${sha}`,
+      "",
+    ].join("\n");
+    expect(bulletConfirm(refused, "verifier/web")).toBe(null);
+    const accepted = [
+      `- cli goes in verifier/cli/. Confirmed: ${sha}`,
+      "  It shares its driver with verifier/web/.",
+      "- web goes in verifier/web/. Files: x.",
+      "",
+    ].join("\n");
+    expect(bulletConfirm(accepted, "verifier/web")).toBe(null);
   });
 
   test("featuresConfirm reads the whole features index", () => {
