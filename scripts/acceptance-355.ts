@@ -33,9 +33,9 @@ export const POSTMASTER_OFFER =
   "Then check whether any verifier may have gone stale on the landing: advance " +
   "`<repo>`'s checkout of the default branch to the landed merge commit first, so the " +
   "stale query reads the landing's own index, then run `<tool>/scripts/run verifier " +
-  "stale <repo> --at <merge>` once; for each verifier it marks, offer the upkeep pass " +
-  "(`run verifier upkeep <repo> --run <dispatch>`), naming the changed files, and a yes " +
-  "starts the pass; a landing it clears offers nothing.";
+  "stale <repo> --at <merge>` once; for the verifiers it marks, offer one correcting " +
+  "upkeep pass (`run verifier upkeep <repo> --run <dispatch> --correct`), naming the " +
+  "changed files, and a yes starts it; a landing it clears offers nothing.";
 
 // The rule the clerk's runbook carries, word for word (line wrapping aside): a
 // verifier step the ticket leaves alone that fails at the base is reported,

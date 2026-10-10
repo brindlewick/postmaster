@@ -157,6 +157,27 @@ describe("C1: the stale mark", () => {
     }
   });
 
+  test("an entry with an empty Files list counts as unconfirmed", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      const first = headOf(repo, "HEAD");
+      plantSingle(repo, { files: "src/cli.ts", confirmed: first });
+      const map = join(repo, "verify-app/features/README.md");
+      writeRepoFile(
+        repo,
+        "verify-app/features/README.md",
+        readFileSync(map, "utf8").replace("Files: src/cli.ts", "Files:"),
+      );
+      commitAll(repo, "empty the files");
+      changeFile(repo, "src/cli.ts", "change the cli");
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("stale: verify-app: unconfirmed (no Files: list)");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
   test("an entry without Confirmed counts as unconfirmed", () => {
     const { dir, repo } = freshScratch();
     try {
