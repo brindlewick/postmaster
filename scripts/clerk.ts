@@ -17,6 +17,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
+import { shlexQuote } from "./verify.ts";
 
 const HERE = scriptsDir(import.meta);
 const TOOL = toolRoot(import.meta);
@@ -78,6 +79,30 @@ function requireScript(name: string, args: string[], what: string): string {
   const r = runScript(name, args);
   if (r.code !== 0) die(`${what} (${(r.out + r.err).trim() || `exit ${r.code}`})`);
   return r.out;
+}
+
+// The listings describe the project, wherever under it the clerk was pointed:
+// a brief for a subdir used to succeed, so it still does, with the project's
+// checks and verifiers rather than the subdir's.
+function repoTop(repo: string): string {
+  const r = run("git", ["-C", repo, "rev-parse", "--show-toplevel"]);
+  const top = (r.out ?? "").replace(/\n+$/u, "");
+  return r.code === 0 && top !== "" ? top : repo;
+}
+
+// The gate discovery finds for the repo, as discover-project prints it: the
+// brief's checks run with it, as every run's do.
+function discoveredGate(top: string): string {
+  const out = requireScript("discover-project", [top], `run discover-project ${top} failed`);
+  for (const l of out.split("\n")) {
+    if (l.startsWith("gate=")) return l.slice("gate=".length);
+  }
+  return "";
+}
+
+// A cited command, quoted per element so the clerk can re-run it as written.
+function cite(args: string[]): string {
+  return ["scripts/run", ...args].map((a) => shlexQuote(a)).join(" ");
 }
 
 function trackerKind(repo: string): string {
@@ -242,23 +267,28 @@ function writeBrief(repo: string, id: string): Brief {
   // The checks every run is held to, and the project's verifiers beside them:
   // a check the clerk writes should fit the checks every run already runs, and
   // drive a surface with a verifier through it. Both print verbatim, so the
-  // brief never paraphrases what the scripts say.
+  // brief never paraphrases what the scripts say. Both run against the project
+  // top with the gate discovery finds, as every run's do.
+  const top = repoTop(repo);
+  const gate = discoveredGate(top);
+  const checksArgs =
+    gate === "" ? ["checks", top, "--lines"] : ["checks", top, "--gate", gate, "--lines"];
   const checksOut = requireScript(
     "verify",
-    ["checks", repo, "--lines"],
-    `run verify checks ${repo} --lines failed`,
+    checksArgs,
+    `run verify ${checksArgs.join(" ")} failed`,
   ).replace(/\n+$/u, "");
   const checksBlock = checksOut === "" ? ["(no checks reported)"] : checksOut.split("\n");
   const verifiersOut = requireScript(
     "verifier",
-    ["list", repo],
-    `run verifier list ${repo} failed`,
+    ["list", top],
+    `run verifier list ${top} failed`,
   ).replace(/\n+$/u, "");
   const verifiersBlock =
     verifiersOut === "verifiers: none"
       ? ["Verifiers: none."]
       : [
-          `The project's verifiers, as \`scripts/run verifier list ${repo}\` prints them:`,
+          `The project's verifiers, as \`${cite(["verifier", "list", top])}\` prints them:`,
           "",
           "```text",
           ...verifiersOut.split("\n"),
@@ -286,7 +316,7 @@ function writeBrief(repo: string, id: string): Brief {
     "",
     "## Checks and verifiers",
     "",
-    `The checks every run is held to, as \`scripts/run verify checks ${repo} --lines\` prints them:`,
+    `The checks every run is held to, as \`${cite(["verify", ...checksArgs])}\` prints them:`,
     "",
     "```text",
     ...checksBlock,
