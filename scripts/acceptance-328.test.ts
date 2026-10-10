@@ -533,8 +533,8 @@ describe("the pass changes nothing outside the verifiers' folder", () => {
       const before = headOf(sandbox.repo, "main");
       const r = runPass(sandbox, env);
       expectCode(r, 1);
-      expect(r.err).toMatch(/outside/);
-      expect(r.err).toMatch(/notes\.txt/);
+      expect(r.err).toMatch(/outside/u);
+      expect(r.err).toMatch(/notes\.txt/u);
       expect(headOf(sandbox.repo, "main")).toBe(before);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
@@ -558,8 +558,8 @@ describe("the pass moves the index to the commit it drove", () => {
       });
       const r = runPass(sandbox, env);
       expectCode(r, 1);
-      expect(r.err).toMatch(/names no confirmed commit/);
-      expect(r.err).toMatch(/verify-app\/features\/README\.md/);
+      expect(r.err).toMatch(/names no confirmed commit/u);
+      expect(r.err).toMatch(/verify-app\/features\/README\.md/u);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
@@ -662,8 +662,8 @@ describe("a pass that cannot correct everything", () => {
       });
       const r = runPass(sandbox, env);
       expectCode(r, 1);
-      expect(r.err).toMatch(/carries a correction/);
-      expect(r.err).toMatch(/usage: --help/);
+      expect(r.err).toMatch(/carries a correction/u);
+      expect(r.err).toMatch(/usage: --help/u);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
@@ -723,8 +723,8 @@ describe("each verifier is confirmed in the shared index", () => {
       });
       const r = runPass(sandbox, env);
       expectCode(r, 1);
-      expect(r.err).toMatch(/names no confirmed commit/);
-      expect(r.err).toMatch(/verifier\/web/);
+      expect(r.err).toMatch(/names no confirmed commit/u);
+      expect(r.err).toMatch(/verifier\/web/u);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
@@ -883,7 +883,7 @@ describe("C2: after the user's word the corrections land by the route", () => {
       ].join("\n");
       const second = writeReport(dir, clean);
       const map = readFileSync(join(repo, APP_MAP), "utf8").replace(
-        /Confirmed: [0-9a-f]+\n?/,
+        /Confirmed: [0-9a-f]+\n?/u,
         `Confirmed: ${head}\n`,
       );
       expect(map).toContain(`Confirmed: ${head}`);
@@ -942,15 +942,15 @@ describe("upkeep-prompt --correct: the correcting instructions", () => {
       expect(out).toMatch(/correct/iu);
       expect(out).toMatch(/never change the project's code/iu);
       expect(out).toMatch(/drive the recipe again/iu);
-      expect(out).toMatch(/Corrected:/);
-      expect(out).toMatch(/Confirmed:/);
+      expect(out).toMatch(/Corrected:/u);
+      expect(out).toMatch(/Confirmed:/u);
       expect(out).toMatch(/commit/iu);
-      expect(out).toMatch(/UPKEEP\.md/);
+      expect(out).toMatch(/UPKEEP\.md/u);
       expect(out).toMatch(/health check/iu);
       expect(out).toMatch(/ask the user only what you cannot observe/iu);
       expect(out).toMatch(/name of the file that holds it/iu);
-      expect(out).not.toMatch(/only reports/);
-      expect(out).not.toMatch(/never change the verifiers/);
+      expect(out).not.toMatch(/only reports/u);
+      expect(out).not.toMatch(/never change the verifiers/u);
       expect(out).not.toContain("HANDOVER.md");
       expect(out).not.toContain("{{");
       expect(out).toContain(ADD);
@@ -966,10 +966,10 @@ describe("upkeep-prompt --correct: the correcting instructions", () => {
       expect(out).toMatch(/cannot ask anyone anything/iu);
       expect(out).toMatch(/unasked/iu);
       expect(out).toMatch(/never invent a value/iu);
-      expect(out).toMatch(/Corrected:/);
-      expect(out).toMatch(/Confirmed:/);
+      expect(out).toMatch(/Corrected:/u);
+      expect(out).toMatch(/Confirmed:/u);
       expect(out).toMatch(/drive the recipe again/iu);
-      expect(out).toMatch(/UPKEEP\.md/);
+      expect(out).toMatch(/UPKEEP\.md/u);
       expect(out).not.toContain("HANDOVER.md");
       expect(out).not.toContain("{{");
       expect(out).toContain(ADD);
@@ -1027,7 +1027,7 @@ describe("usage", () => {
         report,
       ]);
       expectCode(r, 2);
-      expect(r.err).toMatch(/not both/);
+      expect(r.err).toMatch(/not both/u);
       expect(r.err).toContain("usage: run verifier");
     } finally {
       cleanup(dir);
@@ -1041,7 +1041,7 @@ describe("usage", () => {
       plantBranch(repo, "upkeep", appCorrections(repo), "corrections");
       const r = runCheckReport(repo, "upkeep", dispatch, join(dir, "missing.md"));
       expectCode(r, 2);
-      expect(r.err).toMatch(/no report to read/);
+      expect(r.err).toMatch(/no report to read/u);
     } finally {
       cleanup(dir);
     }
@@ -1076,7 +1076,7 @@ describe("usage", () => {
         "--correct",
       ]);
       expectCode(r, 2);
-      expect(r.err).toMatch(/unknown flag/);
+      expect(r.err).toMatch(/unknown flag/u);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
@@ -1089,7 +1089,7 @@ describe("usage", () => {
       const dispatch = makeDispatch(dir, "postmaster");
       const r = runLandReport(repo, "main", dispatch, report);
       expectCode(r, 2);
-      expect(r.err).toMatch(/needs a verifier branch/);
+      expect(r.err).toMatch(/needs a verifier branch/u);
     } finally {
       cleanup(dir);
     }

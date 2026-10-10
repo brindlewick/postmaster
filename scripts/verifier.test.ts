@@ -3106,6 +3106,7 @@ describe("index confirmation", () => {
 
   test("confirmedSha reads the sha lowered, or nothing when it names none", () => {
     expect(confirmedSha(`Files: a. Confirmed: ${sha}.`)).toBe(sha);
+    // ASCII: the fixture sha is hex
     expect(confirmedSha(`Confirmed: ${sha.toUpperCase()}`)).toBe(sha);
     expect(confirmedSha("Files: a.")).toBe(null);
     expect(confirmedSha(`confirmed: ${sha}`)).toBe(null);
