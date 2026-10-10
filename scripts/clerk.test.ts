@@ -163,6 +163,26 @@ describe("brief", () => {
     expect(labelsLine).not.toContain("ready");
   });
 
+  test("brief for a subdir lists the project's checks and verifiers from its top", () => {
+    const repo = localRepo();
+    const id = localTicket(repo, "Fix the list");
+    writeFileSync(join(repo, "package.json"), `{"scripts": {"check": "true"}}\n`);
+    mkdirSync(join(repo, "verify-app"), { recursive: true });
+    writeFileSync(join(repo, "verify-app", "README.md"), "# app on the command line\n");
+    const sub = join(repo, "sub");
+    mkdirSync(sub, { recursive: true });
+    const cfgDir = mkdtempSync(join(tmpdir(), "clerk-cfg-"));
+    const cfg = stubConfig(cfgDir);
+    const r = sh(SELF, ["clerk", "brief", sub, id], { POSTMASTER_CONFIG: cfg });
+    expect(r.code).toBe(0);
+    const brief = readFileSync(join(sub, ".postmaster", "clerk", `${id}.brief.md`), "utf8");
+    expect(brief).toContain("## Checks and verifiers");
+    expect(brief).toContain(SELF);
+    expect(brief).toContain("gate\tdefault:gate\tnpm run check");
+    expect(brief).toContain("verify-app");
+    expect(brief).toContain("command line");
+  });
+
   test("brief reads the review link from the project settings over the global config", () => {
     const repo = localRepo();
     const id = localTicket(repo, "Fix the list");

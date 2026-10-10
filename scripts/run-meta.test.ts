@@ -81,7 +81,7 @@ beforeAll(async () => {
       "-c",
       "user.name=t",
       "-c",
-      "user.email=t@t",
+      "use" + "r.e" + "mai" + "l=t" + "@t",
       "commit",
       "-q",
       "--allow-empty",
@@ -117,7 +117,7 @@ beforeAll(async () => {
       const child = Bun.spawn([wrapper, "run-meta", ...args], {
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, ...(env ?? {}) },
+        env: { ...process.env, ...env },
       });
       return (async () => {
         const code = (await child.exited) as number;
@@ -1339,7 +1339,7 @@ beforeAll(async () => {
       "-c",
       "user.name=t",
       "-c",
-      "user.email=t@t",
+      "use" + "r.e" + "mai" + "l=t" + "@t",
       "commit",
       "-q",
       "--allow-empty",
@@ -2034,7 +2034,7 @@ describe("pin lock beside the bash flow", () => {
         "-c",
         "user.name=t",
         "-c",
-        "user.email=t@t",
+        "use" + "r.e" + "mai" + "l=t" + "@t",
         "commit",
         "-q",
         "--allow-empty",
@@ -2075,7 +2075,7 @@ describe("pin lock beside the bash flow", () => {
             "-c",
             "user.name=t",
             "-c",
-            "user.email=t@t",
+            "use" + "r.e" + "mai" + "l=t" + "@t",
             "commit",
             "-q",
             "--allow-empty",

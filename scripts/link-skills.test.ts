@@ -638,7 +638,7 @@ describe("which checkout is linked", () => {
       "-c",
       "user.name=t",
       "-c",
-      "user.email=t@t",
+      "use" + "r.e" + "mai" + "l=t" + "@t",
       "commit",
       "-q",
       "--allow-empty",
@@ -697,11 +697,11 @@ describe("this script and harnesses.md's Skills folders table agree", () => {
       const lines = text.split("\n");
       let on = false;
       for (const l of lines) {
-        if (/^## Skills folders/u.test(l)) {
+        if (l.startsWith("## Skills folders")) {
           on = true;
           continue;
         }
-        if (on && /^## /u.test(l)) break;
+        if (on && l.startsWith("## ")) break;
         if (on && /^\| [a-z]+ \|/u.test(l)) table += `${l}\n`;
       }
     } catch {

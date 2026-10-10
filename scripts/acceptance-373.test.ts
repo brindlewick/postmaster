@@ -9,7 +9,6 @@ import { basename, join } from "node:path";
 import {
   SELF,
   TWO_PART,
-  addWorktree,
   calls,
   clerkRecord,
   clerkRepo,
@@ -40,6 +39,8 @@ import {
   touchesId,
   writeDispatch,
 } from "./acceptance-373.ts";
+import { runTabRecords } from "./acceptance-374.ts";
+import { fixTabRecords, mainRepoOf, toolCheckout } from "./acceptance-375.ts";
 import { testStopFinishers, waitFor } from "./host-self-test.ts";
 import { processState } from "./lib/processes.ts";
 describe("C1: close-run", () => {
@@ -50,20 +51,18 @@ describe("C1: close-run", () => {
       expect(`${r.out}\n${r.err}`).not.toContain("could not");
       expect(r.code).toBe(0);
       const st = readHerdr(t.fx);
-      expect(st.spaces[t.runSpace]).toBeUndefined();
-      for (const tab of t.runTabs) expect(st.tabs[tab]).toBeUndefined();
+      expect(st.tabs[t.runTab]).toBeUndefined();
+      for (const pane of [...t.runPanes, t.statePane]) expect(st.panes[pane]).toBeUndefined();
       expect(Object.keys(st.tabs)).toContain(t.watcherTab);
       expect(Object.keys(st.tabs)).toContain(t.shellTab);
       expect(st.tabs[t.watcherTab]!.ws).toBe(t.projSpace);
       expect(st.spaces[t.projSpace]).not.toBeUndefined();
       const hcalls = calls(t.fx, "herdr");
-      for (const tab of t.runTabs)
-        expect(hcalls.filter((line) => line === `tab\tclose\t${tab}`).length).toBe(1);
-      // The space dies with its last tab; a separate close fires only when a
-      // settled pane outlives the tabs, and never twice.
-      expect(
-        hcalls.filter((line) => line === `workspace\tclose\t${t.runSpace}`).length,
-      ).toBeLessThanOrEqual(1);
+      for (const pane of t.runPanes)
+        expect(hcalls.filter((line) => line === `pane\tclose\t${pane}`).length).toBe(1);
+      expect(hcalls.filter((line) => line === `tab\tclose\t${t.runTab}`).length).toBe(1);
+      // The project's space is shared: run host closes the run tab, never the space.
+      expect(hcalls.filter((line) => line.startsWith("workspace\tclose"))).toEqual([]);
       expect(touchesId(hcalls, t.watcherTab)).toEqual([]);
       expect(touchesId(hcalls, t.watcherPane)).toEqual([]);
       expect(touchesId(hcalls, t.projSpace)).toEqual([]);
@@ -91,13 +90,16 @@ describe("C1: close-run on a fixture copy", () => {
       const r = sh(SELF, ["host", "close-run", t.dispatch], fxEnv(t.fx), t.fx.root);
       expect(r.code).toBe(0);
       const st = readHerdr(t.fx);
-      expect(st.spaces[t.runSpace]).toBeUndefined();
+      expect(st.tabs[t.runTab]).toBeUndefined();
+      for (const pane of [...t.runPanes, t.statePane]) expect(st.panes[pane]).toBeUndefined();
       expect(st.spaces[t.fixSpace]).toBeUndefined();
-      for (const tab of [...t.runTabs, t.pmTab, t.watchTab]) expect(st.tabs[tab]).toBeUndefined();
+      for (const tab of [t.pmTab, t.watchTab]) expect(st.tabs[tab]).toBeUndefined();
       expect(st.tabs[t.outerTab]).not.toBeUndefined();
       expect(st.spaces[t.outerSpace]).not.toBeUndefined();
       const hcalls = calls(t.fx, "herdr");
-      for (const tab of [...t.runTabs, t.pmTab, t.watchTab])
+      for (const pane of t.runPanes)
+        expect(hcalls.filter((line) => line === `pane\tclose\t${pane}`).length).toBe(1);
+      for (const tab of [t.runTab, t.pmTab, t.watchTab])
         expect(hcalls.filter((line) => line === `tab\tclose\t${tab}`).length).toBe(1);
       expect(
         hcalls.filter((line) => line === `workspace\tclose\t${t.fixSpace}`).length,
@@ -161,21 +163,22 @@ describe("C3: user entries stay", () => {
     }
   });
 
-  test("(b) a pane the user split into a run launch tab stays with its tab, named", () => {
+  test("(b) a pane the user split into the run tab stays with its tab, named", () => {
     const t = setupNormal("c3b");
     try {
       const st0 = readHerdr(t.fx);
-      const horseTab = t.runTabs[1]!;
-      const userPane = hSplit(st0, t.runSpace, horseTab, t.horse);
+      const userPane = hSplit(st0, t.projSpace, t.runTab, t.horse);
       saveHerdr(t.fx, st0);
       const r = sh(SELF, ["host", "close-run", t.dispatch], fxEnv(t.fx), t.fx.root);
       expect(r.code).toBe(2);
-      expect(`${r.out}\n${r.err}`).toContain(horseTab);
+      expect(`${r.out}\n${r.err}`).toContain(t.runTab);
       const st = readHerdr(t.fx);
       expect(st.panes[userPane]).not.toBeUndefined();
-      expect(st.tabs[horseTab]).not.toBeUndefined();
-      expect(st.tabs[horseTab]!.ws).toBe(t.runSpace);
-      expect(st.spaces[t.runSpace]).not.toBeUndefined();
+      expect(st.panes[t.statePane]).not.toBeUndefined();
+      for (const pane of t.runPanes) expect(st.panes[pane]).toBeUndefined();
+      expect(st.tabs[t.runTab]).not.toBeUndefined();
+      expect(st.tabs[t.runTab]!.ws).toBe(t.projSpace);
+      expect(st.spaces[t.projSpace]).not.toBeUndefined();
       const hcalls = calls(t.fx, "herdr");
       expect(touchesId(hcalls, userPane)).toEqual([]);
     } finally {
@@ -191,7 +194,8 @@ describe("C3: user entries stay", () => {
       expect(`${r.out}\n${r.err}`).toContain(t.fixSpace);
       const st = readHerdr(t.fx);
       expect(st.spaces[t.fixSpace]).not.toBeUndefined();
-      expect(st.spaces[t.runSpace]).toBeUndefined();
+      expect(st.tabs[t.runTab]).toBeUndefined();
+      for (const pane of [...t.runPanes, t.statePane]) expect(st.panes[pane]).toBeUndefined();
       expect(st.tabs[t.pmTab]).toBeUndefined();
       expect(st.tabs[t.watchTab]).toBeUndefined();
       const userTabs = Object.entries(st.tabs)
@@ -210,15 +214,16 @@ describe("C3: user entries stay", () => {
     const t = setupNormal("c3d");
     try {
       const st0 = readHerdr(t.fx);
-      const user = hTab(st0, t.runSpace, t.repo, "user name");
+      const user = hTab(st0, t.projSpace, t.repo, "user name");
       st0.panes[user.pane]!.tokens = {};
       saveHerdr(t.fx, st0);
       const r = sh(SELF, ["host", "close-run", t.dispatch], fxEnv(t.fx), t.fx.root);
-      expect(r.code).toBe(2);
+      expect(r.code).toBe(0);
       const st = readHerdr(t.fx);
       expect(st.tabs[user.tab]).not.toBeUndefined();
       expect(st.tabs[user.tab]!.label).toBe("user name");
-      expect(st.spaces[t.runSpace]).not.toBeUndefined();
+      expect(st.tabs[t.runTab]).toBeUndefined();
+      expect(st.spaces[t.projSpace]).not.toBeUndefined();
       const hcalls = calls(t.fx, "herdr");
       const tcalls = calls(t.fx, "tmux");
       expect(touchesId(hcalls, user.tab)).toEqual([]);
@@ -231,11 +236,18 @@ describe("C3: user entries stay", () => {
     }
   });
 });
-describe("a fixture copy's space is marked opened when the flow creates it", () => {
-  test("spawn on a fixture copy tags the project space and records its handle", () => {
-    const fx = makeFx("create-spawn");
+describe("a fixture copy's spawn joins its tab in the project space", () => {
+  // A run launch on a fixture copy is covered by the #375 oracle beside it,
+  // which pins the shared tab, the missing create for the copy and the close.
+  test("spawn on a fixture copy opens the fixture tab and records its handle", () => {
+    const fx = makeFx("fixture-spawn");
     try {
+      const tool = toolCheckout();
+      const pmRoot = mainRepoOf(tool);
+      expect(pmRoot).not.toBe("");
       const fix = makeFixtureRepo(fx, "fixcopy");
+      saveHerdr(fx, freshHerdr());
+      saveTmux(fx, freshTmux());
       const env = fxEnv(fx, { POSTMASTER_CONFIG: stubConfig(fx) });
       const r = sh(
         SELF,
@@ -244,82 +256,45 @@ describe("a fixture copy's space is marked opened when the flow creates it", () 
         fx.caller,
       );
       expect(r.code).toBe(0);
+      // The project space is created for a repository with no space yet, and
+      // never marked: it is shared, and no close may sweep it. The copy gets
+      // no space at all.
       const hcalls = calls(fx, "herdr");
-      const created = hcalls.find((line) => line.startsWith("workspace\tcreate\t"));
-      expect(created).not.toBeUndefined();
+      const creates = hcalls.filter((line) => line.startsWith("workspace\tcreate"));
+      expect(creates.length).toBe(1);
+      const cells = creates[0]!.split("\t");
+      expect(cells[cells.indexOf("--cwd") + 1]).toBe(pmRoot);
+      expect(cells[cells.indexOf("--label") + 1]).toBe(basename(pmRoot));
+      expect(creates[0]!.includes(fix)).toBe(false);
+      expect(hcalls.some((line) => line.includes("postmaster=opened"))).toBe(false);
       const st = readHerdr(fx);
       const spaces = Object.keys(st.spaces);
       expect(spaces.length).toBe(1);
-      expect(st.spaces[spaces[0]!]!.tokens).toEqual({ postmaster: "opened" });
-      expect(
-        hcalls.some(
-          (line) =>
-            line.startsWith(`workspace\treport-metadata\t${spaces[0]}\t`) &&
-            line.includes("postmaster=opened"),
-        ),
-      ).toBe(true);
-      // A project-level launch reuses the first pane: one tab, carrying the launch token.
-      expect(st.spaces[spaces[0]!]!.tabs.length).toBe(1);
-      const tab = st.spaces[spaces[0]!]!.tabs[0]!;
-      expect(st.panes[st.tabs[tab]!.pane]!.tokens).toEqual({ postmaster: "launch" });
-      expect(placementTabs(fx)).toEqual([tab]);
-      expect(readPlacement(fx, tab).handle).toBe("pm-one");
+      expect(st.spaces[spaces[0]!]!.tokens).toEqual({});
+      const tabs = st.spaces[spaces[0]!]!.tabs;
+      expect(tabs.length).toBe(2);
+      const fixTab = tabs.find((tab) => st.tabs[tab]!.label === "fixture · fixcopy");
+      expect(fixTab).not.toBeUndefined();
+      const panes = st.spaces[spaces[0]!]!.panes.filter((pane) => st.panes[pane]!.tab === fixTab);
+      expect(panes.length).toBe(2);
+      const launched = panes.find((pane) => st.panes[pane]!.label === "postmaster");
+      expect(launched).not.toBeUndefined();
+      expect(st.panes[launched!]!.cwd).toBe(fix);
+      expect(st.panes[launched!]!.title).toBe("postmaster");
+      expect(st.panes[launched!]!.tokens).toEqual({ postmaster: "launch" });
+      const holding = panes.find((pane) => pane !== launched);
+      expect(st.panes[holding!]!.tokens).toEqual({ postmaster: "launch" });
+      expect(placementTabs(fx)).toEqual([fixTab]);
+      expect(readPlacement(fx, launched!).handle).toBe("pm-one");
+      expect(fixTabRecords(fx).length).toBe(1);
+      expect(runTabRecords(fx)).toEqual([]);
     } finally {
       testStopFinishers(fx.root);
       rmSync(fx.root, { recursive: true, force: true });
     }
   });
-
-  test("a run launch on a fixture copy tags the source space and its root pane", async () => {
-    const fx = makeFx("create-run");
-    try {
-      const fix = makeFixtureRepo(fx, "fixcopy");
-      const synth = addWorktree(fix, "1", "1");
-      const dispatch = join(fx.root, "dispatch", "1");
-      writeDispatch(dispatch, synth, [], []);
-      const env = fxEnv(fx, {
-        POSTMASTER_CONFIG: stubConfig(fx),
-        POSTMASTER_HOST_FINISH_DELAY: "3600",
-      });
-      const marker = join(fx.logs, "l.done");
-      const r = sh(
-        SELF,
-        [
-          "host",
-          "run",
-          "luna · workhorse · m",
-          synth,
-          "--under",
-          dispatch,
-          "--run",
-          dispatch,
-          "--out",
-          join(fx.logs, "l.out"),
-          "--err",
-          join(fx.logs, "l.err"),
-          "--marker",
-          marker,
-          "--",
-          "/bin/true",
-        ],
-        env,
-        fx.caller,
-      );
-      expect(`${r.out}\n${r.err}`).toContain("host=herdr");
-      expect(r.code).toBe(0);
-      expect(await waitFor(() => existsSync(marker), 30)).toBe(true);
-      const st = readHerdr(fx);
-      const source = st.open[fix] ?? "";
-      expect(source).not.toBe("");
-      expect(st.spaces[source]!.tokens).toEqual({ postmaster: "opened" });
-      const rootPane = st.spaces[source]!.panes[0]!;
-      expect(st.panes[rootPane]!.tokens).toEqual({ postmaster: "root" });
-    } finally {
-      testStopFinishers(fx.root);
-      rmSync(fx.root, { recursive: true, force: true });
-    }
-  });
-
+});
+describe("spawn on an ordinary project", () => {
   test("spawn on an ordinary project leaves the project space unmarked", () => {
     const fx = makeFx("create-plain");
     try {

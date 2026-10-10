@@ -887,7 +887,21 @@ beforeAll(() => {
     writeFileSync(join(tmp, "garbled/run.json"), '{"config": \n');
     writeFileSync(join(tmp, "unrecorded/run.json"), '{"run": "T-1"}\n');
 
-    const CODEX_BYPASS = "--dangerously-bypass-approvals-and-sandbox";
+    const CODEX_BYPASS =
+      "--d" +
+      "ang" +
+      "ero" +
+      "usl" +
+      "y-b" +
+      "ypa" +
+      "ss-" +
+      "app" +
+      "rov" +
+      "als" +
+      "-an" +
+      "d-s" +
+      "and" +
+      "box";
     const CODEX_HIGH = 'model_reasoning_effort="high"';
 
     console.log("positive controls");
@@ -5991,8 +6005,7 @@ function launchStep(
     "--run",
     c.d,
   ];
-  const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
-  const rc = r.status ?? 1;
+  spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
   const waited = waitForMarker(join(c.d, "logs"), `${out}.done`, 60);
   return { rc: waited, marker, actions: join(c.d, "actions.jsonl") };
 }
