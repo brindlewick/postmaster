@@ -12,7 +12,7 @@
 // wiring, and the transcripts sit in the run record. Every case drives git or
 // scripts/run as a subprocess.
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUN, commitAll, gitOrThrow, writeRepoFile } from "./acceptance-323.ts";
@@ -320,6 +320,23 @@ describe("D5 and D6: the wait follows the host", () => {
     }
   });
 
+  test("a comma-joined surfaces value counts its surfaces", () => {
+    const { dir, repo } = noCommitRepo();
+    try {
+      const dispatch = mkdtempSync(join(dir, "dispatch-"));
+      const config = writeMinimalConfig(dir);
+      const r = run(RUN, ["setup-verifiers", repo, "cli,web", "--run", dispatch], {
+        env: { POSTMASTER_HOST: "none", POSTMASTER_CONFIG: config },
+      });
+      expect(r.code).toBe(2);
+      expect(r.err).toContain("no commit to cut from");
+      expect(r.out).toContain("timeout 7200");
+      expect(r.out).toContain("kinds cli,web");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("with a host the session waits without a limit", () => {
     const { dir, repo } = noCommitRepo();
     try {
@@ -394,7 +411,43 @@ describe("land --word: the launch-card yes is the merge word", () => {
     }
   });
 
-  test("with the word it merges", () => {
+  test("with the word it merges on a setup dispatch", () => {
+    const { dir, repo } = freshApp();
+    try {
+      const proof = writeProof(dir, "proof-cli.log");
+      const handover = writeHandover(
+        dir,
+        "HANDOVER.md",
+        handoverDoc(handoverEntry("cli", "verify-app", proof)),
+      );
+      const dispatch = makeDispatch(dir, "user");
+      const record = JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      writeFileSync(
+        join(dispatch, "run.json"),
+        JSON.stringify({ ...record, kind: "setup-verifiers" }),
+      );
+      plantBranch(repo, "verify-cli", verifierFiles("verify-app", HELPER_GOOD), "clean verifier");
+      const before = headOf(repo, "main");
+      const r = runLand(repo, "verify-cli", dispatch, handover, [
+        "--folder",
+        "verify-app",
+        "--landing",
+        "local",
+        "--word",
+      ]);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("merge: verify-cli into main");
+      expect(headOf(repo, "main")).not.toBe(before);
+      expect(parentsOf(repo, "main")).toHaveLength(2);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("with the word on a ticket dispatch it waits", () => {
     const { dir, repo } = freshApp();
     try {
       const proof = writeProof(dir, "proof-cli.log");
@@ -414,9 +467,8 @@ describe("land --word: the launch-card yes is the merge word", () => {
         "--word",
       ]);
       expect(r.code).toBe(0);
-      expect(r.out).toContain("merge: verify-cli into main");
-      expect(headOf(repo, "main")).not.toBe(before);
-      expect(parentsOf(repo, "main")).toHaveLength(2);
+      expect(r.out).toContain("waiting: verify-cli is ready to merge into main");
+      expect(headOf(repo, "main")).toBe(before);
     } finally {
       cleanup(dir);
     }
