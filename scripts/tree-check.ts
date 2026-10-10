@@ -244,8 +244,9 @@ export async function checkTree(
     if (scansNewBlob(status) && path.startsWith("raw/")) rawScans.push({ commit: "", path });
   }
   // One detection, two renderings: text rows print as before and the
-  // findings listing carries the same rows structured, so the rewrite
-  // plans from exactly what the detector reports. Review round 11 (bug-59).
+  // findings listing carries the same rows structured, so a history
+  // rewrite (#423) plans from exactly what the detector reports.
+  // Review round 11 (bug-59).
   const rows: TreeRow[] = [];
   for (const [path, commit] of privatePaths)
     rows.push({
@@ -267,9 +268,9 @@ export async function checkTree(
   if (findings) {
     const listed: Array<{ commit: string; path: string; line: number; rule: string }> = [];
     for (const row of rows) {
-      // A spanning record expands to every line it covers: the rewrite
-      // removes lines, and removing one line of a record would leave the
-      // value behind in pieces.
+      // A spanning record expands to every line it covers: a history
+      // rewrite (#423) removes lines, and removing one line of a record
+      // would leave the value behind in pieces.
       const last = row.span ?? row.line;
       for (let line = row.line; line <= last; line++)
         listed.push({ commit: row.commit, path: row.path, line, rule: row.rule });

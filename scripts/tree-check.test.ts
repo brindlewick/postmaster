@@ -372,8 +372,9 @@ function findingRows(output: string): FindingRow[] {
 }
 
 test("tree check --findings emits structured rows with commits", () => {
-  // Review round 11 (bug-59): the rewrite plans from this listing, so it
-  // carries the commit each finding belongs to, like scrub-check's.
+  // Review round 11 (bug-59): a history rewrite (#423) plans from this
+  // listing, so it carries the commit each finding belongs to, like
+  // scrub-check's.
   const repo = initRepo();
   const base = gitAt(repo, ["rev-parse", "HEAD"]);
   mkdirSync(join(repo, "raw"));
@@ -406,7 +407,8 @@ test("tree check --findings emits structured rows with commits", () => {
 
 test("tree check --findings expands whole-file reasoning to every line", () => {
   // Review round 11 (bug-59): a spanning record flags at line 1 in text,
-  // but the rewrite removes lines, so the listing names each of them.
+  // but a history rewrite (#423) removes lines, so the listing names each
+  // of them.
   const repo = initRepo();
   const base = gitAt(repo, ["rev-parse", "HEAD"]);
   mkdirSync(join(repo, "raw"));
@@ -430,8 +432,8 @@ test("tree check --findings expands whole-file reasoning to every line", () => {
 });
 
 test("tree check --findings names run records under .postmaster/", () => {
-  // Review round 11 (bug-59): path findings list at line 0, and the
-  // rewrite refuses them loudly instead of renaming private content.
+  // Review round 11 (bug-59): path findings list at line 0, and a history
+  // rewrite (#423) refuses them loudly instead of renaming private content.
   const repo = initRepo();
   const base = gitAt(repo, ["rev-parse", "HEAD"]);
   mkdirSync(join(repo, ".postmaster"));

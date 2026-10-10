@@ -62,7 +62,7 @@ function executable(name: string): string {
 }
 
 test("C1 entries run through scripts/run with no python, and a direct Bun range scan needs only Bun, git and a shell", () => {
-  const scripts = ["scrub-check", "tree-check", "raw-promote", "scrub-rewrite", "verify-merge"];
+  const scripts = ["scrub-check", "tree-check", "raw-promote", "verify-merge"];
   for (const name of scripts) {
     expect(existsSync(join(ROOT, "scripts", `${name}.sh`))).toBe(false);
     const help = spawnSync(join(ROOT, "scripts", "run"), [name, "--help"], { encoding: "utf8" });

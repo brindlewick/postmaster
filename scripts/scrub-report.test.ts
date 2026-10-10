@@ -87,9 +87,9 @@ test("errorText prefixes the script and redacts values anywhere in the message",
   expect(errorText("tree-check", "the tree could not be read")).toBe(
     "tree-check: the tree could not be read",
   );
-  const text = errorText("scrub-rewrite", `a finding in (${email()} needs a manual reword`);
+  const text = errorText("scrub-check", `a finding in (${email()} could not be shown`);
   expect(text).not.toContain(email());
-  expect(text.startsWith("scrub-rewrite: ")).toBe(true);
+  expect(text.startsWith("scrub-check: ")).toBe(true);
 });
 
 test("testReset matches from the start on a dirty global regex and leaves it clean", () => {

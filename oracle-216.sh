@@ -19,7 +19,6 @@ set -uo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 SCRUB="$ROOT/scripts/scrub-check.sh"
-REWRITE="$ROOT/scripts/scrub-rewrite.sh"
 PROMOTE="$ROOT/scripts/raw-promote.sh"
 TREE="$ROOT/scripts/tree-check.sh"
 VERIFY_MERGE="$ROOT/scripts/verify-merge.sh"
@@ -97,14 +96,14 @@ mk_repo() { # mk_repo <dir>: a scratch repo with user set and one clean commit
 
 # --- C1: TypeScript run by Bun, no Python. ---
 echo "C1: typescript, no python"
-if ls "$ROOT/scripts/scrub-check.ts" "$ROOT/scripts/scrub-rewrite.ts" \
+if ls "$ROOT/scripts/scrub-check.ts" \
   "$ROOT/scripts/raw-promote.ts" "$ROOT/scripts/tree-check.ts" \
   "$ROOT/scripts/verify-merge.ts" >/dev/null 2>&1; then
-  ok "the five scripts exist as TypeScript"
+  ok "the four scripts exist as TypeScript"
 else
-  bad "the five scripts exist as TypeScript" "missing .ts beside the wrappers"
+  bad "the four scripts exist as TypeScript" "missing .ts beside the wrappers"
 fi
-NEW10="$ROOT/scripts/scrub-check.ts $ROOT/scripts/scrub-check.sh $ROOT/scripts/scrub-rewrite.ts $ROOT/scripts/scrub-rewrite.sh $ROOT/scripts/raw-promote.ts $ROOT/scripts/raw-promote.sh $ROOT/scripts/tree-check.ts $ROOT/scripts/tree-check.sh $ROOT/scripts/verify-merge.ts $ROOT/scripts/verify-merge.sh"
+NEW10="$ROOT/scripts/scrub-check.ts $ROOT/scripts/scrub-check.sh $ROOT/scripts/raw-promote.ts $ROOT/scripts/raw-promote.sh $ROOT/scripts/tree-check.ts $ROOT/scripts/tree-check.sh $ROOT/scripts/verify-merge.ts $ROOT/scripts/verify-merge.sh"
 # shellcheck disable=SC2086
 if grep -il python $NEW10 2>/dev/null | grep -q .; then
   # shellcheck disable=SC2086
@@ -113,7 +112,7 @@ else
   ok "no python in the new scripts"
 fi
 WRAP_OK=1
-for s in scrub-check scrub-rewrite raw-promote tree-check verify-merge; do
+for s in scrub-check raw-promote tree-check verify-merge; do
   if ! diff <(sed "s/host/$s/g" "$ROOT/scripts/host.sh") "$ROOT/scripts/$s.sh" >/dev/null 2>&1; then
     WRAP_OK=0
   fi
@@ -272,9 +271,9 @@ else
   bad "accented names found" "exit $AC_CODE: $AC_OUT"
 fi
 if grep -rniE "fetch[[:space:]]*\(|node:https?|chat/completions|openrouter|api\.anthropic|generativelanguage|WebSocket" \
-  "$ROOT/scripts/scrub-check.ts" "$ROOT/scripts/scrub-rewrite.ts" "$ROOT/scripts/raw-promote.ts" \
+  "$ROOT/scripts/scrub-check.ts" "$ROOT/scripts/raw-promote.ts" \
   "$ROOT/scripts/tree-check.ts" "$ROOT/scripts/verify-merge.ts" 2>/dev/null | grep -q .; then
-  bad "no network or model calls" "$(grep -rniE "fetch[[:space:]]*\(|node:https?|chat/completions|openrouter" "$ROOT"/scripts/scrub-check.ts "$ROOT"/scripts/scrub-rewrite.ts "$ROOT"/scripts/raw-promote.ts "$ROOT"/scripts/tree-check.ts "$ROOT"/scripts/verify-merge.ts 2>/dev/null | head -3)"
+  bad "no network or model calls" "$(grep -rniE "fetch[[:space:]]*\(|node:https?|chat/completions|openrouter" "$ROOT"/scripts/scrub-check.ts "$ROOT"/scripts/raw-promote.ts "$ROOT"/scripts/tree-check.ts "$ROOT"/scripts/verify-merge.ts 2>/dev/null | head -3)"
 else
   ok "no network or model calls"
 fi
@@ -531,43 +530,12 @@ else
   bad "markers inert in posted text" "exit $M16P_CODE/$M16C_CODE: $M16P_OUT $M16C_OUT"
 fi
 
-# --- C17-C18: the rewrite. ---
-echo "C17-C18: rewrite"
-mk_repo "$TMP/c17r"
-C17="$TMP/c17r"
-(cd "$C17" && echo "clean" > a.txt && git add -A && git commit -qm "clean"
-  printf 'contact %s\n' "$MAIL1" > b.txt && git add -A && git commit -qm "planted"
-  echo "clean" > b.txt && git add -A && git commit -qm "dropped") || bad "C17 fixture" "fixture setup failed"
-C17_BEFORE=$(git -C "$C17" rev-parse HEAD^{tree})
-C17_BASE=$(git -C "$C17" rev-parse HEAD~3)
-C17_OUT=$(cd "$C17" && POSTMASTER_DETECTIONS_LOG="$TMP/c17.log" "$REWRITE" HEAD~3 2>"$TMP/c17.err") && C17_CODE=$? || C17_CODE=$?
-C17_AFTER=$(git -C "$C17" rev-parse HEAD^{tree})
-if [ "$C17_CODE" -eq 0 ] && [ "$C17_BEFORE" = "$C17_AFTER" ]; then
-  ok "rewrite exits 0 with the tree unchanged"
-else
-  bad "rewrite exits 0 with the tree unchanged" "exit $C17_CODE"
-fi
-if [ "$(printf '%s' "$C17_OUT" | grep -c "removed")" -eq 1 ]; then ok "rewrite prints one removed line"; else bad "rewrite prints one removed line" "$C17_OUT"; fi
-C17_RE=$(cd "$C17" && "$SCRUB" "$C17_BASE" HEAD 2>/dev/null) && C17_RE_CODE=$? || C17_RE_CODE=$?
-if [ "$C17_RE_CODE" -eq 0 ] && [ -z "$C17_RE" ]; then ok "rescan after rewrite is clean"; else bad "rescan after rewrite is clean" "exit $C17_RE_CODE: $C17_RE"; fi
-mk_repo "$TMP/c18r"
-(cd "$TMP/c18r" && git init -q --bare "$TMP/c18remote" && git remote add origin "$TMP/c18remote"
-  echo "clean" > a.txt && git add -A && git commit -qm "clean"
-  printf 'contact %s\n' "$MAIL1" > b.txt && git add -A && git commit -qm "planted"
-  echo "clean" > b.txt && git add -A && git commit -qm "dropped"
-  git push -q origin main) || bad "C18 fixture" "fixture setup failed"
-C18_HEAD_BEFORE=$(git -C "$TMP/c18r" rev-parse HEAD)
-C18_OUT=$(cd "$TMP/c18r" && "$REWRITE" HEAD~3 2>"$TMP/c18.err") && C18_CODE=$? || C18_CODE=$?
-C18_HEAD_AFTER=$(git -C "$TMP/c18r" rev-parse HEAD)
-if [ "$C18_CODE" -eq 2 ] && [ "$C18_HEAD_BEFORE" = "$C18_HEAD_AFTER" ]; then
-  ok "pushed branch refuses with HEAD unchanged"
-else
-  bad "pushed branch refuses with HEAD unchanged" "exit $C18_CODE"
-fi
+# --- C18: pushed findings escalate. (C17, the rewrite, moved to #423.) ---
+echo "C18: pushed findings escalate"
 if tr '\n' ' ' < "$ROOT/skills/postmaster/coachman.md" | grep -qi "escalat[^.]*push\|push[^.]*escalat"; then
-  ok "refused rewrite escalates to the user"
+  ok "pushed findings escalate to the user"
 else
-  bad "refused rewrite escalates to the user" "no pushed-branch escalation in coachman.md"
+  bad "pushed findings escalate to the user" "no pushed-branch escalation in coachman.md"
 fi
 
 # --- C19-C21: promoting records. ---
@@ -675,7 +643,7 @@ fi
 
 # --- C23: every rule proven. ---
 echo "C23: rule proofs"
-for s in scrub-check scrub-rewrite raw-promote tree-check verify-merge; do
+for s in scrub-check raw-promote tree-check verify-merge; do
   if [ -f "$ROOT/scripts/$s.test.ts" ]; then ok "$s.test.ts beside its script"; else bad "$s.test.ts beside its script" "missing"; fi
 done
 FLIP_DIR="$TMP"

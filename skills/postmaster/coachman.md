@@ -1241,10 +1241,9 @@ carries.
    the last code change; the gate must
    pass before the card is ready. No P1 or P2 finding may remain open.
    If the private-data check fails, fix each finding in the synthesis worktree, record its
-   resolution and rerun the gate; do not ask the user to repair an ordinary finding. Before the
-   card, run `<rt>/scripts/run scrub-rewrite <main-or-base>` to remove findings that survive only
-   in earlier unpushed commits. A refusal for pushed history or a finding that needs a manual
-   rewrite is escalated under Stage E.
+   resolution and rerun the gate; do not ask the user to repair an ordinary finding. A finding
+   that survives only in an earlier commit goes to the user, as one in a pushed commit does,
+   until #423 lands.
    If a new P1 or P2 issue appears during final QA, fix it and pass the gate again; when the
    review loop has a gating lens, run another review round and rewrite `checkpoint-review.md`
    with the loop's rounds and outcome before writing the card.
