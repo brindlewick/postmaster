@@ -347,7 +347,7 @@ everything the coachman needs and nothing it must go and find:
 <the turnpikes: line <tool>/scripts/run ticket-check printed for the ticket, whole: turnpikes: <names> or turnpikes: none>
 
 ## Ticket
-<the ticket verbatim: problem, acceptance criteria, direction, turnpikes, notes, User journey if it has one>
+<the ticket whole when the run's ticket notes are given, and without its technical notes and verified facts when they are held back, as <tool>/scripts/run ticket-cut prints it: problem, acceptance criteria, direction, turnpikes, notes where kept, User journey if it has one>
 
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>
