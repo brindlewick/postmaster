@@ -214,12 +214,43 @@ describe("the rule's setting", () => {
 });
 
 describe("the gate's shape", () => {
-  test("failing every warning fails", () => {
+  // #232 fails every warning through --deny-warnings, so the pin accepts that
+  // one flag and refuses every other blanket mechanism, naming it; the rule
+  // still fails at error either way (ruling on the 232/233 merge).
+  test("--deny-warnings passes", () => {
     const dir = fresh();
     plant(dir, cleanConfig(), "tsc --noEmit && bunx oxlint --deny-warnings");
     const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(0);
+    expect(r.out).toBe("");
+  });
+
+  test("another blanket flag fails naming the flag", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), "tsc --noEmit && bunx oxlint --max-warnings=0");
+    const r = accept(dir, stub(GOOD));
     expect(r.code).toBe(1);
-    expect(r.out).toContain("package.json");
+    expect(r.out).toContain("--max-warnings=0");
+  });
+
+  test("denying every rule fails naming the flag", () => {
+    const dir = fresh();
+    plant(dir, cleanConfig(), "tsc --noEmit && bunx oxlint --deny all");
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("--deny all");
+  });
+
+  test("without the rule at error still fails", () => {
+    const dir = fresh();
+    plant(
+      dir,
+      { rules: {}, ignorePatterns: ["fixtures/**", "scripts/lib/vendor/**"] },
+      "tsc --noEmit && bunx oxlint --deny-warnings",
+    );
+    const r = accept(dir, stub(GOOD));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(RULE);
   });
 
   test("a check that never runs the linter fails", () => {
