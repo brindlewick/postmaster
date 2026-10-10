@@ -9,11 +9,13 @@ import { commitAll, gitOrThrow, initRepo, RUN, writeRepoFile } from "./acceptanc
 import { run } from "./lib/proc.ts";
 import {
   acceptLine,
+  acceptLineReport,
   addedFeaturePages,
   addedPaths,
   addedUnder,
   branchFileText,
   branchHasPath,
+  bulletConfirm,
   type CheapFacts,
   type ChecksOutcome,
   type ClassifiedEntry,
@@ -21,6 +23,8 @@ import {
   classifyEntries,
   commitsPastBase,
   committedFeaturePages,
+  confirmedSha,
+  correctedClaims,
   decideCheap,
   decideChecks,
   defaultBase,
@@ -31,8 +35,11 @@ import {
   failureOutcome,
   featurePageNames,
   featurePages,
+  featuresConfirm,
   handoverFresh,
   hasUpkeepLine,
+  indexBullets,
+  indexFileFor,
   indexNames,
   isFeaturePage,
   isSurface,
@@ -47,6 +54,7 @@ import {
   orderKinds,
   outsideAdded,
   outsidePaths,
+  outsideReason,
   parseArgs,
   parseHandover,
   parseUpkeepReport,
@@ -69,6 +77,7 @@ import {
   scrubGitEnv,
   sendText,
   sendVerdict,
+  spanNamesDir,
   spawnCommand,
   strayVerifierPaths,
   surfaceFromReadme,
@@ -79,6 +88,7 @@ import {
   unlistedSentence,
   unrunProject,
   type UpkeepReport,
+  upkeepCorrectSendText,
   upkeepScope,
   upkeepSendText,
   UPKEEP_HEADLESS_UNASKED,
@@ -2869,5 +2879,336 @@ describe("verdictUpkeep", () => {
       ok: false,
       error: "the report names no stale claim for its changed page v/features/a.md",
     });
+  });
+});
+
+describe("correcting args", () => {
+  test("upkeep and upkeep-prompt take --correct, upkeep-report refuses it", () => {
+    expect(parseArgs(["upkeep", "/r", "--run", "/d", "--correct"])).toEqual({
+      ok: true,
+      req: {
+        cmd: "upkeep",
+        repo: "/r",
+        dispatch: "/d",
+        timeout: 3600,
+        folder: null,
+        correct: true,
+      },
+    });
+    expect(parseArgs(["upkeep-prompt", "/r", "--correct"])).toEqual({
+      ok: true,
+      req: { cmd: "upkeep-prompt", repo: "/r", headless: false, folder: null, correct: true },
+    });
+    expect(
+      parseArgs(["upkeep-report", "/r", "--run", "/d", "--report", "/u", "--correct"]),
+    ).toEqual({ ok: false, error: "unknown flag for upkeep-report: --correct" });
+  });
+
+  test("check and land take --report instead of --handover, never both", () => {
+    expect(parseArgs(["check", "/r", "upkeep", "--run", "/d", "--report", "/u"])).toEqual({
+      ok: true,
+      req: {
+        cmd: "check",
+        repo: "/r",
+        branch: "upkeep",
+        dispatch: "/d",
+        report: "/u",
+        folder: null,
+        timeout: 3600,
+      },
+    });
+    expect(
+      parseArgs(["land", "/r", "upkeep", "--run", "/d", "--report", "/u", "--landing", "local"]),
+    ).toEqual({
+      ok: true,
+      req: {
+        cmd: "land",
+        repo: "/r",
+        branch: "upkeep",
+        dispatch: "/d",
+        report: "/u",
+        folder: null,
+        timeout: 3600,
+        landing: "local",
+      },
+    });
+    expect(
+      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--report", "/u"]),
+    ).toEqual({ ok: false, error: "check takes --handover or --report, not both" });
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--report"])).toEqual({
+      ok: false,
+      error: "check needs --report <file>",
+    });
+  });
+});
+
+describe("corrected claims", () => {
+  test("parseUpkeepReport reads the first Corrected: line, and none when absent", () => {
+    const text = [
+      "## Claim: c",
+      "Page: p",
+      "Verdict: stale",
+      "Stated: s",
+      "Found: f",
+      "Corrected: first",
+      "Corrected: second",
+      "",
+    ].join("\n");
+    const parsed = parseUpkeepReport(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("the report should parse");
+    expect(parsed.report.claims).toEqual([
+      {
+        name: "c",
+        page: "p",
+        verdict: "stale",
+        stated: "s",
+        found: "f",
+        because: null,
+        corrected: "first",
+      },
+    ]);
+    const bare = parseUpkeepReport("## Claim: c\nPage: p\nVerdict: stale\nStated: s\nFound: f\n");
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) throw new Error("the report should parse");
+    expect(bare.report.claims[0]).toEqual({
+      name: "c",
+      page: "p",
+      verdict: "stale",
+      stated: "s",
+      found: "f",
+      because: null,
+    });
+    expect("corrected" in (bare.report.claims[0] as object)).toBe(false);
+  });
+
+  test("correctedClaims keeps stale claims with a correction", () => {
+    expect(
+      correctedClaims([
+        {
+          name: "a",
+          page: "p",
+          verdict: "stale",
+          stated: "s",
+          found: "f",
+          because: null,
+          corrected: "x",
+        },
+        { name: "b", page: "p", verdict: "stale", stated: "s", found: "f", because: null },
+        { name: "c", page: "p", verdict: "unchecked", stated: "s", found: null, because: "b" },
+      ]).map((c) => c.name),
+    ).toEqual(["a"]);
+  });
+
+  test("a corrected stale claim prints its correction after its finding", () => {
+    const decided = verdictUpkeep(["v/features/a.md"], ["v"], {
+      verifiers: [{ name: "cli", folder: "v" }],
+      features: [{ page: "v/features/a.md", outcome: "changed" }],
+      claims: [
+        {
+          name: "a: one",
+          page: "v/features/a.md",
+          verdict: "stale",
+          stated: "s1",
+          found: "f1",
+          because: null,
+          corrected: "reworded and drove again",
+        },
+      ],
+      unasked: [],
+    });
+    expect(decided).toEqual({
+      ok: true,
+      verdict: {
+        lines: [
+          "stale: a: one (v/features/a.md)",
+          "  stated: s1",
+          "  found: f1",
+          "corrected: a: one (v/features/a.md)",
+          "  change: reworded and drove again",
+          "features driven: 1, stale: 1, unchecked: 0",
+        ],
+        stale: 1,
+        unchecked: 0,
+      },
+    });
+  });
+
+  test("a correction on an unchecked claim fails naming the claim", () => {
+    const decided = verdictUpkeep(["v/features/a.md"], ["v"], {
+      verifiers: [{ name: "cli", folder: "v" }],
+      features: [{ page: "v/features/a.md", outcome: "blocked" }],
+      claims: [
+        {
+          name: "u: one",
+          page: "v/features/a.md",
+          verdict: "unchecked",
+          stated: "s",
+          found: null,
+          because: "b",
+          corrected: "x",
+        },
+      ],
+      unasked: [],
+    });
+    expect(decided).toEqual({
+      ok: false,
+      error: "the report's unchecked claim u: one carries a correction",
+    });
+  });
+});
+
+describe("outsideReason and acceptLineReport", () => {
+  test("no paths outside means no reason", () => {
+    expect(outsideReason([])).toBe(null);
+  });
+
+  test("outside paths refuse with the first ten named", () => {
+    expect(outsideReason(["AGENTS.md"])).toBe("outside the verifiers' folder: AGENTS.md");
+    const twelve = Array.from({ length: 12 }, (_, n) => `f${n}.md`);
+    expect(outsideReason(twelve)).toBe(
+      `outside the verifiers' folder: ${twelve.slice(0, 10).join(", ")} and 2 more`,
+    );
+  });
+
+  test("a pass branch lands with what its report corrected", () => {
+    expect(
+      acceptLineReport("upkeep", {
+        verifiers: [
+          { name: "cli", folder: "verify-app" },
+          { name: "web", folder: "verifier/web" },
+        ],
+        features: [],
+        claims: [
+          {
+            name: "a",
+            page: "p",
+            verdict: "stale",
+            stated: "s",
+            found: "f",
+            because: null,
+            corrected: "x",
+          },
+          { name: "b", page: "p", verdict: "stale", stated: "s", found: "f", because: null },
+          { name: "c", page: "p", verdict: "unchecked", stated: "s", found: null, because: "b" },
+        ],
+        unasked: [],
+      }),
+    ).toBe(
+      "accept: upkeep lands upkeep corrections for cli (verify-app), web (verifier/web); " +
+        "corrected: 1 of 2 stale, unchecked: 1",
+    );
+  });
+});
+
+describe("index confirmation", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+
+  test("confirmedSha reads the sha lowered, or nothing when it names none", () => {
+    expect(confirmedSha(`Files: a. Confirmed: ${sha}.`)).toBe(sha);
+    expect(confirmedSha(`Confirmed: ${sha.toUpperCase()}`)).toBe(sha);
+    expect(confirmedSha("Files: a.")).toBe(null);
+    expect(confirmedSha(`confirmed: ${sha}`)).toBe(null);
+    expect(confirmedSha(`Confirmed: ${sha.slice(0, 39)}`)).toBe(null);
+    expect(confirmedSha(`Confirmed: ${sha}0`)).toBe(null);
+  });
+
+  test("indexBullets spans bullets to the next bullet or heading", () => {
+    expect(
+      indexBullets(
+        [
+          "# index",
+          "",
+          "- cli goes in verifier/cli/.",
+          "  continued",
+          "",
+          "- web goes in verifier/web/.",
+          "",
+          "## notes",
+          "",
+          "prose",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      ["- cli goes in verifier/cli/.", "  continued", ""],
+      ["- web goes in verifier/web/.", ""],
+    ]);
+  });
+
+  test("spanNamesDir matches the folder, never a longer kind", () => {
+    expect(
+      spanNamesDir(["- the command line (cli) verifier goes in verifier/cli/."], "verifier/cli"),
+    ).toBe(true);
+    expect(spanNamesDir(["- see [cli](cli/) for the driver"], "verifier/cli")).toBe(true);
+    expect(
+      spanNamesDir(
+        ["- the command line (cli) verifier goes in verifier/cli-extra/."],
+        "verifier/cli",
+      ),
+    ).toBe(false);
+    expect(
+      spanNamesDir(["- the web pages (web) verifier goes in verifier/web/."], "verifier/cli"),
+    ).toBe(false);
+  });
+
+  test("bulletConfirm reads the bullet's own confirmation", () => {
+    const index = [
+      `- cli goes in verifier/cli/. Confirmed: ${sha}`,
+      "- web goes in verifier/web/. Files: x.",
+      "",
+    ].join("\n");
+    expect(bulletConfirm(index, "verifier/cli")).toBe(sha);
+    expect(bulletConfirm(index, "verifier/web")).toBe(null);
+    expect(bulletConfirm(index, "verifier/missing")).toBe(null);
+  });
+
+  test("a wrapped bullet confirms from its continuation line", () => {
+    const index = [`- cli goes in verifier/cli/. Files: x.`, `  Confirmed: ${sha}`, ""].join("\n");
+    expect(bulletConfirm(index, "verifier/cli")).toBe(sha);
+  });
+
+  test("featuresConfirm reads the whole features index", () => {
+    expect(featuresConfirm(`# map\n\nFiles: a.\nConfirmed: ${sha}\n`)).toBe(sha);
+    expect(featuresConfirm("# map\n\nFiles: a.\n")).toBe(null);
+  });
+
+  test("indexFileFor covers shared bullets and lone features indexes", () => {
+    expect(indexFileFor("verifier/cli", true)).toBe("verifier/README.md");
+    expect(indexFileFor("verify-app", true)).toBe("verify-app/features/README.md");
+    expect(indexFileFor("verifier/cli", false)).toBe("verifier/cli/features/README.md");
+    expect(indexFileFor("verifier", true)).toBe("verifier/features/README.md");
+  });
+});
+
+describe("scopeVdirs at a revision", () => {
+  test("reads the driven commit, not the current one", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/a.md", "# a\n");
+      commitAll(repo, "first");
+      const head = gitOrThrow(repo, "rev-parse", "HEAD").trim();
+      writeRepoFile(repo, "verifier/web/README.md", "# w\n");
+      writeRepoFile(repo, "verifier/web/features/b.md", "# b\n");
+      commitAll(repo, "second");
+      expect(scopeVdirs(repo, "verifier", head)).toEqual(["verifier/cli"]);
+      expect(scopeVdirs(repo, "verifier")).toEqual(["verifier/cli", "verifier/web"]);
+      expect(scopeVdirs(repo, "missing", head)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("upkeepCorrectSendText", () => {
+  test("names the correcting pass and its instructions file", () => {
+    const text = upkeepCorrectSendText("/d/logs/verifier-upkeep-prompt.txt");
+    expect(text).toContain("/d/logs/verifier-upkeep-prompt.txt");
+    expect(text).toMatch(/correcting upkeep pass/u);
+    expect(text.endsWith("\n")).toBe(true);
   });
 });
