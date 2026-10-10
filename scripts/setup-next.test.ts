@@ -39,4 +39,20 @@ describe("setup-next", () => {
       expect(r.out).toContain("next=global");
     });
   });
+
+  test("an unusable .postmaster still reports its verdict and route", () => {
+    withTempDir((dir) => {
+      const repo = join(dir, "proj");
+      mkdirSync(repo, { recursive: true });
+      run("git", ["init", "-q", repo]);
+      writeFileSync(join(repo, ".postmaster"), "not a directory\n", "utf8");
+      const config = join(dir, "config.toml");
+      writeFileSync(config, 'projects_roots = ["~/Code"]\n', "utf8");
+      const r = setupNext(repo, config);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("setup=not set up");
+      expect(r.out).toContain("settings_ignored=no");
+      expect(r.out).toContain("next=project");
+    });
+  });
 });

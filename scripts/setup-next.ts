@@ -61,11 +61,19 @@ export function main(argv: string[]): number {
   if (verdict.notice !== null) console.error(verdict.notice);
   const setUp = verdict.code === 0;
   const next = setUp ? "done" : globalUsable ? "project" : "global";
+  // A .postmaster that is a file or a symlink breaks the ignore probe, but
+  // the verdict and the route still report: nothing there can be ignored.
+  let ignored = false;
+  try {
+    ignored = settingsIgnored(root);
+  } catch {
+    ignored = false;
+  }
   const lines = [
     `root=${root}`,
     `global=${globalPresent ? "present" : "missing"}:${globalPath}`,
     `project_settings=${settingsPresent ? "present" : "missing"}:${settingsPath}`,
-    `settings_ignored=${settingsIgnored(root) ? "yes" : "no"}`,
+    `settings_ignored=${ignored ? "yes" : "no"}`,
     `setup=${setUp ? "set up" : "not set up"}`,
     ...verdict.lines.slice(1).map((reason) => `reason=${reason}`),
     `next=${next}`,
