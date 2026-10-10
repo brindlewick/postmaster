@@ -47,12 +47,13 @@
 import { readFileSync } from "node:fs";
 import {
   TECH_NOTES_RE,
-  VERIFIED_RE,
   agentsIndex,
   fenceMap,
   isFence,
   level3Sections,
   normalizeTicket,
+  verifiedAtSha,
+  verifiedSection,
 } from "./lib/ticket-sections.ts";
 
 // --- limits -----------------------------------------------------------------------------------
@@ -298,16 +299,13 @@ export function analyze(text: string, final: boolean): Report | null {
     subs.find((s) => re.test(s.title));
   const checks = sub(/^checks$/iu);
   const techNotes = sub(TECH_NOTES_RE);
-  const verified = sub(VERIFIED_RE);
+  const verified = verifiedSection(lines, ai);
   const where = ai + 1;
   if (!checks) add(where, "part", 'no "### Checks" section under "## For the agents"');
   if (!techNotes) add(where, "part", 'no "### Technical notes" section under "## For the agents"');
   if (!verified) add(where, "part", 'no "### Verified at <sha>" section under "## For the agents"');
-  else {
-    const sha = verified.title.replace(/^verified at/iu, "").trim();
-    if (!/^[0-9a-f]{7,40}$/iu.test(sha))
-      add(verified.at + 1, "part", '"### Verified at" needs a commit of 7 to 40 hex characters');
-  }
+  else if (verifiedAtSha(verified.title) === "")
+    add(verified.at + 1, "part", '"### Verified at" needs a commit of 7 to 40 hex characters');
 
   // The checks: one for each criterion, labelled C1 to CN, in order.
   if (checks && N > 0) {
