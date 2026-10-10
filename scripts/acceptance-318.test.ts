@@ -200,6 +200,11 @@ describe("upkeep-report: the verdict from a finished pass", () => {
       expect(r.out).toContain("features driven: 5, stale: 1, unchecked: 1");
       const actions = readFileSync(join(sandbox.dispatch, "actions.jsonl"), "utf8");
       expect(actions).toContain("features driven: 5, stale: 1, unchecked: 1");
+      const logged = actions
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { target: string });
+      expect(logged[logged.length - 1]?.target).toBe(join(sandbox.dir, "UPKEEP.md"));
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
@@ -510,6 +515,7 @@ describe("upkeep-prompt: the pass instructions", () => {
       expect(out).toMatch(/Outcome: clean/iu);
       expect(out).toMatch(/changed/iu);
       expect(out).toMatch(/blocked/iu);
+      expect(out).not.toContain("HANDOVER.md");
       expect(out).toContain(ADD);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
@@ -524,6 +530,7 @@ describe("upkeep-prompt: the pass instructions", () => {
       expect(out).toMatch(/unasked/iu);
       expect(out).toMatch(/never invent a value/iu);
       expect(out).toMatch(/UPKEEP\.md/u);
+      expect(out).not.toContain("HANDOVER.md");
       expect(out).toMatch(/health check/iu);
       expect(out).toContain(ADD);
     } finally {
