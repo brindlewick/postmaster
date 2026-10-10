@@ -2087,7 +2087,7 @@ function runUpkeepLaunches(
       if (final !== null) lines.push(`stream ${final.stream}`);
       lines.push(`report ${join(wt, "UPKEEP.md")}`);
       for (const line of [...lines, ...verdict.lines]) console.log(line);
-      logVerdict(dispatch, branch, "note", verdict.lines[verdict.lines.length - 1] as string);
+      for (const line of verdict.lines) logVerdict(dispatch, branch, "note", line);
       return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
     },
   });
@@ -2846,7 +2846,7 @@ function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
   for (const line of verdict.lines) console.log(line);
   // The report is what was judged: the command cuts no branch to name.
   const judged = resolve(req.report);
-  logVerdict(dispatch, judged, "note", verdict.lines[verdict.lines.length - 1] as string);
+  for (const line of verdict.lines) logVerdict(dispatch, judged, "note", line);
   return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
 }
 
