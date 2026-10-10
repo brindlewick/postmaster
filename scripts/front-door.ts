@@ -3,10 +3,11 @@
 // terminal; the target and the config are given. It is `self` when that session is already on
 // team.postmaster's harness and model, in the target repo, with the user at the terminal. It is
 // `spawn` with every condition that failed, in ticket order: the harness differs, the model
-// differs, the target is another repo, or nobody is at the terminal. When the decision is
-// `spawn` and the target is a fixture copy (postmaster.fixture in its own git config, set by
-// run fixture new), it also prints a `headless` line: that postmaster starts headless on every
-// host, in the form hosts.md gives under none, so it never meets a trust prompt.
+// differs, the target is another repo, or nobody is at the terminal. When the target is a
+// fixture copy (postmaster.fixture in its own git config, set by run fixture new), it also
+// prints a `fixture` line, on both routes, so the launch card offers it no verifiers. On a
+// `spawn` it prints a `headless` line too: that postmaster starts headless on every host,
+// in the form hosts.md gives under none, so it never meets a trust prompt.
 //
 //   run front-door <harness> <model> <cwd> <at-terminal> <target> [--config <path>]
 //
@@ -16,7 +17,8 @@
 // team.postmaster is read from the target's effective config: its own settings
 // over the global config, or its own settings alone with no global config.
 //
-//   exit 0  printed `self` or `spawn` with its reasons, and `headless` for a fixture copy
+//   exit 0  printed `self` or `spawn` with its reasons, `headless` on a fixture
+//           spawn, and `fixture` for a fixture copy
 //   exit 1  no config or one that does not parse, team.postmaster missing, or a bad value
 //   exit 2  usage
 import { existsSync, statSync } from "node:fs";
@@ -110,9 +112,11 @@ function route(
           "self team.postmaster harness and model, the target is this repo, ",
           "and the user is at the terminal\n",
         ].join("");
-  return reasons.length > 0 && fixtureCopy
-    ? `${spawn}headless the target is a fixture copy made by run fixture new\n`
-    : spawn;
+  if (!fixtureCopy) return spawn;
+  const fixture = "fixture the target is a fixture copy made by run fixture new\n";
+  return reasons.length > 0
+    ? `${spawn}headless the target is a fixture copy made by run fixture new\n${fixture}`
+    : `${spawn}${fixture}`;
 }
 
 function decide(

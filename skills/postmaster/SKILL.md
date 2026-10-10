@@ -212,10 +212,11 @@ its env file, never in settings.
    with the user at the terminal: the postmaster is this session, and no second one is
    started. `spawn` means a separate postmaster session is needed, and the reasons say
    which conditions failed: the harness or the model differs from `team.postmaster`, the
-   target is another repo, or nobody is at the terminal. When the decision is `spawn` and the
-   target is a fixture copy (`run fixture new` marked it), it also prints `headless`: that
-   postmaster starts headless on every host, in the form `hosts.md` gives under none, so it
-   never meets a trust prompt. `self` stays `self` in a fixture copy. If it exits non-zero instead,
+   target is another repo, or nobody is at the terminal. When the target is a fixture copy
+   (`run fixture new` marked it), it also prints `fixture`, on both routes. When the decision
+   is `spawn`, it prints `headless` too: that postmaster starts headless on every host, in the
+   form `hosts.md` gives under none, so it never meets a trust prompt. `self` stays `self` in
+   a fixture copy. If it exits non-zero instead,
    stop and tell the user what it said: the config is missing, does not parse, or has no
    `team.postmaster`, or the report was malformed. Settle that first; there is no route
    to put on the launch card until the script answers.
@@ -229,8 +230,9 @@ its env file, never in settings.
    the merge word for local-merge projects (`ship.merge_authority`), the landing route
    (`pull-request` or `local`), the session host the fleet will run on
    (`<tool>/scripts/run host detect`), and the project facts above. Where the discovery's
-   `verifiers=` line is empty and step 3 printed no `headless` line, the card also offers
-   to make the project's verifiers before anything starts: one for each surface the
+   `verifiers=` line is empty and step 3 printed neither a `headless` line nor a `fixture`
+   line, the card also offers to make the project's verifiers before anything starts: one
+   for each surface the
    discovery's `surfaces=` line names, or one for the project's main surface when that
    line names none, the surface named from the project or asked on the card. The user
    answers the offer with the rest of the card. A fixture copy, and a project whose
