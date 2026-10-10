@@ -1192,8 +1192,7 @@ function runTabById(tab: string): boolean {
         string,
         unknown
       > | null;
-      if (item && typeof item === "object" && !Array.isArray(item) && item.tab === tab)
-        return true;
+      if (item && typeof item === "object" && !Array.isArray(item) && item.tab === tab) return true;
     } catch {}
   }
   return false;
@@ -1683,8 +1682,7 @@ function herdrRunPlace(
     if (!anchor) {
       const recreated = withRunTabLock(() => {
         const current = readRunTab(dispatch);
-        if (current && current.workspace === source && current.tab !== placed.tab)
-          return current;
+        if (current && current.workspace === source && current.tab !== placed.tab) return current;
         return createRunTab(source, runName, runPath, dispatch);
       });
       if (!recreated) return null;

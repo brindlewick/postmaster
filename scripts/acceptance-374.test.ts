@@ -80,9 +80,7 @@ describe("C1+C2: one run is one tab of the repository's space", () => {
       expect(hcalls.filter((line) => line.startsWith("worktree\topen"))).toEqual([]);
       expect(hcalls.filter((line) => line.startsWith("workspace\tcreate"))).toEqual([]);
 
-      const st = JSON.parse(
-        readFileSync(join(fx.stub, "herdr.json"), "utf8"),
-      ) as HerdrState;
+      const st = JSON.parse(readFileSync(join(fx.stub, "herdr.json"), "utf8")) as HerdrState;
       expect(Object.keys(st.spaces)).toEqual([projSpace]);
       const tabs = st.spaces[projSpace]!.tabs;
       expect(tabs.length).toBe(3);
@@ -93,9 +91,7 @@ describe("C1+C2: one run is one tab of the repository's space", () => {
       );
       // Four launches plus the pane that shows the run's state.
       expect(runPanes.length).toBe(5);
-      expect(
-        hcalls.filter((line) => line.startsWith("tab\tcreate\t")).length,
-      ).toBe(2);
+      expect(hcalls.filter((line) => line.startsWith("tab\tcreate\t")).length).toBe(2);
 
       const records = placementRecords(fx).filter((item) => item.run === dispatch);
       expect(records.length).toBe(4);
@@ -137,9 +133,7 @@ describe("C3: the run tab stays between launches and closes with the run", () =>
       const repo = join(fx.root, "repo");
       gitInit(repo);
       const projSpace = openRepoSpace(fx, repo);
-      const rootTab = JSON.parse(
-        readFileSync(join(fx.stub, "herdr.json"), "utf8"),
-      ) as HerdrState;
+      const rootTab = JSON.parse(readFileSync(join(fx.stub, "herdr.json"), "utf8")) as HerdrState;
       const shellTab = rootTab.spaces[projSpace]!.tabs[0]!;
       const shellPane = rootTab.spaces[projSpace]!.panes[0]!;
       const synth = addWorktree(repo, "374", "374");
@@ -151,9 +145,7 @@ describe("C3: the run tab stays between launches and closes with the run", () =>
       expect(r.code).toBe(0);
       expect(await waitFor(() => existsSync(marker), 30)).toBe(true);
 
-      const launched = JSON.parse(
-        readFileSync(join(fx.stub, "herdr.json"), "utf8"),
-      ) as HerdrState;
+      const launched = JSON.parse(readFileSync(join(fx.stub, "herdr.json"), "utf8")) as HerdrState;
       const runTab = launched.spaces[projSpace]!.tabs.find(
         (tab) => launched.tabs[tab]!.label === SHORT_NAME,
       );
@@ -163,9 +155,7 @@ describe("C3: the run tab stays between launches and closes with the run", () =>
       expect(
         await waitFor(() => {
           try {
-            const now = JSON.parse(
-              readFileSync(join(fx.stub, "herdr.json"), "utf8"),
-            ) as HerdrState;
+            const now = JSON.parse(readFileSync(join(fx.stub, "herdr.json"), "utf8")) as HerdrState;
             return now.panes[String(launchPane)] === undefined;
           } catch {
             return false;
@@ -173,9 +163,7 @@ describe("C3: the run tab stays between launches and closes with the run", () =>
         }, 30),
       ).toBe(true);
 
-      const between = JSON.parse(
-        readFileSync(join(fx.stub, "herdr.json"), "utf8"),
-      ) as HerdrState;
+      const between = JSON.parse(readFileSync(join(fx.stub, "herdr.json"), "utf8")) as HerdrState;
       expect(between.tabs[runTab!]).not.toBeUndefined();
       const held = between.spaces[projSpace]!.panes.filter(
         (pane) => paneView(between, pane).tab === runTab,
@@ -190,9 +178,7 @@ describe("C3: the run tab stays between launches and closes with the run", () =>
 
       const closed = sh(SELF, ["host", "close-run", dispatch], env, fx.root);
       expect(closed.code).toBe(0);
-      const after = JSON.parse(
-        readFileSync(join(fx.stub, "herdr.json"), "utf8"),
-      ) as HerdrState;
+      const after = JSON.parse(readFileSync(join(fx.stub, "herdr.json"), "utf8")) as HerdrState;
       expect(after.tabs[runTab!]).toBeUndefined();
       expect(after.panes[held[0]!]).toBeUndefined();
       expect(after.spaces[projSpace]).not.toBeUndefined();

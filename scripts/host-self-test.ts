@@ -7735,8 +7735,16 @@ export async function live(): Promise<void> {
         },
         `${liveRun2.out}\n${liveRun2.err}`,
       );
-      const liveFin1 = liveHost(["_finish", "herdr", liveRunSpace, liveRunTab, liveRunPane1], f.caller, root);
-      const liveFin2 = liveHost(["_finish", "herdr", liveRunSpace, liveRunTab, liveRunPane2], f.caller, root);
+      const liveFin1 = liveHost(
+        ["_finish", "herdr", liveRunSpace, liveRunTab, liveRunPane1],
+        f.caller,
+        root,
+      );
+      const liveFin2 = liveHost(
+        ["_finish", "herdr", liveRunSpace, liveRunTab, liveRunPane2],
+        f.caller,
+        root,
+      );
       await pass(
         "finished launches leave the tab with its state pane",
         () => {
@@ -7758,31 +7766,28 @@ export async function live(): Promise<void> {
         },
         `${liveFin1.out}\n${liveFin1.err}\n${liveFin2.out}\n${liveFin2.err}`,
       );
-      await pass(
-        "the state pane shows the run",
-        async () => {
-          const runtabs = readdir(join(root, "state", "runtabs"));
-          if (runtabs.length !== 1) return false;
-          const record = JSON.parse(
-            readFileSync(join(root, "state", "runtabs", runtabs[0]!), "utf8"),
-          ) as { pane?: string };
-          if (!record.pane) return false;
-          for (let i = 0; i < 30; i++) {
-            const screen = liveHerdr(
-              "pane",
-              "read",
-              record.pane,
-              "--source",
-              "recent-unwrapped",
-              "--lines",
-              "40",
-            ).out;
-            if (screen.includes("#1, Stop") && screen.includes("stage:")) return true;
-            await sleep(1000);
-          }
-          return false;
-        },
-      );
+      await pass("the state pane shows the run", async () => {
+        const runtabs = readdir(join(root, "state", "runtabs"));
+        if (runtabs.length !== 1) return false;
+        const record = JSON.parse(
+          readFileSync(join(root, "state", "runtabs", runtabs[0]!), "utf8"),
+        ) as { pane?: string };
+        if (!record.pane) return false;
+        for (let i = 0; i < 30; i++) {
+          const screen = liveHerdr(
+            "pane",
+            "read",
+            record.pane,
+            "--source",
+            "recent-unwrapped",
+            "--lines",
+            "40",
+          ).out;
+          if (screen.includes("#1, Stop") && screen.includes("stage:")) return true;
+          await sleep(1000);
+        }
+        return false;
+      });
       const liveClose = liveHost(["close-run", liveRun], f.caller, root, {
         POSTMASTER_HOST: "herdr",
       });
