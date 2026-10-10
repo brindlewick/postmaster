@@ -6404,7 +6404,7 @@ export function runWorktreePaths(givenDispatch: string): string[] {
   // A missing lane file is a life stage (nothing launched yet); a present one
   // that does not parse is corruption. When files exist but none parses,
   // the lane set is unknown, and silently treating it as empty would skip
-  // workhorse worktrees, so this fails instead.
+  // workhorse copies, so this fails instead.
   if (existsSync(join(dispatch, "run.json"))) {
     laneFiles++;
     try {

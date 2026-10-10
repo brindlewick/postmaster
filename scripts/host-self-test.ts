@@ -27,7 +27,6 @@ import {
   processStart,
   processState,
 } from "./lib/processes.ts";
-import { pyWords } from "./lib/text.ts";
 
 const HERE = scriptsDir(import.meta);
 const SELF = join(HERE, "run");
@@ -387,7 +386,7 @@ function herdrStubInner(args: string[], stateDir: string): void {
     if (p) {
       const ws = p.ws;
       st.spaces[ws].panes = st.spaces[ws].panes.filter((id: string) => id !== pane);
-      for (const tab of [...st.spaces[ws].tabs]) {
+      for (const tab of st.spaces[ws].tabs) {
         const kept = Object.values(st.panes).some((q) => q.ws === ws && (q.tab || tab) === tab);
         if (!kept) {
           st.spaces[ws].tabs = st.spaces[ws].tabs.filter((id: string) => id !== tab);

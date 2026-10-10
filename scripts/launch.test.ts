@@ -5991,8 +5991,7 @@ function launchStep(
     "--run",
     c.d,
   ];
-  const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
-  const rc = r.status ?? 1;
+  spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
   const waited = waitForMarker(join(c.d, "logs"), `${out}.done`, 60);
   return { rc: waited, marker, actions: join(c.d, "actions.jsonl") };
 }

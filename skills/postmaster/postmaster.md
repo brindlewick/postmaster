@@ -758,15 +758,18 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
    remove `.leg-3-done` and resume leg 3 (Stage C, step 5) with its lines and "Fix the style sort
    as `coachman.md` says, and end the leg", then wait for its done marker. On exit 1, tell the
    user what it printed.
-2. **Tear down** every run-created worktree space from outside them, once the last leg's process
+2. **Tear down** every run-created folder space from outside them, once the last leg's process
    has exited (`.leg-3-exited`): `<tool>/scripts/run host close-run <dispatch>` closes the
-   synthesis, workhorse and reviewer scratch spaces, including review clones. On exit 2, a user
-   pane remains open, a launch is still running, or the run's records could not be read; stop
-   and report. Then remove the synthesis
+   synthesis, workhorse and reviewer scratch spaces, including workhorse and review clones. On
+   exit 2, a user pane remains open, a launch is still running, or the run's records could not be
+   read; stop and report. Then remove the synthesis
    worktree with `git -C <repo> worktree remove .worktrees/<TICKET>`, never with force unless
-   the tree is clean and the card confirmed it, and log `teardown`. The workhorse worktrees are
-   the coachman's; if any survive, remove them the same way after preserving any stray file into
-   `<dispatch>/stray/`. Teardown uses the live checkout's run host, never the run's pinned one: it
+   the tree is clean and the card confirmed it, and log `teardown`. The workhorse copies are
+   the coachman's; if any survive, remove each with `<tool>/scripts/run cut-scratch --remove
+   <repo> <folder>` after preserving any stray file into `<dispatch>/stray/`. A survivor from a
+   run dispatched before workhorse copies is a worktree on its `wb/` branch, which `--remove`
+   refuses; remove those with `git -C <repo> worktree remove <folder>` instead. Teardown uses
+   the live checkout's run host, never the run's pinned one: it
    must work even when the pin is gone or fails its check.
 3. **Close the run** with `<tool>/scripts/run stage <dispatch> done postmaster`, then release the
    run's pinned tool: `<tool>/scripts/run run-meta release <dispatch>`. It removes the checkout
@@ -792,12 +795,17 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 6. **Dispatch the next ticket** in order, Stage B.
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
-word, stop launches in every worktree the run created with `<tool>/scripts/run host stop-run
+word, stop launches in every folder the run created with `<tool>/scripts/run host stop-run
 <dispatch>` while the run still counts as in flight and holds its pin — on a fixture copy run
 that from outside the copy, since `stop` refuses from inside it — then set the stage with
 `<tool>/scripts/run stage <dispatch> abandoned postmaster`. Close all of its spaces with
-`<tool>/scripts/run host close-run <dispatch>` before removing each worktree after preserving
-stray files. Release the run's pinned tool (`<tool>/scripts/run run-meta release <dispatch>`, as
+`<tool>/scripts/run host close-run <dispatch>` before removing each folder after preserving
+stray files, a workhorse copy the way a reviewer's is removed, with
+`<tool>/scripts/run cut-scratch --remove <repo> <folder>`. A workhorse folder from a run
+dispatched before workhorse copies is a worktree on its `wb/` branch, which `--remove`
+refuses; remove those with `git -C <repo> worktree remove <folder>` instead. Release the
+run's pinned tool
+(`<tool>/scripts/run run-meta release <dispatch>`, as
 Stage G step 3 does; log the result as `teardown`), and move the ticket back to todo or to
 cancelled as the user says. The dispatch directory stays. Then put the run's tool faults to the
 user (Tool faults).
