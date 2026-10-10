@@ -1853,7 +1853,7 @@ export function indexFileFor(vdir: string, shared: boolean): string {
  * wrapping backticks and a leading `./`, then one trailing full stop (the
  * sentence's, as the shared bullets read), then trailing slashes, so a folder
  * last in the list matches. The label is case-sensitive, as the instructions
- * write it.
+ * write it. A bare `.` names no path and is dropped.
  */
 export function parseFilesList(scope: string): string[] | null {
   const at = scope.indexOf("Files:");
@@ -1871,7 +1871,7 @@ export function parseFilesList(scope: string): string[] | null {
     if (entry.startsWith("./")) entry = entry.slice("./".length);
     if (entry.endsWith(".") && entry.length > 1) entry = entry.slice(0, -1);
     entry = entry.replace(/\/+$/u, "");
-    if (entry !== "") entries.push(entry);
+    if (entry !== "" && entry !== ".") entries.push(entry);
   }
   return entries;
 }
@@ -2280,7 +2280,7 @@ function staleDetail(repo: string, vdir: string, shared: boolean, at: string): s
     sha = featuresConfirm(text);
   }
   const files = scope === null ? null : parseFilesList(scope);
-  if (files === null) return "unconfirmed (no Files: list)";
+  if (files === null || files.length === 0) return "unconfirmed (no Files: list)";
   if (sha === null) return "unconfirmed (no Confirmed: commit)";
   if (git(repo, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]).code !== 0)
     return `unconfirmed (unknown commit ${sha})`;

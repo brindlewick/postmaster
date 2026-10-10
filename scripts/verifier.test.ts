@@ -270,6 +270,11 @@ describe("parseFilesList", () => {
   test("empty entries are dropped", () => {
     expect(parseFilesList("Files: src/cli.ts,, ")).toEqual(["src/cli.ts"]);
   });
+
+  test("a bare label and a bare dot name nothing", () => {
+    expect(parseFilesList("Files:")).toEqual([]);
+    expect(parseFilesList("Files: .")).toEqual([]);
+  });
 });
 
 describe("matchDependedFiles", () => {
