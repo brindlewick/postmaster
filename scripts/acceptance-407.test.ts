@@ -4,8 +4,9 @@
 // fixture tickets and the shapes the ticket names, and that the run's own
 // checks read whole and cut alike; C4 pins the fixture score's premises item
 // and leaves the run's actions to a dispatched run; C5 needs model runs and
-// stays hand-verified by the postmaster at landing. Every case drives
-// scripts/run as a subprocess.
+// stays hand-verified by the postmaster at landing. A final rule test requires
+// ticket-parts, ticket-cut and premises to agree on every ready-ticket variant.
+// Every case drives scripts/run as a subprocess.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -447,5 +448,130 @@ describe("C5: fixture runs", () => {
   test.skipIf(true)("with no key scores clean", () => {
     // Needs a model run from this branch; the postmaster dispatches and
     // scores it at landing.
+  });
+});
+
+describe("readers agree: parts, cut and premises read every ready variant alike", () => {
+  test("ticket-parts, ticket-cut and premises agree on every ready-ticket variant", () => {
+    // One repo with the cited content; every variant cites it at the verified commit.
+    const dir = join(tmp, "agree");
+    mkdirSync(join(dir, "repo", "docs"), { recursive: true });
+    const repo = join(dir, "repo");
+    let r = run("git", ["init", "-q", "-b", "main", repo]);
+    if (r.code !== 0) throw new Error("git init failed");
+    run("git", ["-C", repo, "config", "user.name", "agree-test"]);
+    run("git", ["-C", repo, "config", "user.email", "agree-test@example.invalid"]);
+    const content = Array.from({ length: 30 }, (_, i) => `filler line ${i + 1}`);
+    content[4] = "THE CITED MARKER LINE";
+    writeFileSync(join(repo, "docs", "a.md"), `${content.join("\n")}\n`);
+    r = run("git", ["-C", repo, "add", "."]);
+    if (r.code !== 0) throw new Error("git add failed");
+    r = run("git", ["-C", repo, "commit", "-q", "-m", "cited"]);
+    if (r.code !== 0) throw new Error(`git commit failed: ${r.err}`);
+    r = run("git", ["-C", repo, "rev-parse", "HEAD"]);
+    if (r.code !== 0) throw new Error("git rev-parse failed");
+    const sha = r.out.trim();
+    const link = (range: string): string =>
+      `[cited](https://github.com/example/r/blob/${sha}/docs/a.md#${range})`;
+    const base = [
+      "# Mini",
+      "",
+      "## Problem / feature",
+      "",
+      "The list view shows entries unsorted.",
+      "",
+      "## Acceptance criteria",
+      "",
+      "1. First thing works.",
+      "2. Second thing works.",
+      "",
+      "## For the agents",
+      "",
+      "### Checks",
+      "",
+      "- **C1** x. **At the base:** y.",
+      "- **C2** x. **At the base:** y.",
+      "",
+      "### Technical notes",
+      "",
+      `Renders per ${link("L5-L5")}.`,
+      "",
+      `### Verified at ${sha}`,
+      "",
+      "- The list renders as cited.",
+      "",
+    ].join("\n");
+    const filler = "Filler line for size padding 0123456789abcdef.\n".repeat(3000);
+    const variants: Array<{ name: string; text: string; count: number }> = [
+      { name: "lf", text: base, count: 1 },
+      { name: "crlf", text: base.replace(/\n/gu, "\r\n"), count: 1 },
+      { name: "bom", text: `\uFEFF${base}`, count: 1 },
+      {
+        name: "case",
+        text: base
+          .replace("## For the agents", "## FOR THE AGENTS")
+          .replace("### Technical notes", "### Technical Notes")
+          .replace("### Verified at", "### VERIFIED AT"),
+        count: 1,
+      },
+      {
+        name: "spaces",
+        text: base
+          .replace("## For the agents", "##  For the agents")
+          .replace(`### Verified at ${sha}\n`, `### Verified at ${sha}   \n`),
+        count: 1,
+      },
+      {
+        name: "fence",
+        text: base.replace("Renders per", "```\n## Example\n```\n\nRenders per"),
+        count: 1,
+      },
+      {
+        name: "journey",
+        text: base.replace(
+          "### Verified at",
+          `## User journey\n\nWalk ${link("L1-L1")}.\n\n### Verified at`,
+        ),
+        count: 2,
+      },
+      {
+        name: "big",
+        text: base.replace("## For the agents", `${filler}## For the agents`, 1),
+        count: 1,
+      },
+    ];
+    // Each command's own exit status, never a pipeline's: run() captures the
+    // child's status directly. A variant readiness rejects tells nothing, so a
+    // non-ready variant fails the test as a malformed variant.
+    const failures: string[] = [];
+    for (const v of variants) {
+      const path = join(dir, `agree-${v.name}.md`);
+      writeFileSync(path, v.text);
+      const parts = run(RUN, ["ticket-parts", "--final", path]);
+      const cut = run(RUN, ["ticket-cut", path]);
+      const prem = run(RUN, ["premises", repo, path, sha]);
+      const exits = `parts:${parts.code} cut:${cut.code} premises:${prem.code}`;
+      if (parts.code !== 0) {
+        failures.push(`${v.name} [${exits}]: not ready, tells nothing: ${parts.out}${parts.err}`);
+        continue;
+      }
+      if (cut.code !== 0) failures.push(`${v.name} [${exits}]: cut exit ${cut.code}`);
+      if (/technical notes/iu.test(cut.out ?? ""))
+        failures.push(`${v.name} [${exits}]: cut kept the technical notes`);
+      if (/verified at/iu.test(cut.out ?? ""))
+        failures.push(`${v.name} [${exits}]: cut kept the verified facts`);
+      if (!(cut.out ?? "").includes("- **C1** x."))
+        failures.push(`${v.name} [${exits}]: cut dropped the checks`);
+      if (v.name === "journey" && !(cut.out ?? "").includes("## User journey"))
+        failures.push(`${v.name} [${exits}]: cut dropped the journey`);
+      if (v.name === "big" && (cut.out ?? "").length <= 65536)
+        failures.push(`${v.name} [${exits}]: cut output truncated at the pipe buffer`);
+      if (prem.code !== 0) failures.push(`${v.name} [${exits}]: premises exit ${prem.code}`);
+      const summary =
+        (prem.out ?? "").split("\n").find((l) => l.startsWith("PREMISES ")) ?? "(no summary)";
+      if (!summary.includes("result=same") || !summary.includes(`count=${v.count}`))
+        failures.push(`${v.name} [${exits}]: premises says ${summary}`);
+    }
+    expect(failures).toEqual([]);
   });
 });
