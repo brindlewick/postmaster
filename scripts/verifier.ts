@@ -800,12 +800,23 @@ function handoverMtimeMs(path: string): number | null {
   }
 }
 
+/** The file's change stamp: mtime and size, or null when it cannot be read. */
+function fileStamp(path: string): { mtimeMs: number; size: number } | null {
+  try {
+    const st = statSync(path);
+    return { mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
 /** Naps between handover checks: short enough that a small timeout keeps its shape. */
 export const HANDOVER_NAP_SECONDS = 5;
 
 /**
- * True once the worktree holds a file this session wrote. An interactive
- * session has no marker, so the file's arrival is the completion signal. The
+ * True once the worktree holds a file this session wrote, unchanged across one
+ * nap: a report written in pieces must not read half done. An interactive
+ * session has no marker, so the settled file is the completion signal. The
  * clock and the sleep are injected for tests.
  */
 export function waitForFile(
@@ -819,9 +830,17 @@ export function waitForFile(
   nowMs: () => number = Date.now,
 ): boolean {
   const deadline = nowMs() + timeoutSec * 1000;
+  let seen: { mtimeMs: number; size: number } | null = null;
   for (;;) {
-    const written = handoverMtimeMs(join(wt, file));
-    if (written !== null && handoverFresh(written, cutMs)) return true;
+    const stamp = fileStamp(join(wt, file));
+    if (stamp !== null && handoverFresh(stamp.mtimeMs, cutMs)) {
+      if (seen !== null && stamp.mtimeMs === seen.mtimeMs && stamp.size === seen.size) {
+        return true;
+      }
+      seen = stamp;
+    } else {
+      seen = null;
+    }
     const left = deadline - nowMs();
     if (left <= 0) return false;
     sleepMs(Math.min(left, HANDOVER_NAP_SECONDS * 1000));

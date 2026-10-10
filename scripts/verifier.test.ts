@@ -750,7 +750,7 @@ describe("handoverFresh", () => {
 });
 
 describe("waitForHandover", () => {
-  test("a fresh handover already there returns at once, with no sleep", () => {
+  test("a fresh handover already there returns after one settle nap", () => {
     const dir = tempDir();
     try {
       const wt = join(dir, "wt");
@@ -768,7 +768,7 @@ describe("waitForHandover", () => {
           () => 1000,
         ),
       ).toBe(true);
-      expect(naps).toEqual([]);
+      expect(naps).toEqual([5000]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -823,7 +823,7 @@ describe("waitForHandover", () => {
     }
   });
 
-  test("a handover landing mid-wait ends the wait", () => {
+  test("a handover landing mid-wait ends the wait once settled", () => {
     const dir = tempDir();
     try {
       const wt = join(dir, "wt");
@@ -837,12 +837,14 @@ describe("waitForHandover", () => {
         (ms) => {
           naps.push(ms);
           now += ms;
-          writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+          if (!existsSync(join(wt, "HANDOVER.md"))) {
+            writeFileSync(join(wt, "HANDOVER.md"), "hi\n");
+          }
         },
         () => now,
       );
       expect(ok).toBe(true);
-      expect(naps).toEqual([5000]);
+      expect(naps).toEqual([5000, 5000]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1932,7 +1934,7 @@ describe("upkeep unasked rule", () => {
 });
 
 describe("waitForFile", () => {
-  test("a fresh file already there returns at once, with no sleep", () => {
+  test("a fresh file already there returns after one settle nap", () => {
     const dir = tempDir();
     try {
       const wt = join(dir, "wt");
@@ -1951,7 +1953,65 @@ describe("waitForFile", () => {
           () => 1000,
         ),
       ).toBe(true);
-      expect(naps).toEqual([]);
+      expect(naps).toEqual([5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file still being written waits for it to settle", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      let writes = 0;
+      const ok = waitForFile(
+        wt,
+        "UPKEEP.md",
+        0,
+        60,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          writes++;
+          // Grows every nap but the third: two writes may share an mtime,
+          // so the growing size is what keeps the wait from settling early.
+          if (writes <= 2) writeFileSync(join(wt, "UPKEEP.md"), `part ${writes}\n${"x".repeat(writes)}`);
+        },
+        () => now,
+      );
+      expect(ok).toBe(true);
+      expect(naps).toEqual([5000, 5000, 5000]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file that never settles gives up at the timeout", () => {
+    const dir = tempDir();
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(wt, { recursive: true });
+      const naps: number[] = [];
+      let now = 0;
+      let writes = 0;
+      const ok = waitForFile(
+        wt,
+        "UPKEEP.md",
+        0,
+        12,
+        (ms) => {
+          naps.push(ms);
+          now += ms;
+          writes++;
+          writeFileSync(join(wt, "UPKEEP.md"), `${"x".repeat(writes)}\n`);
+        },
+        () => now,
+      );
+      expect(ok).toBe(false);
+      expect(naps).toEqual([5000, 5000, 2000]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
