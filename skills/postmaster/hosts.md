@@ -38,6 +38,7 @@ way on every row, only less visibly on the last.
 | send it a message | `herdr agent prompt` | paste the text bracketed, then Enter as a key of its own | resume its thread with the message as the prompt |
 | wait for it to settle | the same call, `herdr agent prompt --wait`: idle, done or blocked | its screen unchanged for 10 seconds | its marker lands |
 | read what it said | `herdr agent read --source recent-unwrapped` | `tmux capture-pane -p -J` | its final message (`harnesses.md`) |
+| close one spawned session | the recorded tab dies with its agent | the recorded window dies | nothing recorded: nothing closes |
 | close a worktree's space | `herdr workspace close`, before the worktree is removed | kill the worktree's windows | nothing to close |
 
 ```sh
@@ -61,6 +62,7 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host send <handle> <file> [--wait [<seconds>]]
 <tool>/scripts/run host wait <handle> [<seconds>]
 <tool>/scripts/run host read <handle> [<lines>]
+<tool>/scripts/run host close-handle <handle>
 ```
 
 **Send and wait as one command, `send --wait`.** On Herdr a separate `wait` straight after a
@@ -73,6 +75,12 @@ takes input and drop what it is sent, so read the session before sending the mes
 first start to ask something, such as whether to trust the folder: the user answers it in the
 pane. A booking clerk is spawned the same way (`postmaster.md`, Stage B).
 `spawn`, `send`, `wait` and `read` exit 3 on `none`.
+`run host close-handle <handle>` closes every session recorded under the handle, and only
+those: on Herdr the tabs the placement records name for the handle, on tmux the windows
+carrying its handle tag. A live session with no record is refused, and an unknown handle reports `no
+session`, exit 0. A booking clerk session closes this way once its ticket is marked ready: the
+mark arms a closer that waits for the clerk's turn to end, then closes its tab and drops its
+record. A session spawned from before this form exists has no record and closes by hand.
 
 ## Run, on every host
 
@@ -175,15 +183,16 @@ onto the fragment it supersedes.
   `<tool>/scripts/run host`'s runner: to add a name or a family, extend that list and the
   matching test beside the script. Never widen it to the whole `CLAUDE_CODE_*` prefix and
   never replace it with an allow-list; both would drop configuration a launch needs.
-- **The ticket belongs to the run's space; a launch label carries only launch identity.**
-  `<tool>/scripts/run host name <dispatch>` prints the ticket number and title for the run level.
+- **The ticket belongs to the run's entry; a launch label carries only launch identity.**
+  `<tool>/scripts/run host name <dispatch>` prints the ticket number and the start of its title
+  for the run level, in 30 characters.
   Its launch forms build labels from the run's recorded config: `coachman · <model> · leg <n>`,
   `<lane> · workhorse · <model>`, or `<lane> · <lens> review · <model> · r<n>`, and
   `role <text...>` names any other launch by its role alone. A model shows as the basename
   after its last `/`, so a provider prefix never pushes the round past the ellipsis. A lane
   or role comes first so it remains visible on a narrow sidebar. `postmaster` is the
   project-level interactive role. `run host run --under <dispatch>` puts the ticket on the
-  synthesis worktree space and every launch label on its tab or window, pane title, and
+  run tab and every launch label on its pane or window, pane title, and
   harness thread name (`POSTMASTER_LAUNCH_NAME`, `harnesses.md`). A title can contain shell
   syntax, so take every value from `run host name`; never type it into a shell.
 - **The pane shows the stream, not the JSON**: `<tool>/scripts/run view-stream` renders each event
@@ -196,10 +205,15 @@ onto the fragment it supersedes.
   never runs from inside that worktree, which would stop the caller too. `run host close
   <worktree>` refuses while one runs there, after waiting 15 seconds for one that is just ending.
 - `run host stop-run <dispatch>` and `run host close-run <dispatch>` cover the synthesis worktree,
-  workhorse worktrees in the run config, and reviewer scratches in its round records and action
-  log, including scratch clones that Git does not list as worktrees, plus any pane or window
-  still tagged for the run. Either exits 2 when the run's records cannot be read; a round
+  workhorse copies in the run config, and reviewer scratches in its round records and action
+  log, including workhorse and scratch clones that Git does not list as worktrees, plus any pane
+  or window still tagged for the run. Either exits 2 when the run's records cannot be read; a round
   record or action-log line it can read but not use is named in the refusal.
+- On a fixture copy (`run fixture new`), which exists for one run, the run's entries include the
+  copy's own space with its postmaster's and watcher's tabs: the first launch marks that space
+  opened, `stop-run` stops the copy's root launches, and `close-run` closes the space with the
+  run's. The project's own watcher is told apart from the copy's by the checkout recorded at
+  launch, never by a label, and stays.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `run host`
   prints `host=none` rather than where it would have been.
@@ -207,41 +221,45 @@ onto the fragment it supersedes.
 ## herdr
 
 - **Placement.** Every run launch uses `run host run --under <dispatch>`, which reads the ticket name and synthesis
-  worktree from the waybill. `herdr worktree open --workspace <repository's space> --path
-  <synthesis worktree> --label <ticket>` opens the run's space. Every launch gets a tab
-  in the same space, with its own checkout as the tab's working directory, the first one
-  included: it closes the run space's root tab once its own tab exists.
-  That includes reviewer scratches: a clone is never opened as a separate workspace. A
-  failure before the launch lands rolls back instead — the root tab
-  while the launch tab does not exist yet, the launch tab after — so a failed
-  placement leaves nothing a later close could refuse. A run launch without `--under` is refused
-  instead of opening a top-level space.
-- **The tree** is project space → ticket-labeled run space → live launch tabs. The project space holds
-  the postmaster, the synthesis worktree's space holds all coachman legs, workhorses and review
-  launches for that ticket, and each launch's label starts with its role and lane. The synthesis
-  worktree space has no spare shell tab: the first launch closes its root tab once its own
-  tab exists, and each later tab is opened for a launch. When its marker lands, a launch tab
-  closes after the settle delay; a user split stays open with the user's pane. The project
+  worktree from the waybill. The run is one tab in the repository's space, found through
+  `herdr worktree list --cwd <synthesis worktree>` and its `source_workspace_id`; the run's
+  first launch opens the tab, labelled with the ticket number and the start of its title in
+  30 characters, and every launch splits a pane off it, with its own checkout as the pane's
+  working directory. That includes reviewer scratches: a clone is never opened as a separate
+  workspace. The tab's first pane shows the run's state while no lane runs — the ticket, the
+  stage, what the run waits for, read from the run's records by `run host run-state` — and
+  keeps the tab listed between launches. A failure before the launch lands rolls back
+  instead — the run tab while the launch pane does not exist yet, the launch pane after —
+  so a failed placement leaves nothing a later close could refuse. A run launch without
+  `--under` is refused instead of opening a top-level space.
+- **The tree** is project space → ticket-labeled run tab → live launch panes. The project space holds
+  the postmaster and the run tab; the run tab holds all coachman legs, workhorses and review
+  launches for that ticket, and each launch's label starts with its role and lane. When its
+  marker lands, a launch pane closes after the settle delay and the tab stays for the rest;
+  a user split stays open with the user's pane. The project
   space keeps its shell tab:
   Herdr closes a workspace with its last tab, and refuses the close once a worktree nests under
-  it, so run host never closes it. The tabs are panes under the run; Herdr 0.9.1 cannot nest one
+  it, so run host never closes it. The panes are entries under the run; Herdr 0.9.1 cannot nest one
   agent under another.
 - **Ownership.** `run host` marks what it opens with Herdr metadata tokens: a space
-  `postmaster=opened`, a pane `postmaster=launch`. It remembers each launch tab in the host state.
-  `run host close <worktree>` closes tabs it opened for that checkout, then closes a space only
+  `postmaster=opened`, a pane `postmaster=launch`. It remembers each launch pane in the host state,
+  and each run's tab beside them. `run host close <worktree>` closes panes it opened for that
+  checkout, then closes a space only
   when that space belongs to the checkout, carries the ownership token, every pane in it does,
-  and nothing registered runs there. A tab closes only when every pane in it
-  carries the launch token: a split tab keeps the user's pane and stays open,
+  and nothing registered runs there. A tab closes only when it holds the recorded pane alone
+  and every pane in it carries the launch token: a split tab keeps the user's pane and stays open,
   named in the refusal, and so does a tab whose pane list cannot place every
   row. A row counts as placed only when its tab_id is a string of the shape
   Herdr sends (`w…:t…`); a missing, null or otherwise malformed tab_id is
-  unattributable, and one unattributable sibling refuses the close. Where the
+  unattributable, and one unattributable sibling refuses the close. A shared run tab stays open
+  by design with only the recorded pane closed. Where the
   recorded pane itself carries no attributable tab, only that pane closes,
-  never the tab. Closing a reviewer scratch therefore removes its tabs
-  without closing the run space; when they are its last tabs Herdr destroys the tabless space
-  with them. It never closes a repository's own space, a scratch clone's aside, never uses
-  `workspace close --group`, and never runs `herdr worktree remove`, which deletes the checkout.
-  Close a space before removing its worktree.
+  never the tab. Closing a reviewer scratch therefore removes its panes
+  without closing the run tab. `run host close-run` closes every launch pane and then the run
+  tab itself, while every pane in it is run host's own; a user pane inside keeps it open,
+  named in the refusal. It never closes a repository's own space, a scratch clone's or a fixture copy's
+  aside, never uses `workspace close --group`, and never runs `herdr worktree remove`, which
+  deletes the checkout. Close a space before removing its worktree.
 - **State.** The pane reports its launch `working` as it starts, under the agent label
   `headless`, and releases it (`pane release-agent`, same label) when the launch exits. Left to
   itself Herdr shows a headless harness as idle. A closing `idle` report does not work: Herdr
@@ -287,7 +305,8 @@ with `herdr agent start`. It is a pane whose agent `run host` reports. So when i
 - `run host close <worktree>` closes only the recorded pane IDs run host opened for that worktree
   once no launch runs there. A split window stays open with its other panes and the close
   reports the refusal (exit 2); an unrecorded pane is never selected by its window name or
-  other text.
+  other text. `run host close-handle <handle>` closes the window carrying that handle's tag,
+  and refuses a window merely named for it.
 - Sending: `tmux load-buffer` from the file, `tmux paste-buffer -p` so an application that asked
   for bracketed paste gets it, then `tmux send-keys Enter` as a key of its own. Settled means
   the screen has not changed for 10 seconds (`POSTMASTER_HOST_QUIET`).
@@ -317,13 +336,16 @@ with `herdr agent start`. It is a pane whose agent `run host` reports. So when i
 The tests beside `<tool>/scripts/run host` run every form against stub `herdr` and `tmux` on a PATH that
 holds nothing else, and never reaches a live server. It also checks the labels: each kind of
 launch (a coachman leg, a workhorse, each review lens with its round, the postmaster) leads
-with its role and holds no part of the ticket title, and the run's level carries the ticket.
+with its role and holds no part of the ticket title, and the run's level carries the ticket
+number and the start of its title, in 30 characters.
 Where a working systemd user scope exists, it also checks that a bounded fork and allocation
 launch are stopped at their caps while a healthy launch completes. Without that backend it
 checks the uncapped notice and successful launch.
 `<tool>/scripts/run host --live-test` runs the
 ticket's controls against the hosts on this machine, in a scratch repository it creates: a
-postmaster using the project's first tab; a coachman in a ticket-labeled run space with no spare
-shell tab; a workhorse and style, bug, and security launches under that run, including a security
-clone whose tab closes without closing the run space; then the same launch with no host and on
-tmux. It opens only its own spaces and tmux session, and closes them.
+postmaster using the project's first tab; run launches sharing one ticket-labeled tab in the
+project's space, with a state pane that outlives them and a close-run that takes the tab;
+a workhorse and style, bug, and security launches under that run, including a security
+clone whose pane closes without closing the run tab; a spawned session that `close-handle`
+closes from its placement record, and the handle spawns again; then the same launch with no
+host and on tmux. It opens only its own spaces and tmux session, and closes them.

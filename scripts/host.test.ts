@@ -21,7 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runControls, waitFor } from "./host-self-test.ts";
-import { runWorktreePaths } from "./host.ts";
+import { runTabLockOwnerAlive, runWorktreePaths } from "./host.ts";
 import { bootId, processStart, processState } from "./lib/processes.ts";
 import { launchRound, type StepChild, type StepDeps } from "./review-round.ts";
 
@@ -31,7 +31,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "launch labels and run identity", count: 31 },
   { name: "name: from the waybill, so no title is typed into a shell", count: 5 },
   { name: "run, no host: headless launch", count: 16 },
-  { name: "a run launch without a named run space is refused", count: 1 },
+  { name: "a run launch without a named run tab is refused", count: 1 },
   { name: "stop: owned process trees and refusal controls", count: 5 },
   { name: "stop: registry identity and process membership", count: 13 },
   { name: "run, Herdr (stub): pane placement and environment handover", count: 16 },
@@ -51,8 +51,10 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "review round 2 fixes, tmux (stub)", count: 1 },
   { name: "review round 4 fixes, Herdr (stub)", count: 16 },
   { name: "review round 4 fixes, tmux (stub)", count: 11 },
+  { name: "374 review round 1 fixes, Herdr (stub)", count: 8 },
   { name: "teardown reads only the round records", count: 16 },
   { name: "interactive sessions", count: 15 },
+  { name: "clerk close", count: 6 },
   { name: "run role: the explicit host role", count: 2 },
   { name: "leg attempt controls", count: 89 },
   {
@@ -1171,6 +1173,74 @@ test("close-run teardown finds reviewer worktrees from rows the launch wrote", (
     for (const lens of ["style", "bug", "security"]) {
       expect(paths).toContain(join(repo, ".worktrees", `T-9-rev-${lens}-luna`));
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run-state strips control characters from the ticket title", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runstate-")));
+  try {
+    const dispatch = join(dir, "dispatch");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Dispatch\nname: #1, Pro\x1b]0;spoofed\x07\x1b[2J title\nsynthesis worktree: /nowhere\n",
+    );
+    writeFileSync(join(dispatch, "manifest.json"), '{"stage":"review","leg":2,"lanes":{}}\n');
+    const result = spawnSync(join(import.meta.dir, "run"), ["host", "run-state", dispatch], {
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    const first = result.stdout.split("\n")[0] ?? "";
+    expect(first).not.toContain("\x1b");
+    expect(first).not.toContain("\x07");
+    expect(first).toContain("#1, Pro");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run-state reports an abandoned run as complete, not unknown", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runstate-")));
+  try {
+    const dispatch = join(dir, "dispatch");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Dispatch\nname: #1, Probe\nsynthesis worktree: /nowhere\n",
+    );
+    writeFileSync(join(dispatch, "manifest.json"), '{"stage":"abandoned","leg":2,"lanes":{}}\n');
+    const result = spawnSync(join(import.meta.dir, "run"), ["host", "run-state", dispatch], {
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("nothing — the run is complete");
+    expect(result.stdout).not.toContain("unknown — the run's records name no stage");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run-tab lock reads live only for its own started owner", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runlock-")));
+  try {
+    const lock = join(dir, ".lock");
+    mkdirSync(lock);
+    const start = processStart(process.pid);
+    expect(start).not.toBeNull();
+    writeFileSync(join(lock, "owner"), `${process.pid}\n${start ?? ""}\n`);
+    expect(runTabLockOwnerAlive(lock)).toBe(true);
+    const dead = spawnSync("true");
+    const deadPid = dead.pid ?? 0;
+    expect(deadPid).toBeGreaterThan(0);
+    expect(dead.status).toBe(0);
+    writeFileSync(join(lock, "owner"), `${deadPid}\nnot a start time\n`);
+    expect(runTabLockOwnerAlive(lock)).toBe(false);
+    writeFileSync(join(lock, "owner"), "not a pid\n");
+    expect(runTabLockOwnerAlive(lock)).toBe(false);
+    unlinkSync(join(lock, "owner"));
+    expect(runTabLockOwnerAlive(lock)).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

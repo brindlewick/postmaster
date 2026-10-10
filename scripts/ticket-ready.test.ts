@@ -431,6 +431,42 @@ describe("a tracker of kind other", () => {
     expect(ready(["pending", repo]).out.split("\n")).toContain("EXT-1");
   });
 
+  test("a queue write that fails arms no clerk close", () => {
+    const a = join(tmp, "a.md");
+    const clerks = join(repo, ".postmaster", "runs", "postmaster", "clerks");
+    mkdirSync(clerks, { recursive: true });
+    writeFileSync(
+      join(clerks, "EXT-ARM.json"),
+      `${JSON.stringify({ ticket: "#EXT-ARM, x", brief: join(repo, "b.md"), handle: "clerk-arm", opened: "2026-10-09T00:00:00.000Z" })}\n`,
+    );
+    const readyDir = join(repo, ".postmaster", "runs", "postmaster", "ready");
+    mkdirSync(readyDir, { recursive: true });
+    chmodSync(readyDir, 0o555);
+    try {
+      const r = ready([
+        "mark",
+        "--body",
+        a,
+        "--labels",
+        "ready",
+        "--repo",
+        repo,
+        "--id",
+        "EXT-ARM",
+      ]);
+      expect(r.code).not.toBe(0);
+      expect(r.out).toContain(".ready");
+      expect(r.out).not.toContain("closes when its turn ends");
+      const record = JSON.parse(readFileSync(join(clerks, "EXT-ARM.json"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      expect("closing" in record).toBe(false);
+    } finally {
+      chmodSync(readyDir, 0o755);
+    }
+  });
+
   test("a body changed after marking refuses until marked again", () => {
     const f = join(tmp, "bind-other.md");
     writeFileSync(f, readFileSync(join(tmp, "a.md"), "utf8"));

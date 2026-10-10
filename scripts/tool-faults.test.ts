@@ -416,7 +416,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     run("chmod", ["+x", stubGh]);
 
     const db = (access: string, ...rest: string[]): void => {
-      const issues: Record<string, any> = {};
+      const issues: Record<
+        string,
+        { state: string; title: string; body: string; comments: unknown[] }
+      > = {};
       for (let i = 0; i < rest.length; i += 4) {
         issues[rest[i]!] = {
           state: rest[i + 1],
@@ -559,10 +562,12 @@ if (a[0] === "api" && a[1] === "graphql") {
 
     const stateOf = (d: string, id: string): string => {
       try {
-        const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8"));
+        const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8")) as {
+          faults?: Array<{ id?: unknown; state?: unknown }>;
+        };
         return (st.faults || [])
-          .filter((x: any) => x.id === id)
-          .map((x: any) => x.state)
+          .filter((x) => x.id === id)
+          .map((x) => x.state)
           .join(" ");
       } catch {
         return "";
@@ -570,8 +575,10 @@ if (a[0] === "api" && a[1] === "graphql") {
     };
 
     const draftOf = (d: string, id: string): string => {
-      const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8"));
-      const x = (st.faults || []).filter((x: any) => x.id === id).pop();
+      const st = JSON.parse(readFileSync(join(d, "tool-faults.json"), "utf-8")) as {
+        faults?: Array<{ id?: unknown; draft?: string }>;
+      };
+      const x = (st.faults || []).filter((x) => x.id === id).pop() as { draft: string };
       return join(d, x.draft);
     };
 
@@ -877,9 +884,9 @@ if (a[0] === "api" && a[1] === "graphql") {
       const bLine = lineOf(out, B);
       check(
         "a ticket holding the id in its title or its body is known; one only like it is not; a draft already shown is asked",
-        / known #57 \(open\)$/u.test(aLine) &&
+        aLine.endsWith(" known #57 (open)") &&
           / asked, like #57 {2}tool-faults\//u.test(cLine) &&
-          / known #58 \(open\)$/u.test(d1Line) &&
+          d1Line.endsWith(" known #58 (open)") &&
           / asked {2}tool-faults\//u.test(bLine),
         out,
       );
@@ -1019,7 +1026,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       const cLine = lineOf(out, C);
       check(
         "in a later run, a fault a comment names on any ticket is known there",
-        / known #12 \(closed\)$/u.test(cLine),
+        cLine.endsWith(" known #12 (closed)"),
         out,
       );
     }

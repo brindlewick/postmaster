@@ -152,8 +152,8 @@ const RANK: Record<string, number> = {
 function loadText(path: string): string {
   try {
     return readFileSync(path, "utf8").replace(/^\ufeff/u, "");
-  } catch (e: any) {
-    dieT(`cannot read ${path}: ${e?.message ?? e}`);
+  } catch (e) {
+    dieT(`cannot read ${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -287,7 +287,7 @@ function hasWords(lines: Array<[string, boolean]>): boolean {
 
 function prose(lines: Array<[string, boolean]>): string {
   return lines
-    .filter(([_, code]) => !code)
+    .filter(([, code]) => !code)
     .map(([t]) => t)
     .join("\n")
     .replace(SPAN, " ");
@@ -530,7 +530,7 @@ function splice(baseText: string, sectionsText: string, _turnpikesPath: string):
     } else {
       const before = out
         .map((s, k) => [k, RANK[s[0] ?? ""] ?? rank] as const)
-        .filter(([_, r]) => r < rank);
+        .filter(([, r]) => r < rank);
       if (before.length > 0) {
         at = before[before.length - 1]?.[0] + 1;
         while (at < out.length && RANK[out[at]?.[0] ?? ""] === undefined) at++;

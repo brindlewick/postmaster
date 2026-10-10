@@ -101,6 +101,7 @@ import { beside, scriptsDir } from "./lib/paths.ts";
 import { pinnedCommand, runPinned } from "./lib/pinned.ts";
 import { die, run } from "./lib/proc.ts";
 import { PY_M_END, PY_M_START } from "./lib/text.ts";
+import { thrownCode, thrownDetail } from "./lib/thrown.ts";
 
 const USAGE = "usage: run runs-watch <project-run-root> [--timeout <seconds>] | --help";
 
@@ -227,7 +228,19 @@ function pyRepr(v: unknown, lit: PollLiteral = UNKNOWN_LITERAL): string {
   if (typeof v === "bigint") return String(v);
   if (Array.isArray(v)) return `[${v.map((e) => pyRepr(e)).join(", ")}]`;
   if (typeof v === "object" && v !== null) {
-    const o = v as Record<string, any>;
+    const o = v as {
+      year: number;
+      month: number;
+      day: number;
+      hour: number;
+      minute: number;
+      second: number;
+      millisecond: number;
+      microsecond: number;
+      nanosecond: number;
+      epochNanoseconds: bigint | number;
+      epochMilliseconds: number;
+    };
     const ctor = (v as object).constructor?.name;
     if (ctor === "PlainDate") return `datetime.date(${o.year}, ${o.month}, ${o.day})`;
     if (ctor === "PlainTime") {
@@ -240,8 +253,7 @@ function pyRepr(v: unknown, lit: PollLiteral = UNKNOWN_LITERAL): string {
       // An offset datetime: Bun keeps the instant, not the offset, so this is
       // the UTC form where Python would keep the original offset.
       const ns = o.epochNanoseconds;
-      const msNum =
-        typeof ns === "bigint" ? Number(ns / 1000000n) : (o.epochMilliseconds as number);
+      const msNum = typeof ns === "bigint" ? Number(ns / 1000000n) : o.epochMilliseconds;
       const us = typeof ns === "bigint" ? Number((ns / 1000n) % 1000000n) : 0;
       const d = new Date(msNum);
       return `datetime.datetime(${d.getUTCFullYear()}, ${d.getUTCMonth() + 1}, ${d.getUTCDate()}, ${d.getUTCHours()}, ${d.getUTCMinutes()}${d.getUTCSeconds() !== 0 || us !== 0 ? `, ${d.getUTCSeconds()}${us !== 0 ? `, ${us}` : ""}` : ""}, tzinfo=datetime.timezone.utc)`;
@@ -431,14 +443,14 @@ function pollSeconds(configPath: string): number {
   let bytes: Buffer;
   try {
     bytes = readFileSync(configPath);
-  } catch (e: any) {
-    if (e?.code === "ENOENT") {
+  } catch (e) {
+    if (thrownCode(e) === "ENOENT") {
       return fallback(
         `runs-watch: no config at ${configPath}; the poll interval is the default, 120s`,
       );
     }
     return fallback(
-      `runs-watch: cannot read ${configPath} (${e?.message ?? e}); the poll interval is the default, 120s`,
+      `runs-watch: cannot read ${configPath} (${thrownDetail(e)}); the poll interval is the default, 120s`,
     );
   }
   // A byte-order mark is not valid TOML to tomllib (Bun's parser and the
@@ -451,17 +463,17 @@ function pollSeconds(configPath: string): number {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (e: any) {
+  } catch (e) {
     return fallback(
-      `runs-watch: cannot read ${configPath} (${e?.message ?? e}); the poll interval is the default, 120s`,
+      `runs-watch: cannot read ${configPath} (${thrownDetail(e)}); the poll interval is the default, 120s`,
     );
   }
   let cfg: Record<string, unknown>;
   try {
     cfg = Bun.TOML.parse(text);
-  } catch (e: any) {
+  } catch (e) {
     return fallback(
-      `runs-watch: cannot read ${configPath} (${e?.message ?? e}); the poll interval is the default, 120s`,
+      `runs-watch: cannot read ${configPath} (${thrownDetail(e)}); the poll interval is the default, 120s`,
     );
   }
   const pm: unknown = "postmaster" in cfg ? cfg.postmaster : {};
@@ -584,8 +596,8 @@ function tryReadHeld(pmDir: string): string | null {
   let names: string[];
   try {
     names = readdirSync(pmDir);
-  } catch (e: any) {
-    if (e?.code === "ENOENT") {
+  } catch (e) {
+    if (thrownCode(e) === "ENOENT") {
       let link = false;
       try {
         lstatSync(pmDir);
@@ -597,7 +609,7 @@ function tryReadHeld(pmDir: string): string | null {
       else return "";
       return null;
     }
-    console.error(`runs-watch: cannot read ${pmDir} (${e?.message ?? e})`);
+    console.error(`runs-watch: cannot read ${pmDir} (${thrownDetail(e)})`);
     return null;
   }
   if (!names.includes("held")) return "";
@@ -614,8 +626,8 @@ function tryReadHeld(pmDir: string): string | null {
   }
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(p));
-  } catch (e: any) {
-    console.error(`runs-watch: cannot read ${p} (${e?.message ?? e})`);
+  } catch (e) {
+    console.error(`runs-watch: cannot read ${p} (${thrownDetail(e)})`);
     return null;
   }
 }

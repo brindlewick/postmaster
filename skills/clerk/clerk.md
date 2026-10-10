@@ -72,6 +72,12 @@ the stated behavior, or a check cannot tell the fix from a workaround, change th
 the user what changed and why. The user reviews the plain part once; do not ask them to review the
 code details separately.
 
+Where a criterion drives a surface that has a verifier, write its check through that verifier:
+name the verifier and the feature page it uses. The brief's Checks and verifiers section names the
+project's verifiers and their feature pages. Run the check at the base through the verifier, and
+put what it showed after **At the base** with the proof file named. A feature with no page yet is
+driven through the verifier's start and drive steps all the same, and the run adds its page.
+
 ### Show the draft and work through the user's feedback
 
 Tell the user in two or three plain sentences what the ticket asks for. List each decision you
@@ -119,7 +125,8 @@ which records the sign-off and queues the ticket the same way. Pass `--labels` o
 label, each flag one whole name; a lone flag with a comma is refused as ambiguous.
 
 Tell the user the ticket is ready and the postmaster will pick it up when a run slot is free. They
-do not need to ask the postmaster again.
+do not need to ask the postmaster again. The mark closes this session once your turn ends, so say
+goodbye briefly and start nothing new: the tab closes itself.
 
 ## Safety
 
