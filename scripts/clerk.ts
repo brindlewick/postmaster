@@ -100,9 +100,11 @@ function discoveredGate(top: string): string {
   return "";
 }
 
-// A cited command, quoted per element so the clerk can re-run it as written.
+// A cited command, quoted per element so the clerk can re-run it as written:
+// absolute, since the clerk runs in the target repo, where a bare scripts/run
+// would miss or hit the target's own script of that name.
 function cite(args: string[]): string {
-  return ["scripts/run", ...args].map((a) => shlexQuote(a)).join(" ");
+  return [join(HERE, "run"), ...args].map((a) => shlexQuote(a)).join(" ");
 }
 
 function trackerKind(repo: string): string {

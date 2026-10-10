@@ -177,6 +177,7 @@ describe("brief", () => {
     expect(r.code).toBe(0);
     const brief = readFileSync(join(sub, ".postmaster", "clerk", `${id}.brief.md`), "utf8");
     expect(brief).toContain("## Checks and verifiers");
+    expect(brief).toContain(SELF);
     expect(brief).toContain("gate\tdefault:gate\tnpm run check");
     expect(brief).toContain("verify-app");
     expect(brief).toContain("command line");
