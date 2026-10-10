@@ -942,9 +942,10 @@ export function ticketNotesVerb(d: string): Outcome {
   }
   const r = rec as Record<string, unknown>;
   const top = r.ticket_notes;
-  if (typeof top === "string" && top !== "") {
+  if (top !== undefined) {
     if (top !== "given" && top !== "held-back") {
-      return fail(`run-meta: ${runJson} records ticket_notes ${top}, not given or held-back\n`);
+      const shown = typeof top === "string" ? top : JSON.stringify(top);
+      return fail(`run-meta: ${runJson} records ticket_notes ${shown}, not given or held-back\n`);
     }
     const source =
       typeof r.ticket_notes_source === "string" && r.ticket_notes_source !== ""

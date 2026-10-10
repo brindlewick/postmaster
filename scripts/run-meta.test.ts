@@ -2331,6 +2331,29 @@ describe("dispatch mode", () => {
     });
   });
 
+  test("a defined top-level ticket_notes outside the two is refused, and reads nothing from the config", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const tops: Array<{ name: string; top: unknown }> = [
+        { name: "empty", top: "" },
+        { name: "null", top: null },
+        { name: "bogus", top: "sometimes" },
+        { name: "number", top: 5 },
+      ];
+      for (const c of tops) {
+        const dispatch = join(tmp, c.name);
+        mkdirSync(dispatch, { recursive: true });
+        writeFileSync(
+          join(dispatch, "run.json"),
+          JSON.stringify({ ticket_notes: c.top, config: { team: { ticket_notes: "held-back" } } }),
+        );
+        const v = run(wrapper, ["run-meta", "ticket-notes", dispatch]);
+        expect(v.code).toBe(1);
+        expect(v.out + v.err).toContain("not given or held-back");
+      }
+    });
+  });
+
   test("held-back is recorded in the config, and the verb prints the three", () => {
     withTempDir((raw) => {
       const tmp = realpathSync(raw);
