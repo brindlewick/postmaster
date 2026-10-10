@@ -1978,7 +1978,8 @@ describe("waitForFile", () => {
           writes++;
           // Grows every nap but the third: two writes may share an mtime,
           // so the growing size is what keeps the wait from settling early.
-          if (writes <= 2) writeFileSync(join(wt, "UPKEEP.md"), `part ${writes}\n${"x".repeat(writes)}`);
+          if (writes <= 2)
+            writeFileSync(join(wt, "UPKEEP.md"), `part ${writes}\n${"x".repeat(writes)}`);
         },
         () => now,
       );
