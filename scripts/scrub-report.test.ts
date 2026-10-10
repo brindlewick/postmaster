@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanupScratch, email, scratchDir } from "./scrub-test-kit.ts";
+import { cleanupScratch, email, scratchDir, token } from "./scrub-test-kit.ts";
 import {
   errorText,
   execReset,
@@ -9,7 +9,9 @@ import {
   isDraftPlace,
   isDraftRecord,
   logFinding,
+  mergeSpans,
   replaceReset,
+  safePath,
   scanReset,
   testReset,
 } from "./scrub-report.ts";
@@ -127,4 +129,66 @@ test("replaceReset replaces from the start on a dirty global regex", () => {
   expect(re.test("a")).toBe(true);
   expect(replaceReset(re, "aa", "b")).toBe("bb");
   expect(re.lastIndex).toBe(0);
+});
+
+test("safePath redacts a token that starts inside an earlier email match", () => {
+  // Review round 14 (bug-83): the email match ends first, so the token
+  // match used to start inside the redacted span and print in the clear.
+  const leaked = `x/bob@corp.${token()}.txt`;
+  const out = safePath(leaked);
+  expect(out).toBe("x/[redacted]");
+  expect(out).not.toContain(token());
+  expect(out).not.toContain("bob@corp");
+});
+
+test("safePath redacts a token nested at the same start as an email match", () => {
+  // Review round 14 (bug-83): same-start nesting already redacted through
+  // the longer match; this locks the order neighbour of the partial case.
+  const nested = `${token()}${email()}`;
+  const out = safePath(nested);
+  expect(out).toBe("[redacted]");
+  expect(out).not.toContain(token());
+  expect(out).not.toContain(email());
+});
+
+test("every message path redacts the overlapping tail", () => {
+  // Review round 14 (bug-83): finding rows, errors and log records all
+  // print through the same redaction, so all three carry the merged span.
+  const leaked = `x/bob@corp.${token()}.txt`;
+  expect(findingRow(leaked, 1, "email")).toBe("x/[redacted]:1: email");
+  const err = errorText("scrub-check", `the path ${leaked} could not be shown`);
+  expect(err).not.toContain(token());
+  expect(err).not.toContain("bob@corp");
+  const { log, restore } = withLog();
+  try {
+    logFinding("email", leaked, 3, "abc");
+    const row = readFileSync(log, "utf8");
+    expect(row).not.toContain(token());
+    expect(row).not.toContain("bob@corp");
+    expect(JSON.parse(row).file).toBe("x/[redacted]");
+  } finally {
+    restore();
+  }
+});
+
+test("mergeSpans joins overlapping, nested, adjacent and identical spans", () => {
+  // Review round 14 (bug-83): the detector never emits touching or
+  // identical spans, so the merge takes them synthetic; disjoint spans
+  // pass through as the negative control.
+  expect(mergeSpans([{ start: 2, end: 13 }, { start: 11, end: 43 }])).toEqual([
+    { start: 2, end: 43 },
+  ]);
+  expect(mergeSpans([{ start: 0, end: 49 }, { start: 0, end: 35 }])).toEqual([
+    { start: 0, end: 49 },
+  ]);
+  expect(mergeSpans([{ start: 0, end: 5 }, { start: 5, end: 10 }])).toEqual([
+    { start: 0, end: 10 },
+  ]);
+  expect(mergeSpans([{ start: 3, end: 9 }, { start: 3, end: 9 }])).toEqual([
+    { start: 3, end: 9 },
+  ]);
+  expect(mergeSpans([{ start: 0, end: 5 }, { start: 10, end: 15 }])).toEqual([
+    { start: 0, end: 5 },
+    { start: 10, end: 15 },
+  ]);
 });

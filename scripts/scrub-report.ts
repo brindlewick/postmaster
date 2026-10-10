@@ -75,12 +75,29 @@ export function fail(prefix: string, message: string): never {
 
 // --- redaction -------------------------------------------------------------------
 
+export function mergeSpans(spans: Array<{ start: number; end: number }>): Array<{
+  start: number;
+  end: number;
+}> {
+  // Review round 14 (bug-83): overlapping detector matches merge into one
+  // redacted span, as replaceFindings does, so no tail prints in the clear.
+  const ordered = spans
+    .filter((span) => span.end > span.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const span of ordered) {
+    const last = merged.at(-1);
+    if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+    else merged.push({ start: span.start, end: span.end });
+  }
+  return merged;
+}
+
 export function safePath(path: string): string {
-  const matches = detectLine(path).sort((a, b) => a.start - b.start || b.end - a.end);
+  const matches = mergeSpans(detectLine(path));
   let out = "";
   let cursor = 0;
   for (const f of matches) {
-    if (f.start < cursor) continue;
     out += path.slice(cursor, f.start) + "[redacted]";
     cursor = f.end;
   }
