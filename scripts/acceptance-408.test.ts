@@ -80,15 +80,7 @@ describe("C1: a value the user names wins over the setting", () => {
       const m = machine(tmp, "both", 'ticket_notes = "given"\n');
       const r = run(
         RUN,
-        [
-          "run-meta",
-          m.dispatch,
-          m.repo,
-          "--mode",
-          "single-thread",
-          "--ticket-notes",
-          "held-back",
-        ],
+        ["run-meta", m.dispatch, m.repo, "--mode", "single-thread", "--ticket-notes", "held-back"],
         { env: m.env },
       );
       expect(r.code).toBe(0);
@@ -206,7 +198,7 @@ describe("C4: the scorer reads a user-named held-back record", () => {
   test("held-back from the user with a postmaster premises line scores its premises item", () => {
     withTempDir((raw) => {
       const tmp = realpathSync(raw);
-      const { dispatch, repo } = userHeldDispatch("post", "held-post", "postmaster");
+      const { dispatch, repo } = userHeldDispatch(tmp, "held-post", "postmaster");
       expect(premisesLine(dispatch, repo)).toMatch(/^ok +premises-order/u);
     });
   });
@@ -214,14 +206,17 @@ describe("C4: the scorer reads a user-named held-back record", () => {
   test("held-back from the user with no premises line fails its premises item", () => {
     withTempDir((raw) => {
       const tmp = realpathSync(raw);
-      const { dispatch, repo } = userHeldDispatch("none", "held-none", null);
+      const { dispatch, repo } = userHeldDispatch(tmp, "held-none", null);
       expect(premisesLine(dispatch, repo)).toMatch(/^FAIL premises-order/u);
     });
   });
 
-  test.skipIf(true)("a fixture run on remove with no key and the user naming held-back scores clean", () => {
-    // Needs a model run from this branch: no key in the config, the user
-    // naming held-back, fixture score exit 0, run.json saying held-back from
-    // user. The postmaster dispatches and scores it at landing.
-  });
+  test.skipIf(true)(
+    "a fixture run on remove with no key and the user naming held-back scores clean",
+    () => {
+      // Needs a model run from this branch: no key in the config, the user
+      // naming held-back, fixture score exit 0, run.json saying held-back from
+      // user. The postmaster dispatches and scores it at landing.
+    },
+  );
 });
