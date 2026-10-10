@@ -534,7 +534,7 @@ async function scanTextBlock(commit: string, place: string, raw: string): Promis
     for (const finding of result.findings)
       rows.push({ commit, path: place, line: i + 1, rule: finding.rule });
   }
-  for (const marker of feed.scanner.flush())
+  for (const _marker of feed.scanner.flush())
     rows.push({ commit, path: place, line: lines.length, rule: "marker" });
   return rows;
 }

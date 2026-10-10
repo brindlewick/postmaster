@@ -440,10 +440,6 @@ test("C4 --files and range scans find private-key body lines, even when changed 
   expect(fileScan.status).toBe(1);
   expect(fileScan.stdout.trim()).toBe("[redacted]:1: token");
 
-  const base = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd: repo,
-    encoding: "utf8",
-  }).stdout.trim();
   writeFileSync(
     path,
     "-----BEGIN RSA PRIV" + "ATE KEY-----\n\n-----END RSA PRIV" + "ATE KEY-----\n",

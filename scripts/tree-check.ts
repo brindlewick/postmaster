@@ -106,7 +106,7 @@ async function scanBlob(
       if (f.rule !== "marker") logFinding(f.rule, path, line, commit);
     }
     for (const f of result.suppressed) logFinding(f.rule, path, line, commit, "marker");
-    for (const marker of result.markers) rows.push({ line, rule: "marker" });
+    for (const _marker of result.markers) rows.push({ line, rule: "marker" });
   }
   if (
     !disabled("encrypted-reasoning") &&
@@ -121,7 +121,7 @@ async function scanBlob(
       logFinding("encrypted-reasoning", path, 1, commit);
     }
   }
-  for (const marker of scanner.flush()) rows.push({ line: line || 1, rule: "marker" });
+  for (const _marker of scanner.flush()) rows.push({ line: line || 1, rule: "marker" });
   const status = await closed;
   if (status !== 0) fail("tree-check", "the tree could not be read");
   return rows;

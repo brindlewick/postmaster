@@ -35,7 +35,6 @@ import {
   fail,
   findingRow,
   logFinding,
-  REASONING_PLACEHOLDER,
   safePath,
 } from "./scrub-report.ts";
 
@@ -148,7 +147,7 @@ async function inspectFile(path: string, report: boolean): Promise<FileScan> {
     const result = scanner.feed(line.number, line.text, { keyBlock: key.flagged });
     if (result.findings.length || result.suppressed.length || result.markers.length)
       changed = changed || result.findings.length > 0 || result.suppressed.length > 0;
-    for (const marker of result.markers) faults.push(`${line.number}: marker`);
+    for (const _marker of result.markers) faults.push(`${line.number}: marker`);
     for (const finding of result.findings) findings.push(`${line.number}: ${finding.rule}`);
     // A valid marker is stripped on copy; when the strip would break a JSON
     // row's syntax the placement is refused instead of publishing a

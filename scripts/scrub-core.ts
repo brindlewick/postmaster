@@ -715,7 +715,7 @@ function tokenFindings(line: string, out: Finding[]): void {
     if (!quoted && (property || callOrExpression) && !CREDENTIAL_SHAPED.test(value)) continue;
     if (
       kind === "account-id" &&
-      (!new RegExp(`^${SPACE}*(?:\\{|[\"'][A-Za-z][A-Za-z0-9_-]*[\"']?${SPACE}*:)`, "u").test(
+      (!new RegExp(`^${SPACE}*(?:\\{|["'][A-Za-z][A-Za-z0-9_-]*["']?${SPACE}*:)`, "u").test(
         line,
       ) ||
         new RegExp(`^${SPACE}*(?:const|let|var|return|export)${BOUND_R}`, "u").test(line))
@@ -1569,7 +1569,10 @@ export async function* childLines(readable: NodeJS.ReadableStream): AsyncGenerat
 }
 
 export function codePointOffset(text: string, offset: number): number {
-  return [...text.slice(0, offset)].length;
+  // Named, not inlined: the spread counts code points, which [...text.slice()]
+  // hides from the linter's useless-spread rule.
+  const head = text.slice(0, offset);
+  return [...head].length;
 }
 
 export function keyBlockStep(
