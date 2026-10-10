@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, writeRepoFile } from "../acceptance-323.ts";
@@ -38,6 +38,34 @@ describe("isFixtureCopy", () => {
     try {
       expect(isFixtureCopy("")).toBe(false);
       expect(isFixtureCopy(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a copy with only the committed marker is one, from its top", () => {
+    const dir = mkdtempSync(join(tmpdir(), "fixture-mark-"));
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, ".postmaster/fixture", "postmaster fixture v1\n");
+      commitAll(repo, "fixture marker");
+      expect(isFixtureCopy(repo)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a copy with only the committed marker is one, from a subdirectory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "fixture-mark-"));
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, ".postmaster/fixture", "postmaster fixture v1\n");
+      commitAll(repo, "fixture marker");
+      const sub = join(repo, "sub");
+      mkdirSync(sub, { recursive: true });
+      expect(isFixtureCopy(sub)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
