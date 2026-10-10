@@ -32,11 +32,7 @@ describe("level3Sections", () => {
       "Done.",
     ];
     const subs = level3Sections(lines, 0);
-    expect(subs.map((s) => s.title)).toEqual([
-      "Checks",
-      "Technical notes",
-      "Verified at abc1234",
-    ]);
+    expect(subs.map((s) => s.title)).toEqual(["Checks", "Technical notes", "Verified at abc1234"]);
     expect(subs.map((s) => [s.at, s.end])).toEqual([
       [0, 4],
       [4, 10],

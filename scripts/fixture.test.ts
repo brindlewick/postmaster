@@ -1711,9 +1711,7 @@ describe("score: premises are checked before workhorse dispatch", () => {
   });
 
   test("held-back with no postmaster premises action fails", () => {
-    const result = checkPremisesOrder(
-      recordOrder("held-missing", [laneDispatch], "held-back"),
-    );
+    const result = checkPremisesOrder(recordOrder("held-missing", [laneDispatch], "held-back"));
     expect(result.ok).toBe(false);
     expect(result.detail).toContain("no postmaster premises action");
   });

@@ -12,12 +12,7 @@
 //   exit 0  the cut ticket is on stdout
 //   exit 1  usage or an unreadable file
 import { readFileSync } from "node:fs";
-import {
-  TECH_NOTES_RE,
-  VERIFIED_RE,
-  agentsIndex,
-  level3Sections,
-} from "./lib/ticket-sections.ts";
+import { TECH_NOTES_RE, VERIFIED_RE, agentsIndex, level3Sections } from "./lib/ticket-sections.ts";
 
 export function cutTicketNotes(text: string): string {
   const lines = text.split("\n");

@@ -958,7 +958,9 @@ export function ticketNotesVerb(d: string): Outcome {
   const v = recorded === "held-back" ? "held-back" : "given";
   const source = typeof recorded === "string" && recorded !== "" ? "setting" : "unrecorded";
   const setting = typeof recorded === "string" && recorded !== "" ? recorded : "unrecorded";
-  return ok(`ticket-notes: ${v}\nticket-notes source: ${source}\nticket-notes setting: ${setting}\n`);
+  return ok(
+    `ticket-notes: ${v}\nticket-notes source: ${source}\nticket-notes setting: ${setting}\n`,
+  );
 }
 
 // check_mode <dispatch>: the waybill's Team section `mode:` line and the record's mode agree.
