@@ -185,12 +185,7 @@ function parseTimeoutText(
   allowZero: boolean,
 ): { ok: true; timeout: number } | { ok: false; error: string } {
   const n = Number(value);
-  if (
-    value === undefined ||
-    !/^[0-9]{1,9}$/u.test(value) ||
-    n < 0 ||
-    (n === 0 && !allowZero)
-  ) {
+  if (value === undefined || !/^[0-9]{1,9}$/u.test(value) || n < 0 || (n === 0 && !allowZero)) {
     return { ok: false, error: `bad timeout: ${value ?? "none"}` };
   }
   return { ok: true, timeout: n };

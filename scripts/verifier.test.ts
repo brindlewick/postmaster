@@ -915,9 +915,7 @@ describe("waitForMarker", () => {
     const seen: number[] = [];
     const settled = waitForMarker(0, (seconds) => {
       seen.push(seconds);
-      return seen.length < 2
-        ? { code: 3, out: "", err: "" }
-        : { code: 1, out: "", err: "broken" };
+      return seen.length < 2 ? { code: 3, out: "", err: "" } : { code: 1, out: "", err: "broken" };
     });
     expect(seen).toEqual([UNLIMITED_WAIT_CHUNK_SECONDS, UNLIMITED_WAIT_CHUNK_SECONDS]);
     expect(settled.code).toBe(1);
@@ -1567,16 +1565,7 @@ describe("check and land args", () => {
   });
 
   test("land takes --word; check refuses it", () => {
-    const word = parseArgs([
-      "land",
-      "/r",
-      "verify-x",
-      "--run",
-      "/d",
-      "--handover",
-      "/h",
-      "--word",
-    ]);
+    const word = parseArgs(["land", "/r", "verify-x", "--run", "/d", "--handover", "/h", "--word"]);
     expect(word).toEqual({
       ok: true,
       req: {
@@ -1591,9 +1580,10 @@ describe("check and land args", () => {
         wordGiven: true,
       },
     });
-    expect(
-      parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--word"]),
-    ).toEqual({ ok: false, error: "unknown flag for check: --word" });
+    expect(parseArgs(["check", "/r", "b", "--run", "/d", "--handover", "/h", "--word"])).toEqual({
+      ok: false,
+      error: "unknown flag for check: --word",
+    });
   });
 
   test("a missing branch, run, hand-over or folder value fails", () => {

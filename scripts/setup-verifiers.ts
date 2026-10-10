@@ -29,10 +29,7 @@
 //           that cannot be detected, or a make call that misused its own command
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  effectiveConfigForProject,
-  globalConfigPath,
-} from "./lib/effective-config.ts";
+import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
 import { isFixtureCopy } from "./lib/fixture-mark.ts";
 import { beside } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
@@ -75,9 +72,7 @@ export interface Parsed {
   dispatch: string;
 }
 
-export type ParseResult =
-  | { ok: true; req: Parsed }
-  | { ok: false; error: string };
+export type ParseResult = { ok: true; req: Parsed } | { ok: false; error: string };
 
 export function parseArgs(argv: string[]): ParseResult {
   const repo = argv[0];
@@ -102,7 +97,8 @@ export function parseArgs(argv: string[]): ParseResult {
     const flag = rest[j] as string;
     if (flag === "--run") {
       const value = rest[j + 1];
-      if (value === undefined) return { ok: false, error: "setup-verifiers needs --run <dispatch>" };
+      if (value === undefined)
+        return { ok: false, error: "setup-verifiers needs --run <dispatch>" };
       dispatch = value;
       j++;
     } else {
@@ -209,7 +205,13 @@ function main(argv: string[]): number {
     console.error(`setup-verifiers: ${join(dispatch, "logs")} cannot be written`);
   }
   const log = join(dispatch, "logs", "setup-verifiers.log");
-  const transcript = (title: string, args: string[], code: number, out: string, err: string): void => {
+  const transcript = (
+    title: string,
+    args: string[],
+    code: number,
+    out: string,
+    err: string,
+  ): void => {
     try {
       appendFileSync(
         log,

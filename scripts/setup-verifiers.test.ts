@@ -70,7 +70,9 @@ describe("timeoutForHost", () => {
 describe("parseMakeOutput", () => {
   test("the branch and hand-over lines parse", () => {
     expect(
-      parseMakeOutput("branch verify-cli\nbase main\nworktree /x\nrole coachman\nhandle h\nprompt /p\nhandover /x/HANDOVER.md\n"),
+      parseMakeOutput(
+        "branch verify-cli\nbase main\nworktree /x\nrole coachman\nhandle h\nprompt /p\nhandover /x/HANDOVER.md\n",
+      ),
     ).toEqual({ branch: "verify-cli", handover: "/x/HANDOVER.md" });
   });
 
