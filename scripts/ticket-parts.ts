@@ -250,6 +250,7 @@ function stripItemHead(item: Item): string {
 // worded otherwise, or not last, is counted, so a mistake adds a warning and never hides one.
 function isFixtureLine(criterion: Item | undefined): boolean {
   if (criterion === undefined) return false;
+  // LOWER: lowered for an ASCII phrase match; a miss only adds a warning
   const text = stripItemHead(criterion).toLowerCase();
   return text.includes("fixture run") && text.includes("scores clean");
 }
