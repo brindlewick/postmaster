@@ -54,7 +54,8 @@ export function readOxConfig(): OxConfig {
 
 /** Effective rule levels as oxlint reports them: allow < warn < deny. */
 export function printConfigRules(): Record<string, string> {
-  const r = run("bunx", ["oxlint", "--print-config"], { cwd: ROOT });
+  const [cmd] = oxlintStep();
+  const r = run(cmd!, ["--print-config"], { cwd: ROOT });
   if (r.code !== 0) throw new Error(`oxlint --print-config: exit ${r.code}: ${r.err.trim()}`);
   const config = JSON.parse(r.out) as { rules: Record<string, string> };
   return config.rules;
