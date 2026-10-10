@@ -28,7 +28,7 @@ import {
   writeScanFixture,
 } from "./acceptance-425.ts";
 
-const EXACT = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/u;
+const EXACT = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/u;
 
 function installTable(): Record<string, unknown> {
   return (readBunfig()["install"] as Record<string, unknown> | undefined) ?? {};
