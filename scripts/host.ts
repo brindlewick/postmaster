@@ -151,16 +151,16 @@ import {
   processIsLive,
   processStart,
   processState,
-  sameBoot,
   processTable as sharedProcessTable,
+  sameBoot,
 } from "./lib/processes.ts";
 import {
   BOUND_L,
   BOUND_R,
-  casefold,
   END_OF_STRING,
   PY_DOT,
   PY_S_CLASS,
+  casefold,
   pySplitLines,
   pyTrim,
   pyWords,
@@ -6742,6 +6742,9 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
       }
       herdrForgetSpace(ws);
     } else if (verdict === "space was not opened by run host") {
+      // The repository's space is shared: run host closes the run tab, never
+      // the space, so a space it did not open is simply not its to sweep.
+      continue;
     } else {
       warn(`${verdict}; left run space ${ws} open`);
       rc = 2;
