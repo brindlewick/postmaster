@@ -20,7 +20,12 @@
 //   exit 1  no config or one that does not parse, team.postmaster missing, or a bad value
 //   exit 2  usage
 import { existsSync, statSync } from "node:fs";
-import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
+import { postmasterProblems } from "./lib/config-check.ts";
+import {
+  effectiveConfigForProject,
+  globalConfigPath,
+  repoTopLevel,
+} from "./lib/effective-config.ts";
 import { readTomlFile } from "./lib/data.ts";
 import { run } from "./lib/proc.ts";
 
@@ -59,13 +64,6 @@ function repoOf(path: string): string {
   // An empty path is unresolvable: git -C "" would silently mean the process cwd.
   if (!path) return "";
   const r = run("git", ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
-  return r.code === 0 ? r.out.trim() : "";
-}
-
-/** The work-tree top level a path is in, or empty when git cannot say. */
-function topLevel(path: string): string {
-  if (!path) return "";
-  const r = run("git", ["-C", path, "rev-parse", "--show-toplevel"]);
   return r.code === 0 ? r.out.trim() : "";
 }
 
@@ -147,7 +145,7 @@ function decide(
   if (target !== "" && isDir(target)) {
     // Settings live at the repository root, whatever subdirectory names the
     // target; a path git cannot place keeps its own .postmaster, as before.
-    const resolved = effectiveConfigForProject(topLevel(target) || target, cfgPath);
+    const resolved = effectiveConfigForProject(repoTopLevel(target) || target, cfgPath);
     if (resolved.notice !== null) notice = `${resolved.notice}\n`;
     if (resolved.config === null || resolved.error !== null) {
       return die1(`${notice}front-door: ${resolved.error ?? "no effective config"}`);
@@ -169,31 +167,14 @@ function decide(
     team !== null && typeof team === "object" && !Array.isArray(team)
       ? (team as Record<string, unknown>).postmaster
       : undefined;
-  if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
-    return die1(`front-door: ${source} has no team.postmaster with a harness and a model`);
+  const pmProblems = postmasterProblems(spec, source);
+  if (pmProblems.length > 0) {
+    return die1(`front-door: ${pmProblems[0]}`);
   }
+  // No problem means both are non-blank strings without control characters.
   const s = spec as Record<string, unknown>;
-  const harness = s.harness;
-  const model = s.model;
-  if (!harness || !model) {
-    return die1(`front-door: ${source} has no team.postmaster with a harness and a model`);
-  }
-  if (typeof harness !== "string" || typeof model !== "string") {
-    return die1(`front-door: ${source} team.postmaster harness and model must be strings`);
-  }
-  if (!harness.trim() || !model.trim()) {
-    return die1(`front-door: ${source} team.postmaster harness and model must not be blank`);
-  }
-  if (
-    [...(harness + model)].some((c) => {
-      const o = c.codePointAt(0) ?? 0;
-      return o < 0x20 || o === 0x7f;
-    })
-  ) {
-    return die1(
-      `front-door: ${source} team.postmaster harness and model must not contain control characters`,
-    );
-  }
+  const harness = s.harness as string;
+  const model = s.model as string;
   const out = route(
     h,
     m,
