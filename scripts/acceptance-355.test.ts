@@ -307,6 +307,7 @@ describe("C3: the brief shows the mark", () => {
       const first = headOf(repo, "HEAD");
       plantSingle(repo, { files: "src/cli.ts", confirmed: first });
       const brief = briefOrThrow(repo, "Use the verifier", dir);
+      // LOWER: lowered for an ASCII word match
       expect(brief.toLowerCase()).not.toContain("stale");
     } finally {
       cleanup(dir);
@@ -329,7 +330,7 @@ describe("C5: the README says setup makes verifiers", () => {
   test("the README counts pstack lines", () => {
     const count = readme()
       .split("\n")
-      .filter((l) => /pstack/i.test(l)).length;
+      .filter((l) => /pstack/iu.test(l)).length;
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
