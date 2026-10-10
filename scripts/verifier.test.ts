@@ -27,7 +27,7 @@ import {
   defaultBase,
   defaultLanding,
   deliverInstructions,
-  detectFolder,
+  detectFolders,
   dirLines,
   failureOutcome,
   featurePages,
@@ -62,6 +62,7 @@ import {
   renderTemplate,
   repoTop,
   roleHarness,
+  scopeVdirs,
   scrubGitEnv,
   sendText,
   sendVerdict,
@@ -73,6 +74,7 @@ import {
   unlistedSentence,
   unrunProject,
   type UpkeepReport,
+  upkeepScope,
   upkeepSendText,
   UPKEEP_HEADLESS_UNASKED,
   verdictUpkeep,
@@ -2046,11 +2048,11 @@ describe("waitForFile", () => {
 });
 
 describe("upkeep scope", () => {
-  test("a feature page is markdown under a features folder, besides its index", () => {
+  test("a feature page is markdown under its verifier's features folder, besides its index", () => {
     expect(isFeaturePage("verify-app", "verify-app/features/a.md")).toBe(true);
-    expect(isFeaturePage("verifier", "verifier/cli/features/a.md")).toBe(true);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/features/a.md")).toBe(true);
     expect(isFeaturePage("verify-app", "verify-app/features/README.md")).toBe(false);
-    expect(isFeaturePage("verifier", "verifier/cli/features/README.md")).toBe(false);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/features/README.md")).toBe(false);
     expect(isFeaturePage("verify-app", "verify-app/README.md")).toBe(false);
     expect(isFeaturePage("verify-app", "verify-app/features/helper.ts")).toBe(false);
     expect(isFeaturePage("verify-app", "other/features/a.md")).toBe(false);
@@ -2060,24 +2062,54 @@ describe("upkeep scope", () => {
 
   test("a nested page counts, as make counts it", () => {
     expect(isFeaturePage("verify-app", "verify-app/features/deep/a.md")).toBe(true);
-    expect(isFeaturePage("verifier", "verifier/cli/features/deep/a.md")).toBe(true);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/features/deep/a.md")).toBe(true);
   });
 
-  test("detectFolder prefers the multi index, then the single front page", () => {
+  test("a features folder below a subdir is no verifier's, and the multi root is none", () => {
+    expect(isFeaturePage("verify-app", "verify-app/notes/features/a.md")).toBe(false);
+    expect(isFeaturePage("verifier/cli", "verifier/cli/notes/features/a.md")).toBe(false);
+    expect(isFeaturePage("verifier", "verifier/cli/features/a.md")).toBe(false);
+  });
+
+  test("detectFolders spans every shape present, the single front page first", () => {
     const dir = tempDir();
     try {
       const repo = join(dir, "app");
       initRepo(repo);
       writeRepoFile(repo, "README.md", "# app\n");
       commitAll(repo, "first");
-      expect(detectFolder(repo, null)).toBe(null);
-      expect(detectFolder(repo, "custom")).toBe("custom");
+      expect(detectFolders(repo, null)).toEqual([]);
+      expect(detectFolders(repo, "custom")).toEqual(["custom"]);
       writeRepoFile(repo, "verify-app/README.md", "# v\n");
       commitAll(repo, "single");
-      expect(detectFolder(repo, null)).toBe("verify-app");
+      expect(detectFolders(repo, null)).toEqual(["verify-app"]);
       writeRepoFile(repo, "verifier/README.md", "- cli\n");
       commitAll(repo, "multi");
-      expect(detectFolder(repo, null)).toBe("verifier");
+      expect(detectFolders(repo, null)).toEqual(["verify-app", "verifier"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("scopeVdirs finds the folder's verifier dirs, and no subdir features", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verify-app/notes/features/stray.md", "# s\n");
+      writeRepoFile(repo, "verifier/README.md", "- cli\n- web\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/a.md", "# a\n");
+      writeRepoFile(repo, "verifier/web/README.md", "# w\n");
+      writeRepoFile(repo, "verifier/web/features/b.md", "# b\n");
+      writeRepoFile(repo, "verifier/empty/README.md", "# e\n");
+      commitAll(repo, "first");
+      expect(scopeVdirs(repo, "verify-app")).toEqual(["verify-app"]);
+      expect(scopeVdirs(repo, "verifier")).toEqual(["verifier/cli", "verifier/web"]);
+      expect(scopeVdirs(repo, "missing")).toEqual([]);
+      expect(scopeVdirs(join(dir, "nowhere"), "verify-app")).toBe(null);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2119,6 +2151,67 @@ describe("upkeep scope", () => {
         "verify-app/features/a.md",
         "verify-app/features/deep/b.md",
       ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("featurePages unites a multi folder's kinds, skipping a stray features dir", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/b.md", "# b\n");
+      writeRepoFile(repo, "verifier/cli/features/a.md", "# a\n");
+      writeRepoFile(repo, "verifier/cli/notes/features/stray.md", "# s\n");
+      commitAll(repo, "first");
+      expect(featurePages(repo, "verifier")).toEqual([
+        "verifier/cli/features/a.md",
+        "verifier/cli/features/b.md",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("upkeepScope spans every detected folder's pages", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/old.md", "# o\n");
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      writeRepoFile(repo, "verifier/cli/features/new.md", "# n\n");
+      commitAll(repo, "first");
+      expect(upkeepScope(repo, null)).toEqual({
+        folders: ["verify-app", "verifier"],
+        pages: ["verifier/cli/features/new.md", "verify-app/features/old.md"],
+      });
+      expect(upkeepScope(repo, "verifier")).toEqual({
+        folders: ["verifier"],
+        pages: ["verifier/cli/features/new.md"],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("upkeepScope refuses a repo with no verifiers, or a folder with no pages", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "README.md", "# app\n");
+      commitAll(repo, "first");
+      expect(() => upkeepScope(repo, null)).toThrow(`no verifiers in ${repo}`);
+      writeRepoFile(repo, "verifier/README.md", "- cli\n");
+      writeRepoFile(repo, "verifier/cli/README.md", "# c\n");
+      commitAll(repo, "index without verifiers");
+      expect(() => upkeepScope(repo, null)).toThrow("no verifiers under verifier in");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2270,7 +2363,7 @@ describe("verdictUpkeep", () => {
   test("a clean report prints only the summary", () => {
     const decided = verdictUpkeep(
       pages,
-      "v",
+      ["v"],
       report({ features: pages.map((page) => ({ page, outcome: "clean" as const })) }),
     );
     expect(decided).toEqual({
@@ -2282,7 +2375,7 @@ describe("verdictUpkeep", () => {
   test("stale, unchecked and unasked print in report order with the summary", () => {
     const decided = verdictUpkeep(
       ["v/features/a.md"],
-      "v",
+      ["v"],
       report({
         features: [{ page: "v/features/a.md", outcome: "changed" }],
         claims: [
@@ -2316,15 +2409,44 @@ describe("verdictUpkeep", () => {
   });
 
   test("no verifier, or one outside the folder, fails", () => {
-    expect(verdictUpkeep(pages, "v", report({ verifiers: [] }))).toEqual({
+    expect(verdictUpkeep(pages, ["v"], report({ verifiers: [] }))).toEqual({
       ok: false,
       error: "the report names no verifier",
     });
     expect(
-      verdictUpkeep(pages, "v", report({ verifiers: [{ name: "cli", folder: "elsewhere" }] })),
+      verdictUpkeep(pages, ["v"], report({ verifiers: [{ name: "cli", folder: "elsewhere" }] })),
     ).toEqual({
       ok: false,
       error: "the report's verifier cli sits outside v: elsewhere",
+    });
+  });
+
+  test("a verifier under any spanned folder counts, outside every folder fails", () => {
+    const both = ["verify-app", "verifier"];
+    const ok = verdictUpkeep(
+      ["verify-app/features/a.md"],
+      both,
+      report({
+        verifiers: [{ name: "cli", folder: "verifier/cli" }],
+        features: [{ page: "verify-app/features/a.md", outcome: "clean" }],
+      }),
+    );
+    expect(ok).toEqual({
+      ok: true,
+      verdict: { lines: ["features driven: 1, stale: 0, unchecked: 0"], stale: 0, unchecked: 0 },
+    });
+    expect(
+      verdictUpkeep(
+        ["verify-app/features/a.md"],
+        both,
+        report({
+          verifiers: [{ name: "cli", folder: "elsewhere" }],
+          features: [{ page: "verify-app/features/a.md", outcome: "clean" }],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report's verifier cli sits outside verify-app, verifier: elsewhere",
     });
   });
 
@@ -2332,14 +2454,14 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({ features: [{ page: "v/features/a.md", outcome: "clean" }] }),
       ),
     ).toEqual({ ok: false, error: "the report names no outcome for v/features/b.md" });
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: [
             { page: "v/features/a.md", outcome: "clean" },
@@ -2358,7 +2480,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: [
             { page: "v/features/a.md", outcome: "changed" },
@@ -2373,7 +2495,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: [
             { page: "v/features/a.md", outcome: "blocked" },
@@ -2399,7 +2521,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: pages.map((page) => ({ page, outcome: "clean" as const })),
           claims: [claim],
@@ -2412,7 +2534,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: pages.map((page) => ({ page, outcome: "clean" as const })),
           claims: [{ ...claim, page: "v/features/c.md" }],
@@ -2427,7 +2549,7 @@ describe("verdictUpkeep", () => {
   test("a mixed page is blocked and lists both claims", () => {
     const decided = verdictUpkeep(
       pages,
-      "v",
+      ["v"],
       report({
         features: [
           { page: "v/features/a.md", outcome: "blocked" },
@@ -2474,7 +2596,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: [
             { page: "v/features/a.md", outcome: "changed" },
@@ -2510,7 +2632,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: [
             { page: "v/features/a.md", outcome: "blocked" },
@@ -2538,7 +2660,7 @@ describe("verdictUpkeep", () => {
     expect(
       verdictUpkeep(
         pages,
-        "v",
+        ["v"],
         report({
           features: [
             { page: "v/features/a.md", outcome: "changed" },

@@ -62,7 +62,7 @@
 //              carrying an Outcome: line, one ## Claim: section per stale or
 //              unchecked claim, and the unasked questions where the pass ran headless
 //   --folder   the verifiers' folder, relative to the repo top (default verify-<slug>;
-//              the pass takes verifier/ when the repo holds its index there)
+//              the pass takes every shape the repo holds: verify-<slug>/, verifier/, or both)
 //   --landing  local or pull-request (default pull-request with an origin remote)
 //   --timeout  seconds to wait for the session (make, upkeep), or to run the project's
 //              checks for (check, land); past it the branch lands nothing and the
@@ -750,41 +750,69 @@ export function branchHasPath(repo: string, branch: string, path: string): boole
 }
 
 /**
- * The verifiers' folder: the explicit one, else verifier/ when the current
- * commit holds its index, else the single verifier's folder when it holds the
- * front page. Null when the commit holds no verifiers either way.
+ * The verifiers' folders: the explicit one alone, else every shape the
+ * current commit holds, the single front page first. A repo that holds both
+ * shapes gets both: preferring one would silently drop the other's suite.
  */
-export function detectFolder(repo: string, explicit: string | null): string | null {
-  if (explicit !== null) return explicit;
-  if (branchHasPath(repo, "HEAD", "verifier/README.md")) return "verifier";
+export function detectFolders(repo: string, explicit: string | null): string[] {
+  if (explicit !== null) return [explicit];
+  const folders: string[] = [];
   const single = verifyDirName(repo);
-  if (branchHasPath(repo, "HEAD", `${single}/README.md`)) return single;
-  return null;
+  if (branchHasPath(repo, "HEAD", `${single}/README.md`)) folders.push(single);
+  if (branchHasPath(repo, "HEAD", "verifier/README.md")) folders.push("verifier");
+  return folders;
 }
 
 /**
- * A feature page: a markdown file under a features/ folder, besides its
- * index. Nested pages count, as make counts them: a page make accepts is a
- * page the pass drives.
+ * A feature page of the verifier dir: markdown under its features/ folder,
+ * besides its index. Nested pages count, as make counts them: a page make
+ * accepts is a page the pass drives.
  */
-export function isFeaturePage(folder: string, path: string): boolean {
-  if (!path.startsWith(`${folder}/`) || !path.endsWith(".md")) return false;
-  const rest = path.slice(folder.length + 1).split("/");
-  const at = rest.indexOf("features");
-  if (at === -1 || at === rest.length - 1) return false;
-  const below = rest.slice(at + 1);
-  return !(below.length === 1 && below[0] === "README.md");
+export function isFeaturePage(vdir: string, path: string): boolean {
+  if (!path.startsWith(`${vdir}/features/`) || !path.endsWith(".md")) return false;
+  return path.slice(`${vdir}/features/`.length) !== "README.md";
 }
 
-/** The folder's feature pages at the current commit, sorted, or null when unreadable. */
+/**
+ * The folder's verifier dirs at the current commit: itself when it carries a
+ * front page and a features/ folder, and each subdir that does. A features/
+ * folder without a front page beside it is no verifier's, so the pass counts
+ * exactly what make counts. Null when unreadable.
+ */
+export function scopeVdirs(repo: string, folder: string): string[] | null {
+  // -z: NUL-separated and never quoted, so non-ASCII names list as written;
+  // -d lists the immediate subdirs, and a missing folder lists nothing.
+  const subs = git(repo, ["ls-tree", "-z", "-d", "--name-only", "HEAD", "--", `${folder}/`]);
+  if (subs.code !== 0) return null;
+  const vdirs: string[] = [];
+  for (const cand of [folder, ...subs.out.split("\0").filter((l) => l !== "")]) {
+    if (!branchHasPath(repo, "HEAD", `${cand}/README.md`)) continue;
+    const has = git(repo, [
+      "ls-tree",
+      "-z",
+      "-r",
+      "--name-only",
+      "HEAD",
+      "--",
+      `${cand}/features/`,
+    ]);
+    if (has.code !== 0) return null;
+    if (has.out.split("\0").some((l) => l !== "")) vdirs.push(cand);
+  }
+  return vdirs;
+}
+
+/** The folder's feature pages at the current commit, across its verifier dirs, sorted, or null when unreadable. */
 export function featurePages(repo: string, folder: string): string[] | null {
-  // -z: NUL-separated and never quoted, so non-ASCII names list as written.
-  const r = git(repo, ["ls-tree", "-r", "--name-only", "-z", "HEAD", "--", folder]);
-  if (r.code !== 0) return null;
-  return r.out
-    .split("\0")
-    .filter((p) => p !== "" && isFeaturePage(folder, p))
-    .sort();
+  const vdirs = scopeVdirs(repo, folder);
+  if (vdirs === null) return null;
+  const pages: string[] = [];
+  for (const vdir of vdirs) {
+    const listed = committedFeaturePages(repo, "HEAD", vdir);
+    if (listed === null) return null;
+    pages.push(...listed);
+  }
+  return pages.sort();
 }
 
 /** The handover was written after the cut, so this session made it. */
@@ -1312,15 +1340,16 @@ export interface UpkeepVerdict {
  */
 export function verdictUpkeep(
   pages: string[],
-  folder: string,
+  folders: string[],
   report: UpkeepReport,
 ): { ok: true; verdict: UpkeepVerdict } | { ok: false; error: string } {
   if (report.verifiers.length === 0) return { ok: false, error: "the report names no verifier" };
   for (const v of report.verifiers) {
-    if (v.folder !== folder && !v.folder.startsWith(`${folder}/`)) {
+    const inside = folders.some((f) => v.folder === f || v.folder.startsWith(`${f}/`));
+    if (!inside) {
       return {
         ok: false,
-        error: `the report's verifier ${v.name} sits outside ${folder}: ${v.folder}`,
+        error: `the report's verifier ${v.name} sits outside ${folders.join(", ")}: ${v.folder}`,
       };
     }
   }
@@ -1663,7 +1692,7 @@ function readUpkeepTemplate(): string {
 /** The pass instructions for the repo's verifiers at its current commit. */
 function renderUpkeepPrompt(
   repo: string,
-  folder: string,
+  folders: string[],
   base: string,
   pages: string[],
   headless: boolean,
@@ -1671,7 +1700,7 @@ function renderUpkeepPrompt(
   const modes = modeBlocks(headless, "UPKEEP.md");
   return renderTemplate(readUpkeepTemplate(), {
     REPO: repo,
-    VERIFY_DIR: folder,
+    VERIFY_DIR: folders.map((f) => `${f}/`).join(" and "),
     BASE: base,
     FEATURE_LIST: pages.map((p) => `- ${p}`).join("\n"),
     ASK_RULE: modes.askRule,
@@ -1680,14 +1709,21 @@ function renderUpkeepPrompt(
   });
 }
 
-/** The folder and pages the pass drives, or the usage error when there are none. */
-function upkeepScope(repo: string, folder: string | null): { folder: string; pages: string[] } {
-  const found = detectFolder(repo, folder);
-  if (found === null) throw new UsageError(`no verifiers in ${repo}`);
-  const pages = featurePages(repo, found);
-  if (pages === null) throw new RunError(`the verifiers under ${found} could not be read`);
-  if (pages.length === 0) throw new UsageError(`no verifiers under ${found} in ${repo}`);
-  return { folder: found, pages };
+/** The folders and pages the pass drives, or the usage error when there are none. */
+export function upkeepScope(
+  repo: string,
+  folder: string | null,
+): { folders: string[]; pages: string[] } {
+  const found = detectFolders(repo, folder);
+  if (found.length === 0) throw new UsageError(`no verifiers in ${repo}`);
+  const pages: string[] = [];
+  for (const f of found) {
+    const listed = featurePages(repo, f);
+    if (listed === null) throw new RunError(`the verifiers under ${f} could not be read`);
+    if (listed.length === 0) throw new UsageError(`no verifiers under ${f} in ${repo}`);
+    pages.push(...listed);
+  }
+  return { folders: found, pages: [...new Set(pages)].sort() };
 }
 
 /** The current commit the pass drives: HEAD, which the scope proved present. */
@@ -1703,7 +1739,7 @@ function runUpkeepPrompt(req: ParsedUpkeepPrompt): number {
   if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
   const scope = upkeepScope(repo, req.folder);
   const head = currentHead(repo);
-  process.stdout.write(renderUpkeepPrompt(repo, scope.folder, head, scope.pages, req.headless));
+  process.stdout.write(renderUpkeepPrompt(repo, scope.folders, head, scope.pages, req.headless));
   return 0;
 }
 
@@ -1968,10 +2004,10 @@ function validateUpkeepFresh(wt: string, cutAt: number): string {
 }
 
 /** The verdict over a finished report; a malformed report fails the pass. */
-function decideUpkeep(pages: string[], folder: string, text: string): UpkeepVerdict {
+function decideUpkeep(pages: string[], folders: string[], text: string): UpkeepVerdict {
   const parsed = parseUpkeepReport(text);
   if (!parsed.ok) throw new RunError(parsed.error);
-  const decided = verdictUpkeep(pages, folder, parsed.report);
+  const decided = verdictUpkeep(pages, folders, parsed.report);
   if (!decided.ok) throw new RunError(decided.error);
   return decided.verdict;
 }
@@ -2015,7 +2051,7 @@ function runUpkeepLaunches(
   head: string,
   branch: string,
   wt: string,
-  scope: { folder: string; pages: string[] },
+  scope: { folders: string[]; pages: string[] },
   sessionStarted: { started: boolean },
   cutAt: number,
 ): number {
@@ -2032,11 +2068,12 @@ function runUpkeepLaunches(
     sessionStarted,
     logLabel: "upkeep",
     sessionNoun: "upkeep",
-    renderPrompt: (headless) => renderUpkeepPrompt(repo, scope.folder, head, scope.pages, headless),
+    renderPrompt: (headless) =>
+      renderUpkeepPrompt(repo, scope.folders, head, scope.pages, headless),
     sendFileText: (promptFile) => upkeepSendText(promptFile),
     waitFile: "UPKEEP.md",
     validate: () => {
-      decided = decideUpkeep(scope.pages, scope.folder, validateUpkeepFresh(wt, cutAt));
+      decided = decideUpkeep(scope.pages, scope.folders, validateUpkeepFresh(wt, cutAt));
     },
     print: ({ final, handle, promptFile }) => {
       const verdict = decided as UpkeepVerdict;
@@ -2805,7 +2842,7 @@ function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
     throw new UsageError(`no report to read: ${req.report}`);
   }
   const scope = upkeepScope(repo, req.folder);
-  const verdict = decideUpkeep(scope.pages, scope.folder, text);
+  const verdict = decideUpkeep(scope.pages, scope.folders, text);
   for (const line of verdict.lines) console.log(line);
   // The report is what was judged: the command cuts no branch to name.
   const judged = resolve(req.report);

@@ -9,7 +9,7 @@ drives every feature again and reports each claim that no longer holds, with
 what you found instead, and each claim you could not check.
 
 - Reference checkout, read-only, never edit it: {{REPO}}
-- The verifiers live in: {{VERIFY_DIR}}/ at the top of this working copy
+- The verifiers live in: {{VERIFY_DIR}} at the top of this working copy
 - Your working copy: this directory, cut at {{BASE}}. It is what you drive: the
   project's current commit, not the reference checkout and not any uncommitted work.
 - The feature pages you must drive, every one of them:
