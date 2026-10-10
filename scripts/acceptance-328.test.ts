@@ -542,6 +542,31 @@ describe("the pass changes nothing outside the verifiers' folder", () => {
   });
 });
 
+describe("a corrected claim carries its page's change", () => {
+  test("a correction the branch never made fails the pass naming the page", () => {
+    const sandbox = makeSandbox();
+    try {
+      writeStubCorrectingSession(sandbox.bin);
+      const head = headOf(sandbox.repo, "HEAD");
+      const report = writeReport(sandbox.dir, REPORT_CORRECTED);
+      const overlay = writeOverlay(sandbox.dir, { [MAP]: mapWith(head) });
+      const env = makeEnv(sandbox, {
+        POSTMASTER_HOST: "none",
+        ORACLE_REPORT: report,
+        ORACLE_OVERLAY: overlay,
+      });
+      const before = headOf(sandbox.repo, "main");
+      const r = runPass(sandbox, env);
+      expectCode(r, 1);
+      expect(r.err).toMatch(/verify-app\/features\/list\.md/u);
+      expect(r.out).not.toContain("every claim holds");
+      expect(headOf(sandbox.repo, "main")).toBe(before);
+    } finally {
+      rmSync(sandbox.dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the pass moves the index to the commit it drove", () => {
   test("an index left on its old commit fails the pass naming the index", () => {
     const sandbox = makeSandbox();
@@ -783,6 +808,173 @@ describe("C3: the landing refuses a pass branch that reaches outside the folder"
       expect(actions[0]?.action).toBe("note");
       expect(actions[0]?.target).toBe("upkeep");
       expect(actions[0]?.detail).toBe(APP_ACCEPT);
+    } finally {
+      cleanup(dir);
+    }
+  });
+});
+
+const SHARED_ADD = "verifier/cli/features/add.md";
+const SHARED_INDEX = "verifier/README.md";
+
+/** The scratch app with a shared-shape verifier only: no verify-app folder. */
+function appWithSharedVerifier(): { dir: string; repo: string } {
+  const { dir, repo } = freshApp();
+  for (const [rel, text] of Object.entries(verifierFiles("verifier/cli", HELPER_GOOD))) {
+    writeRepoFile(repo, rel, text);
+  }
+  writeRepoFile(
+    repo,
+    SHARED_INDEX,
+    "# verifiers\n\n- the command line (cli) verifier goes in verifier/cli/. Files: README.md\n",
+  );
+  commitAll(repo, "verifiers");
+  return { dir, repo };
+}
+
+/** The corrections a shared-shape pass branch carries: one page, the index. */
+function sharedCorrections(repo: string): Record<string, string> {
+  const head = headOf(repo, "main");
+  return {
+    [SHARED_ADD]: `${readFileSync(join(repo, SHARED_ADD), "utf8")}\nCorrected to what the app does.\n`,
+    [SHARED_INDEX]: `${readFileSync(join(repo, SHARED_INDEX), "utf8")} Confirmed: ${head}\n`,
+  };
+}
+
+/** A pass report over the shared-shape verifier, one claim corrected. */
+const SHARED_REPORT = [
+  "# Upkeep pass",
+  "",
+  "## Verifier: cli",
+  "Folder: verifier/cli",
+  "",
+  `## Feature: ${SHARED_ADD}`,
+  "Outcome: changed",
+  "",
+  correctedClaim(
+    "add: one task",
+    SHARED_ADD,
+    "stdout is added 1",
+    "stdout is added 2",
+    "reworded the id on the page and drove the recipe again: holds",
+  ).trimEnd(),
+  "",
+  "## Feature: verifier/cli/features/done.md",
+  "Outcome: clean",
+  "",
+  "## Feature: verifier/cli/features/list.md",
+  "Outcome: clean",
+  "",
+].join("\n");
+
+const SHARED_ACCEPT =
+  "accept: upkeep lands upkeep corrections for cli (verifier/cli); " +
+  "corrected: 1 of 1 stale, unchecked: 0";
+
+/** A pass report over both shapes, one claim corrected on each. */
+const BOTH_REPORT = [
+  "# Upkeep pass",
+  "",
+  "## Verifier: cli",
+  "Folder: verify-app",
+  "",
+  "## Verifier: cli-shared",
+  "Folder: verifier/cli",
+  "",
+  "## Feature: verify-app/features/add.md",
+  "Outcome: changed",
+  "",
+  correctedClaim(
+    "add: one task",
+    "verify-app/features/add.md",
+    "stdout is added 1",
+    "stdout is added 2",
+    "reworded the id on the page and drove the recipe again: holds",
+  ).trimEnd(),
+  "",
+  "## Feature: verify-app/features/done.md",
+  "Outcome: clean",
+  "",
+  "## Feature: verify-app/features/list.md",
+  "Outcome: clean",
+  "",
+  `## Feature: ${SHARED_ADD}`,
+  "Outcome: changed",
+  "",
+  correctedClaim(
+    "shared: one task",
+    SHARED_ADD,
+    "stdout is added 1",
+    "stdout is added 2",
+    "reworded the id on the page and drove the recipe again: holds",
+  ).trimEnd(),
+  "",
+  "## Feature: verifier/cli/features/done.md",
+  "Outcome: clean",
+  "",
+  "## Feature: verifier/cli/features/list.md",
+  "Outcome: clean",
+  "",
+].join("\n");
+
+const BOTH_ACCEPT =
+  "accept: upkeep lands upkeep corrections for cli (verify-app), cli-shared (verifier/cli); " +
+  "corrected: 2 of 2 stale, unchecked: 0";
+
+describe("the landing judges every shape the repo holds", () => {
+  test("a verifier/-only pass branch lands with no --folder", () => {
+    const { dir, repo } = appWithSharedVerifier();
+    try {
+      const report = writeReport(dir, SHARED_REPORT);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(repo, "upkeep", sharedCorrections(repo), "corrections");
+      const r = runCheckReport(repo, "upkeep", dispatch, report);
+      expect(r.code).toBe(0);
+      expect(r.out).toBe(`${SHARED_ACCEPT}\n`);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("a both-shapes pass branch lands with no --folder", () => {
+    const { dir, repo } = appWithVerifiers();
+    try {
+      for (const [rel, text] of Object.entries(verifierFiles("verifier/cli", HELPER_GOOD))) {
+        writeRepoFile(repo, rel, text);
+      }
+      writeRepoFile(
+        repo,
+        SHARED_INDEX,
+        "# verifiers\n\n- the command line (cli) verifier goes in verifier/cli/. Files: README.md\n",
+      );
+      commitAll(repo, "shared verifier");
+      const report = writeReport(dir, BOTH_REPORT);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(
+        repo,
+        "upkeep",
+        { ...appCorrections(repo), ...sharedCorrections(repo) },
+        "corrections",
+      );
+      const r = runCheckReport(repo, "upkeep", dispatch, report);
+      expect(r.code).toBe(0);
+      expect(r.out).toBe(`${BOTH_ACCEPT}\n`);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("an explicit --folder still narrows the landing to one shape", () => {
+    const { dir, repo } = appWithSharedVerifier();
+    try {
+      const report = writeReport(dir, SHARED_REPORT);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(repo, "upkeep", sharedCorrections(repo), "corrections");
+      const r = runCheckReport(repo, "upkeep", dispatch, report, ["--folder", "verify-app"]);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("refuse: upkeep lands nothing: outside the verifiers' folder: ");
+      expect(r.out).toContain(SHARED_ADD);
+      expect(r.out).toContain(SHARED_INDEX);
     } finally {
       cleanup(dir);
     }
