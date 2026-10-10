@@ -30,7 +30,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "detect", count: 5 },
   { name: "launch labels and run identity", count: 31 },
   { name: "name: from the waybill, so no title is typed into a shell", count: 5 },
-  { name: "run, no host: headless launch", count: 17 },
+  { name: "run, no host: headless launch", count: 18 },
   { name: "a run launch without a named run space is refused", count: 2 },
   { name: "stop: owned process trees and refusal controls", count: 5 },
   { name: "stop: registry identity and process membership", count: 13 },

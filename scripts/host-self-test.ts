@@ -1705,6 +1705,33 @@ export async function runControls(): Promise<number> {
       () => setupLaunch.code === 0 && marker(markerPath("n9"), 15),
       `${setupLaunch.out}${setupLaunch.err}`,
     );
+    const setupPlace = execHost(
+      [
+        "run",
+        f.name,
+        join(f.repo, ".worktrees/T-1-luna"),
+        "--role",
+        "coachman",
+        "--under",
+        setupRun,
+        "--run",
+        setupRun,
+        "--marker",
+        markerPath("n9-place"),
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+    );
+    await pass(
+      "a brief-less dispatch is placed by its worktree on Herdr, not the background",
+      () =>
+        setupPlace.code === 0 &&
+        setupPlace.out.includes("host=herdr space=") &&
+        !`${setupPlace.out}${setupPlace.err}`.includes("could not place") &&
+        marker(markerPath("n9-place"), 15),
+      `${setupPlace.out}${setupPlace.err}`,
+    );
 
     console.log("a run launch without a named run space is refused");
     resetHarness(root);
