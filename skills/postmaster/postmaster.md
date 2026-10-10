@@ -161,19 +161,20 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    printed, whole, under the waybill's title, then the ticket: whole when the run's ticket
    notes are given, and without its technical notes and verified facts when they are held
    back, as `<tool>/scripts/run run-meta ticket-notes <dispatch>` prints them from the
-   record step 6 wrote. For the cut, write the whole ticket body step 1 read to a temporary
-   file outside the run directory, run `<tool>/scripts/run ticket-cut` on it, paste the cut
-   output as the waybill's ticket, and remove the file; the whole ticket stays in the
-   tracker and no copy of it sits where the run reads. When the notes are held back, check
-   the ticket's premises on that temporary file before writing the waybill, since the
-   waybill no longer carries them: `<tool>/scripts/run premises <repo> <whole-body-file>
+   record step 6 wrote. When the notes are held back, write the whole ticket body step 1
+   read to a temporary file outside the run directory and run `<tool>/scripts/run ticket-cut`
+   on it, then check the ticket's premises on that temporary file before writing the waybill,
+   since the waybill no longer carries them: `<tool>/scripts/run premises <repo> <whole-body-file>
    <BASE>`, logged as your own `premises` line with the verified commit, `base=<BASE>` and
    `result=<result>`. `same` holds, `moved` holds elsewhere, and `changed`, `missing` or
    `unknown` does not; when a premise does not hold, ask the user whether to go on or send
    the ticket back before any leg starts, as Stage E step 4 says but with no leg started —
    on go on, write the waybill and dispatch, on send it back, abandon as that step says —
    and in a fixture run, with no user to ask, abandon the run rather than dispatch on
-   premises that do not hold. Without the notes the coachman skips this step. Then the
+   premises that do not hold. Paste the cut output as the waybill's ticket only once the
+   check holds or the ruling says go on, then remove the file; the whole ticket stays in the
+   tracker and no copy of it sits where the run reads. Without the notes the coachman skips
+   this step. Then the
    project profile (gate,
    build, browser suite, landing (`pull-request` or `local`), the checks as
    `<tool>/scripts/run verify record` printed them, docs to read first, tracker, risk
