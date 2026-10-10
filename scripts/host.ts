@@ -1858,8 +1858,19 @@ function createRunTab(
 // Split a launch pane off a pane of the run's tab. A pane's working
 // directory is its own, so each launch keeps its own checkout. The split
 // takes no focus: a launch starting must never steal the user's context.
-function splitRunPane(anchor: string, cwd: string): string {
-  const split = herdr(["pane", "split", anchor, "--direction", "down", "--cwd", cwd, "--no-focus"]);
+// env carries --env pairs for the new pane; a run launch passes none.
+function splitRunPane(anchor: string, cwd: string, env: string[] = []): string {
+  const split = herdr([
+    "pane",
+    "split",
+    anchor,
+    "--direction",
+    "down",
+    "--cwd",
+    cwd,
+    ...env,
+    "--no-focus",
+  ]);
   if (split.code !== 0) return "";
   const result = parseJson<{ result?: { pane?: unknown } }>(split.out)?.result?.pane;
   if (typeof result === "string") return result;
@@ -2143,9 +2154,13 @@ function herdrFixturePlace(
   if (!source) return null;
   const placed = withRunTabLock(() => obtainFixtureTab(source, copyRoot, dispatch, runPath, ""));
   if (!placed) return null;
+  // The copy's own launches run with the caller POSTMASTER_* settings, as a
+  // spawn's fresh tab would carry them; run launches take none, as the run
+  // tab's splits never have.
+  const env = dispatch ? [] : PLACE_ENV;
   let tab = placed.tab;
   let anchor = placed.pane;
-  let pane = splitRunPane(anchor, cwd);
+  let pane = splitRunPane(anchor, cwd, env);
   if (!pane) {
     // The recorded first pane may be gone (closed by hand): split off
     // another run pane in the tab when one is live, and rebuild the tab
@@ -2159,7 +2174,7 @@ function herdrFixturePlace(
       tab = recreated.tab;
       anchor = recreated.pane;
     }
-    pane = splitRunPane(anchor, cwd);
+    pane = splitRunPane(anchor, cwd, env);
     if (!pane) return null;
   }
   return finishRunLaunch(source, tab, pane, name, cwd, dispatch, handle);
@@ -7001,7 +7016,14 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     const runTab = readRunTab(dispatch);
     if (runTab) {
       rc = herdrCloseRunTab(dispatch, runTab.workspace, runTab.tab);
-      if (rc === 0 && fixture) removeFixTab(repo);
+      if (rc === 0 && fixture) {
+        // A copy-level launch may have recreated the fixture tab after the
+        // run record went stale at a dead tab: close the live tab too, so
+        // its record is never removed from under it.
+        const fix = readFixTab(repo);
+        if (fix && fix.tab !== runTab.tab) rc = herdrCloseRunTab(dispatch, fix.workspace, fix.tab);
+        if (rc === 0) removeFixTab(repo);
+      }
     } else if (fixture) {
       // The run never launched, so its tab record was never written, but the
       // copy's own launches opened the fixture tab. Close it by that record.
