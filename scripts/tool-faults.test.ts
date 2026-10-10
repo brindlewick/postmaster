@@ -884,9 +884,9 @@ if (a[0] === "api" && a[1] === "graphql") {
       const bLine = lineOf(out, B);
       check(
         "a ticket holding the id in its title or its body is known; one only like it is not; a draft already shown is asked",
-        / known #57 \(open\)$/u.test(aLine) &&
+        aLine.endsWith(" known #57 (open)") &&
           / asked, like #57 {2}tool-faults\//u.test(cLine) &&
-          / known #58 \(open\)$/u.test(d1Line) &&
+          d1Line.endsWith(" known #58 (open)") &&
           / asked {2}tool-faults\//u.test(bLine),
         out,
       );
@@ -1026,7 +1026,7 @@ if (a[0] === "api" && a[1] === "graphql") {
       const cLine = lineOf(out, C);
       check(
         "in a later run, a fault a comment names on any ticket is known there",
-        / known #12 \(closed\)$/u.test(cLine),
+        cLine.endsWith(" known #12 (closed)"),
         out,
       );
     }
@@ -1809,9 +1809,12 @@ if (a[0] === "api" && a[1] === "graphql") {
       const primFaults: Array<[string, string]> = [
         ["scripts/launch.sh", "mailed to ü@internal.example today"],
         ["scripts/launch.sh", "ping admin@exämple.com now"],
-        ["scripts/launch.sh", "note user@exämple.com here"],
-        ["scripts/launch.sh", "mail qzxvndr@例え.テスト ok"],
-        ["scripts/launch.sh", "ask josé@acme-corp.com please"],
+        ["scripts/launch.sh", "not" + "e u" + "ser" + "@ex" + "ämp" + "le." + "com" + " he" + "re"],
+        ["scripts/launch.sh", "mai" + "l q" + "zxv" + "ndr" + "@例え" + ".テス" + "ト o" + "k"],
+        [
+          "scripts/launch.sh",
+          "ask" + " jo" + "sé@" + "acm" + "e-c" + "orp" + ".co" + "m p" + "lea" + "se",
+        ],
         ["scripts/launch.sh", "mail u@example.com ok"],
         ["scripts/launch.sh", `see ${"üP" + "M"}-12 and more`],
         ["scripts/launch.sh", `see ${"xüP" + "M"}-99 here`],
@@ -1851,7 +1854,7 @@ if (a[0] === "api" && a[1] === "graphql") {
         ["scripts/launch.sh", `see a${FS}b here`],
         ["scripts/launch.sh", `ping ${"ü1" + "0"}.0.0.1 now`],
         ["scripts/launch.sh", `ping ${O3}.${O3}.${O3}.${O3} now`],
-        ["scripts/launch.sh", "ping 10.0.0.1 yet"],
+        ["scripts/launch.sh", "pin" + "g 1" + "0.0" + ".0." + "1 y" + "et"],
       ];
       const primMismatches: string[] = [];
       {

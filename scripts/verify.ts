@@ -791,7 +791,7 @@ function runChecks(wt: string, dispatch: string | null): never {
     const d = loadJson(join(spec, "spec.json"));
     if (!d || typeof d !== "object" || !Array.isArray((d as Record<string, unknown>).checks)) {
       dieV(
-        `${top} is not armed: ${join(spec, "spec.json")} is missing; the coachman arms each workhorse worktree with run verify arm`,
+        `${top} is not armed: ${join(spec, "spec.json")} is missing; the coachman arms each workhorse copy with run verify arm`,
       );
     }
     checks = (d as Record<string, unknown>).checks as Check[];
@@ -810,6 +810,9 @@ function runChecks(wt: string, dispatch: string | null): never {
   const logs = dispatch ? join(dispatch, "verify", sha.slice(0, 12)) : join(spec, "logs");
   mkdirSync(logs, { recursive: true });
   const env = { ...process.env, POSTMASTER_VERIFY: spec } as Record<string, string>;
+  if (dispatch) env.POSTMASTER_DETECTIONS_LOG = join(dispatch, "detections.jsonl");
+  else delete env.POSTMASTER_DETECTIONS_LOG;
+  delete env.SCRUB_CHECK_DISABLE;
   delete env.POSTMASTER_LAUNCH_NAME;
   const results: string[] = [];
   const unlogged: string[] = [];
