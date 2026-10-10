@@ -2807,7 +2807,9 @@ function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
   const scope = upkeepScope(repo, req.folder);
   const verdict = decideUpkeep(scope.pages, scope.folder, text);
   for (const line of verdict.lines) console.log(line);
-  logVerdict(dispatch, repo, "note", verdict.lines[verdict.lines.length - 1] as string);
+  // The report is what was judged: the command cuts no branch to name.
+  const judged = resolve(req.report);
+  logVerdict(dispatch, judged, "note", verdict.lines[verdict.lines.length - 1] as string);
   return verdict.stale + verdict.unchecked > 0 ? 1 : 0;
 }
 
