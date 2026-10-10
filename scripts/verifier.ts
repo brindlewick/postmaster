@@ -1256,9 +1256,9 @@ export interface UpkeepVerdict {
 
 /**
  * The verdict over a parsed report: every committed feature page driven exactly
- * once, every changed or blocked page carrying its claims, every claim's
- * verdict matching its page's outcome. The lines list each stale claim with
- * what the pass found instead, each unchecked claim with why, the unasked
+ * once, every changed or blocked page carrying its claims, a page with both a
+ * stale and an unchecked claim reading blocked. The lines list each stale claim
+ * with what the pass found instead, each unchecked claim with why, the unasked
  * questions, and the summary.
  */
 export function verdictUpkeep(
@@ -1288,10 +1288,19 @@ export function verdictUpkeep(
   }
   for (const feature of report.features) {
     const onPage = report.claims.filter((c) => c.page === feature.page);
+    // An unchecked claim means the page was not fully driven, so a page with
+    // both verdicts is blocked: changed claims a fully driven page with a
+    // failure on it, and nothing less.
     if (feature.outcome === "changed" && !onPage.some((c) => c.verdict === "stale")) {
       return {
         ok: false,
         error: `the report names no stale claim for its changed page ${feature.page}`,
+      };
+    }
+    if (feature.outcome === "changed" && onPage.some((c) => c.verdict === "unchecked")) {
+      return {
+        ok: false,
+        error: `the report's changed page ${feature.page} carries an unchecked claim`,
       };
     }
     if (feature.outcome === "blocked" && !onPage.some((c) => c.verdict === "unchecked")) {
@@ -1315,11 +1324,16 @@ export function verdictUpkeep(
       };
     }
     const outcome = outcomes.get(claim.page) as UpkeepOutcome;
-    const want = claim.verdict === "stale" ? "changed" : "blocked";
-    if (outcome !== want) {
+    if (claim.verdict === "unchecked" && outcome !== "blocked") {
       return {
         ok: false,
-        error: `the report's ${claim.verdict} claim ${claim.name} sits on a ${outcome} page`,
+        error: `the report's unchecked claim ${claim.name} sits on a ${outcome} page`,
+      };
+    }
+    if (claim.verdict === "stale" && outcome !== "changed" && outcome !== "blocked") {
+      return {
+        ok: false,
+        error: `the report's stale claim ${claim.name} sits on a ${outcome} page`,
       };
     }
   }

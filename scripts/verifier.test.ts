@@ -2318,14 +2318,60 @@ describe("verdictUpkeep", () => {
     });
   });
 
-  test("a verdict mismatching its page outcome fails", () => {
+  test("a mixed page is blocked and lists both claims", () => {
+    const decided = verdictUpkeep(
+      pages,
+      "v",
+      report({
+        features: [
+          { page: "v/features/a.md", outcome: "blocked" },
+          { page: "v/features/b.md", outcome: "clean" },
+        ],
+        claims: [
+          {
+            name: "a: one",
+            page: "v/features/a.md",
+            verdict: "stale",
+            stated: "s1",
+            found: "f1",
+            because: null,
+          },
+          {
+            name: "a: two",
+            page: "v/features/a.md",
+            verdict: "unchecked",
+            stated: "s2",
+            found: null,
+            because: "b2",
+          },
+        ],
+      }),
+    );
+    expect(decided).toEqual({
+      ok: true,
+      verdict: {
+        lines: [
+          "stale: a: one (v/features/a.md)",
+          "  stated: s1",
+          "  found: f1",
+          "unchecked: a: two (v/features/a.md)",
+          "  because: b2",
+          "features driven: 2, stale: 1, unchecked: 1",
+        ],
+        stale: 1,
+        unchecked: 1,
+      },
+    });
+  });
+
+  test("a mixed page marked changed fails on the unchecked claim", () => {
     expect(
       verdictUpkeep(
         pages,
         "v",
         report({
           features: [
-            { page: "v/features/a.md", outcome: "blocked" },
+            { page: "v/features/a.md", outcome: "changed" },
             { page: "v/features/b.md", outcome: "clean" },
           ],
           claims: [
@@ -2350,7 +2396,63 @@ describe("verdictUpkeep", () => {
       ),
     ).toEqual({
       ok: false,
-      error: "the report's stale claim a: one sits on a blocked page",
+      error: "the report's changed page v/features/a.md carries an unchecked claim",
+    });
+  });
+
+  test("a stale claim alone on a blocked page still fails", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        "v",
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "blocked" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+          claims: [
+            {
+              name: "a: one",
+              page: "v/features/a.md",
+              verdict: "stale",
+              stated: "s",
+              found: "f",
+              because: null,
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names no unchecked claim for its blocked page v/features/a.md",
+    });
+  });
+
+  test("an unchecked claim alone on a changed page fails", () => {
+    expect(
+      verdictUpkeep(
+        pages,
+        "v",
+        report({
+          features: [
+            { page: "v/features/a.md", outcome: "changed" },
+            { page: "v/features/b.md", outcome: "clean" },
+          ],
+          claims: [
+            {
+              name: "a: two",
+              page: "v/features/a.md",
+              verdict: "unchecked",
+              stated: "s",
+              found: null,
+              because: "b",
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "the report names no stale claim for its changed page v/features/a.md",
     });
   });
 });
