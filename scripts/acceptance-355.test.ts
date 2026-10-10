@@ -15,23 +15,23 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, writeRepoFile } from "./acceptance-323.ts";
 import { headOf } from "./acceptance-325.ts";
+import { cleanup, freshScratch } from "./acceptance-327.ts";
 import {
   briefOrThrow,
   bullet,
-  changeFile,
   CLERK_BASE_FAILURE,
+  changeFile,
   flat,
   ISSUE_273_URL,
+  POSTMASTER_OFFER,
+  PSTACK_URL,
   plantMulti,
   plantSingle,
-  POSTMASTER_OFFER,
   promptOrThrow,
-  PSTACK_URL,
   ROOT,
   RUN,
   runStale,
 } from "./acceptance-355.ts";
-import { cleanup, freshScratch } from "./acceptance-327.ts";
 import { run } from "./lib/proc.ts";
 
 describe("C1: the stale mark", () => {
@@ -98,10 +98,7 @@ describe("C1: the stale mark", () => {
       writeRepoFile(
         repo,
         "verify-app/features/README.md",
-        readFileSync(map, "utf8").replace(
-          /Confirmed: [0-9a-f]+\n?/u,
-          `Confirmed: ${changed}\n`,
-        ),
+        readFileSync(map, "utf8").replace(/Confirmed: [0-9a-f]+\n?/u, `Confirmed: ${changed}\n`),
       );
       commitAll(repo, "confirm");
       const r = runStale(repo);
