@@ -39,9 +39,10 @@ describe("C1: only the pinned version of each library ever runs", () => {
     const manifest = readManifest();
     const deps = { ...manifest.dependencies, ...manifest.devDependencies };
     expect(Object.keys(deps).length).toBeGreaterThan(0);
-    for (const [name, spec] of Object.entries(deps)) {
-      expect(`${name}@${spec}`).toMatch(EXACT);
-    }
+    const loose = Object.entries(deps)
+      .filter(([, spec]) => !EXACT.test(spec))
+      .map(([name, spec]) => `${name}@${spec}`);
+    expect(loose).toEqual([]);
   });
 
   test("the check script calls no bunx", () => {
@@ -142,9 +143,9 @@ describe("C3: no dependency install script runs", () => {
 describe("C4: Socket's scanner checks every package before it is taken", () => {
   test("bunfig.toml scans installs with the Socket scanner module, pinned", () => {
     const security = (installTable()["security"] as Record<string, unknown> | undefined) ?? {};
-    expect(security["scanner"]).toBe("./scripts/lib/install-scanner.ts");
+    expect(security["scanner"]).toBe("@socketsecurity/bun-security-scanner");
     const socket = readManifest().devDependencies?.["@socketsecurity/bun-security-scanner"];
-    expect(`socket@${socket}`).toMatch(EXACT);
+    expect(socket).toMatch(EXACT);
   });
 
   test("an install of a package the scanner flags exits non-zero and installs nothing", async () => {
