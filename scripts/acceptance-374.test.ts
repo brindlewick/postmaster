@@ -9,163 +9,32 @@
 // the run-level name to 30 characters and leaves launch names whole.
 // Covered: C1-C4. Not covered: C5 (the fixture run, scored at landing).
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   SELF,
   addWorktree,
   calls,
-  freshHerdr,
-  freshTmux,
   fxEnv,
   gitInit,
-  hSpace,
   makeFx,
-  saveHerdr,
-  saveTmux,
   sh,
   stubConfig,
   touchesId,
-  writeDispatch,
-  type Fx,
   type HerdrState,
 } from "./acceptance-373.ts";
-import { testStopFinishers, waitFor } from "./host-self-test.ts";
-
-// The waybill name C4 pins, 84 characters at the base.
-const LONG_NAME =
-  "#316, A review loop goes on until its serious findings rise, and has no cap of three";
-const SHORT_NAME = [...LONG_NAME].slice(0, 30).join("");
-
-interface PaneView {
-  ws: string;
-  tab: string;
-  cwd: string;
-  tokens: Record<string, string>;
-  label?: string;
-  title?: string;
-}
-
-function paneView(st: HerdrState, pane: string): PaneView {
-  return st.panes[pane] as unknown as PaneView;
-}
-
-function writeLongDispatch(dispatch: string, synth: string): void {
-  writeDispatch(dispatch, synth, [], []);
-  writeFileSync(
-    join(dispatch, "brief.md"),
-    [
-      "# Waybill: 374",
-      "turnpikes: style, bug, security",
-      "",
-      "## Ticket",
-      "",
-      "## Dispatch",
-      `name: ${LONG_NAME}`,
-      `dispatch: ${dispatch}`,
-      `synthesis worktree: ${synth}`,
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(
-    join(dispatch, "manifest.json"),
-    `${JSON.stringify({ stage: "workhorses-running", leg: 1, lanes: {} })}\n`,
-  );
-}
-
-function openRepoSpace(fx: Fx, repo: string): string {
-  const st = freshHerdr();
-  const proj = hSpace(st, "repo", repo);
-  st.open[repo] = proj.ws;
-  saveHerdr(fx, st);
-  saveTmux(fx, freshTmux());
-  return proj.ws;
-}
-
-function runLaunch(
-  fx: Fx,
-  env: Record<string, string>,
-  name: string,
-  cwd: string,
-  dispatch: string,
-  marker: string,
-): { code: number; out: string; err: string } {
-  return sh(
-    SELF,
-    [
-      "host",
-      "run",
-      name,
-      cwd,
-      "--under",
-      dispatch,
-      "--run",
-      dispatch,
-      "--out",
-      `${marker}.out`,
-      "--err",
-      `${marker}.err`,
-      "--marker",
-      marker,
-      "--",
-      "/bin/true",
-    ],
-    env,
-    fx.caller,
-  );
-}
-
-function placementRecords(fx: Fx): Record<string, unknown>[] {
-  const dir = join(fx.state, "placements");
-  if (!existsSync(dir)) return [];
-  const out: Record<string, unknown>[] = [];
-  for (const file of readdirSync(dir)) {
-    try {
-      out.push(JSON.parse(readFileSync(join(dir, file), "utf8")) as Record<string, unknown>);
-    } catch {}
-  }
-  return out;
-}
-
-function runTabRecords(fx: Fx): Record<string, unknown>[] {
-  const dir = join(fx.state, "runtabs");
-  if (!existsSync(dir)) return [];
-  const out: Record<string, unknown>[] = [];
-  for (const file of readdirSync(dir)) {
-    try {
-      out.push(JSON.parse(readFileSync(join(dir, file), "utf8")) as Record<string, unknown>);
-    } catch {}
-  }
-  return out;
-}
-
-// The state pane's refresh loop outlives the test: the stub records each pane
-// command's pid beside its output, and the loop dies with its group.
-function killPaneLoops(fx: Fx): void {
-  let files: string[] = [];
-  try {
-    files = readdirSync(fx.stub);
-  } catch {
-    return;
-  }
-  for (const file of files) {
-    if (!file.startsWith("pane-") || !file.endsWith(".pid")) continue;
-    const pid = Number(readFileSync(join(fx.stub, file), "utf8").trim());
-    if (!Number.isInteger(pid) || pid <= 0) continue;
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {}
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {}
-  }
-}
-
-function cleanup(fx: Fx): void {
-  testStopFinishers(fx.root);
-  killPaneLoops(fx);
-  rmSync(fx.root, { recursive: true, force: true });
-}
+import {
+  LONG_NAME,
+  SHORT_NAME,
+  cleanup,
+  openRepoSpace,
+  paneView,
+  placementRecords,
+  runLaunch,
+  runTabRecords,
+  writeLongDispatch,
+} from "./acceptance-374.ts";
+import { waitFor } from "./host-self-test.ts";
 
 describe("C1+C2: one run is one tab of the repository's space", () => {
   test("two launches share the run tab, and a spawn takes another tab", async () => {
