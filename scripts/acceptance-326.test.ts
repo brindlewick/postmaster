@@ -171,6 +171,17 @@ describe("C5: a fixture copy is offered nothing", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("a copy with only the committed marker names no surfaces", () => {
+    const { dir, repo } = scratchRepo("bin-vite");
+    try {
+      writeRepoFile(repo, ".postmaster/fixture", "postmaster fixture v1\n");
+      commitAll(repo, "fixture marker");
+      expect(lineValue(discover(repo).out, "surfaces")).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("setup-verifiers usage", () => {
