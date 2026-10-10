@@ -97,7 +97,8 @@ is set up, offer that command; for a project that is not set up, follow the setu
 **Not set up: stop and set the project up**, in conversation, per the setup section of
 `<tool>/AGENTS.md`; each path there is relative to `<tool>`. The steps are two: first set up
 the global config or skip it, then the project's own settings or the global config as it is;
-with no global config, setup goes straight to the project's own settings. A skipped global
+with no global config, the project step goes straight to the project's own settings, since
+there is no global config to keep as it is. A skipped global
 step goes to the project step without rerunning setup-next, which keeps no record of the
 skip. The project's
 settings are written with `<tool>/scripts/run setup --project <target>`, and the file holds

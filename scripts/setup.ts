@@ -350,6 +350,61 @@ function mergeInlineLine(oldLine: string, newLine: string): string {
   return `${key} = { ${merged.map(([k, v]) => `${k} = ${v}`).join(", ")} }`;
 }
 
+// valueSpan <body> <at>: how many lines the value starting on body[at] runs.
+// A TOML value spans lines inside brackets or triple-quoted strings; the old
+// side alone needs the span, since setup only ever writes single-line values.
+function valueSpan(body: string[], at: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+  let triple: string | null = null;
+  let escaped = false;
+  let n = 0;
+  for (let i = at; i < body.length; i++) {
+    n += 1;
+    const line = `${body[i] as string}\n`;
+    const scan = i === at ? line.slice(line.indexOf("=") + 1) : line;
+    for (let c = 0; c < scan.length; c++) {
+      const ch = scan[c] as string;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote !== null) {
+        if (triple !== null) {
+          if (scan.startsWith(triple, c)) {
+            quote = null;
+            triple = null;
+            c += 2;
+          }
+        } else if (ch === "\\" && quote === '"') {
+          escaped = true;
+        } else if (ch === quote || ch === "\n") {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        const q3 = ch.repeat(3);
+        if (scan.startsWith(q3, c)) {
+          quote = ch;
+          triple = q3;
+          c += 2;
+        } else {
+          quote = ch;
+        }
+      } else if (ch === "[" || ch === "{") {
+        depth += 1;
+      } else if (ch === "]" || ch === "}") {
+        depth -= 1;
+      } else if (ch === "#" && depth === 0) {
+        break;
+      }
+    }
+    if (depth <= 0 && quote === null) return n;
+  }
+  return n;
+}
+
 /** mergeSettings <existing> <out>: this run's TOML over the existing file:
  * answered keys replaced or added, everything else kept verbatim. */
 function mergeSettings(existing: string, out: string): string {
@@ -374,22 +429,37 @@ function mergeSettings(existing: string, out: string): string {
         target.body.push(line);
       } else {
         const oldLine = target.body[at] as string;
+        const span = valueSpan(target.body, at);
         if (oldLine.includes("{") && line.includes("{")) {
-          target.body[at] = mergeInlineLine(oldLine, line);
+          const oldText = target.body.slice(at, at + span).join("\n");
+          target.body.splice(at, span, mergeInlineLine(oldText, line));
         } else {
-          target.body[at] = line;
+          target.body.splice(at, span, line);
         }
       }
     }
   }
+  // Top-level assignments from the new preamble merge into the old preamble
+  // the same way: replaced where the key exists, appended where it does not.
+  const preamble = [...oldFile.preamble];
+  for (const line of newFile.preamble) {
+    if (line.startsWith("# Written by ") || line.trim() === "") continue;
+    const key = keyOf(line);
+    if (key === null) {
+      preamble.push(line);
+      continue;
+    }
+    const at = preamble.findIndex((l) => keyOf(l) === key);
+    if (at < 0) preamble.push(line);
+    else preamble.splice(at, valueSpan(preamble, at), line);
+  }
   // The header names the latest write; any other preamble lines stay.
   const outHeader = newFile.preamble.find((l) => l.startsWith("# Written by "));
   const writtenBy = "# Written by scripts/run setup --project";
-  let preamble = [...oldFile.preamble];
   const at = preamble.findIndex((l) => l.startsWith(writtenBy));
   if (outHeader !== undefined) {
     if (at >= 0) preamble[at] = outHeader;
-    else preamble = [outHeader, ...preamble];
+    else preamble.unshift(outHeader);
   }
   const lines = [...preamble];
   for (const section of merged) {
@@ -595,6 +665,36 @@ const MACHINE_TRACKER_KIND = typeof MACHINE_TRACKER.kind === "string" ? MACHINE_
 const MACHINE_TRACKER_WS =
   typeof MACHINE_TRACKER.workspace === "string" ? MACHINE_TRACKER.workspace : "";
 
+// The existing file, read before the questions: the guard fails fast on a
+// path no write may touch, and its lanes and tracker join the prechecks, so
+// a second run answers against what is already set.
+let PROJECT_BACKUP: string | null = null;
+let EXISTING: Rec = {};
+if (PROJECT !== "") {
+  settingsDir(PROJECT_ROOT);
+  if (isSymlink(PROJECT_SETTINGS)) die(`setup: ${PROJECT_SETTINGS} must not be a symlink`, 1);
+  if (existsSync(PROJECT_SETTINGS) && !isFile(PROJECT_SETTINGS))
+    die(`setup: ${PROJECT_SETTINGS} is not a regular file`, 1);
+  if (existsSync(PROJECT_SETTINGS)) {
+    PROJECT_BACKUP = readFileSync(PROJECT_SETTINGS, "utf8");
+    try {
+      EXISTING = asTable(
+        parseTomlStrict(PROJECT_BACKUP, "existing project settings"),
+        "existing project settings",
+      );
+    } catch (e) {
+      die(
+        `setup: the existing ${PROJECT_SETTINGS} does not parse${isDie(e) ? `: ${e.message}` : ""}; fix or remove it before setting more`,
+        1,
+      );
+    }
+  }
+}
+const EXISTING_LANES = recOf(EXISTING.lanes);
+const EXISTING_TRACKER = recOf(EXISTING.tracker);
+const EXISTING_TRACKER_WS =
+  typeof EXISTING_TRACKER.workspace === "string" ? EXISTING_TRACKER.workspace : "";
+
 if (PROJECT === "") {
   console.log("== Installed agent CLIs ==");
   const probe = run(join(HERE, "run"), ["probe-harnesses"]);
@@ -630,14 +730,21 @@ const laneList = LANES.split(",")
   .map((x) => x.trim())
   .filter((x) => x !== "");
 // Project mode asks about the named lanes plus any lane.* answers name; the
-// merged set, global lanes with these, is what every list below resolves to.
+// merged set, global lanes and the existing file's lanes with these, is what
+// every list below resolves to.
 const laneSet =
   PROJECT !== ""
     ? [...laneList, ...impliedLanes(ANSWERS).filter((n) => !laneList.includes(n))]
     : laneList;
 const MERGED_NAMES =
   PROJECT !== ""
-    ? [...Object.keys(MACHINE_LANES), ...laneSet.filter((n) => !Object.hasOwn(MACHINE_LANES, n))]
+    ? [
+        ...Object.keys(MACHINE_LANES),
+        ...Object.keys(EXISTING_LANES).filter((n) => !Object.hasOwn(MACHINE_LANES, n)),
+        ...laneSet.filter(
+          (n) => !Object.hasOwn(MACHINE_LANES, n) && !Object.hasOwn(EXISTING_LANES, n),
+        ),
+      ]
     : laneList;
 const MERGED_TEXT = MERGED_NAMES.join(", ");
 if (PROJECT === "") {
@@ -936,7 +1043,8 @@ if (TK === "plane" || (PROJECT !== "" && (ANSWERS !== "" || MERGED_KIND === "pla
   if (PROJECT === "") {
     if (!PWS) die("setup: a Plane workspace slug is needed", 1);
   } else {
-    const mergedWs = PWS !== "" ? PWS : MACHINE_TRACKER_WS;
+    const mergedWs =
+      PWS !== "" ? PWS : MACHINE_TRACKER_WS !== "" ? MACHINE_TRACKER_WS : EXISTING_TRACKER_WS;
     if (MERGED_KIND === "plane" && mergedWs === "")
       die("setup: a Plane workspace slug is needed", 1);
   }
@@ -1107,7 +1215,15 @@ if (PROJECT !== "") {
 
   if (sections.length === 0) {
     if (IGNORE === "yes" && existsSync(PROJECT_SETTINGS)) {
-      ignoreSettings(PROJECT_ROOT);
+      if (DRY === 1) {
+        console.log("settings ignored: yes");
+        process.exit(0);
+      }
+      try {
+        ignoreSettings(PROJECT_ROOT);
+      } catch (e) {
+        die(`setup: cannot set the ignore rules${isDie(e) ? `: ${e.message}` : ""}`, 1);
+      }
       reportIgnored(IGNORE);
       process.exit(0);
     }
@@ -1116,25 +1232,9 @@ if (PROJECT !== "") {
   const projectDate = new Date().toISOString().slice(0, 10);
   const OUT = `# Written by scripts/run setup --project on ${projectDate}. Only what was set for this project.\n${sections.join("\n")}`;
 
-  // A write through a symlink lands outside the project, and a dangling one
-  // reads as absent, so the guard runs before the backup is read.
-  settingsDir(PROJECT_ROOT);
-  if (isSymlink(PROJECT_SETTINGS)) die(`setup: ${PROJECT_SETTINGS} must not be a symlink`, 1);
-  if (existsSync(PROJECT_SETTINGS) && !isFile(PROJECT_SETTINGS))
-    die(`setup: ${PROJECT_SETTINGS} is not a regular file`, 1);
-  const backup = existsSync(PROJECT_SETTINGS) ? readFileSync(PROJECT_SETTINGS, "utf8") : null;
-  if (backup !== null) {
-    try {
-      parseTomlStrict(backup, "existing project settings");
-    } catch (e) {
-      die(
-        `setup: the existing ${PROJECT_SETTINGS} does not parse${isDie(e) ? `: ${e.message}` : ""}; fix or remove it before setting more`,
-        1,
-      );
-    }
-  }
-  // This run's answers over the existing file, so the settings grow over
-  // several runs; a first run writes its answers alone.
+  // This run's answers over the existing file, read up front, so the
+  // settings grow over several runs; a first run writes its answers alone.
+  const backup = PROJECT_BACKUP;
   const fileText = backup === null ? OUT : mergeSettings(backup, OUT);
 
   // The merged view, global with the file as written: every list below
@@ -1161,6 +1261,24 @@ if (PROJECT !== "") {
     for (const p of checkLaneEntry(name, mergedLanes[name]).problems) die(p, 1);
   }
   const mergedTeam = recOf(merged.team);
+  // A postmaster this run touches must read complete once merged, as
+  // check-setup requires a harness and a model; a half entry is refused here.
+  const touchedPostmaster = ["harness", "model", "effort", "env_file"].some((part) =>
+    GIVEN.has(`postmaster.${part}`),
+  );
+  if (touchedPostmaster) {
+    const mergedPostmaster = recOf(mergedTeam.postmaster);
+    const pmHarness = mergedPostmaster.harness;
+    const pmModel = mergedPostmaster.model;
+    if (
+      typeof pmHarness !== "string" ||
+      pmHarness.trim() === "" ||
+      typeof pmModel !== "string" ||
+      pmModel.trim() === ""
+    ) {
+      die("setup: team.postmaster needs a harness and a model; answer both or neither", 1);
+    }
+  }
   const laneModels: string[] = [];
   for (const name of mergedNames) {
     const model = recOf(mergedLanes[name]).model;
@@ -1223,6 +1341,14 @@ if (PROJECT !== "") {
     const OW = ask(`${PROJECT_SETTINGS} exists; overwrite (yes/no)`, "no", "overwrite", opts);
     if (OW !== "yes") die(`setup: left ${PROJECT_SETTINGS} as it was`, 1);
   }
+  // The ignore rules land before the settings: a failure here leaves no new
+  // settings behind, and rules without settings are inert.
+  try {
+    ensureIgnore(PROJECT_ROOT, true);
+    if (IGNORE === "yes") ignoreSettings(PROJECT_ROOT);
+  } catch (e) {
+    die(`setup: cannot set the ignore rules${isDie(e) ? `: ${e.message}` : ""}`, 1);
+  }
   const restore = (): void => {
     if (backup === null) rmSync(PROJECT_SETTINGS, { force: true });
     else writeFileSync(PROJECT_SETTINGS, backup, "utf8");
@@ -1274,8 +1400,6 @@ if (PROJECT !== "") {
   } else {
     console.error(notice);
   }
-  ensureIgnore(PROJECT_ROOT, true);
-  if (IGNORE === "yes") ignoreSettings(PROJECT_ROOT);
   console.log(`wrote ${PROJECT_SETTINGS} (parsed back as TOML)`);
   reportIgnored(IGNORE);
   process.exit(0);

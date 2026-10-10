@@ -741,4 +741,120 @@ review_link = ""
     const ignored = run("git", ["-C", s.repo, "check-ignore", "-q", ".postmaster/settings.toml"]);
     expect(ignored.code).toBe(0);
   });
+
+  test("a top-level answer on a second run replaces the old line", () => {
+    const s = stageProject();
+    const first = runProject(s.repo, s.config, "tracker=local\nconfine=off");
+    expect(first.code).toBe(0);
+    expect(settingsOf(s.repo)).toContain('confine = "off"');
+    const second = runProject(s.repo, s.config, "confine=on\noverwrite=yes");
+    expect(second.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('confine = "on"');
+    expect(written).not.toContain('confine = "off"');
+    expect(written).toContain('kind = "local"');
+  });
+
+  test("a second run answers team lists against the existing file's lanes", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '[lanes.alpha]\nharness = "claude"\nmodel = "m-a"\n[lanes.beta]\nharness = "codex"\nmodel = "m-b"\n',
+      "utf8",
+    );
+    const missing = join(tmp, `proj-${projCounter}.missing.toml`);
+    const r = runProject(s.repo, missing, "workhorses=alpha, beta\noverwrite=yes");
+    expect(r.code).toBe(0);
+    expect(settingsOf(s.repo)).toContain('workhorses = ["alpha", "beta"]');
+  });
+
+  test("re-answering tracker=plane keeps the saved workspace", () => {
+    const lanesOnly = join(tmp, `proj-${projCounter}.lanes.toml`);
+    writeFileSync(
+      lanesOnly,
+      'projects_roots = ["~/Code"]\nconfine = "off"\n[lanes.alpha]\nharness = "claude"\nmodel = "m-a"\n[lanes.beta]\nharness = "codex"\nmodel = "m-b"\n',
+      "utf8",
+    );
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '[tracker]\nkind = "plane"\nworkspace = "ws"\n',
+      "utf8",
+    );
+    const r = runProject(s.repo, lanesOnly, "tracker=plane\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('kind = "plane"');
+    expect(written).toContain('workspace = "ws"');
+  });
+
+  test("a dry run with only ignore_settings=yes writes nothing", () => {
+    const s = stageProject();
+    const first = runProject(s.repo, s.config, "tracker=local");
+    expect(first.code).toBe(0);
+    const ignore = join(s.repo, ".postmaster", ".gitignore");
+    const before = readFileSync(ignore, "utf8");
+    const r = runProject(s.repo, s.config, "ignore_settings=yes", ["--dry-run"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("settings ignored: yes");
+    expect(readFileSync(ignore, "utf8")).toBe(before);
+  });
+
+  test("an ignore failure leaves no new settings behind", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(join(tmp, `proj-${projCounter}.nowhere`), join(dir, ".gitignore"));
+    const r = runProject(s.repo, s.config, "tracker=local");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("cannot set the ignore rules");
+    expect(existsSync(join(dir, "settings.toml"))).toBe(false);
+  });
+
+  test("a multiline value is replaced whole, not line by line", () => {
+    const s = stageProject();
+    const dir = join(s.repo, ".postmaster");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.toml"),
+      '[team]\nreviewers = [\n  "alpha",\n  "beta",\n]\n',
+      "utf8",
+    );
+    const r = runProject(s.repo, s.config, "reviewers=alpha\noverwrite=yes");
+    expect(r.code).toBe(0);
+    const written = settingsOf(s.repo);
+    expect(written).toContain('reviewers = ["alpha"]');
+    expect(written).not.toContain('"beta"');
+  });
+
+  test("a half-answered postmaster is refused before anything is written", () => {
+    const lanesOnly = join(tmp, `proj-${projCounter}.lanes.toml`);
+    writeFileSync(
+      lanesOnly,
+      'projects_roots = ["~/Code"]\nconfine = "off"\n[lanes.alpha]\nharness = "claude"\nmodel = "m-a"\n[lanes.beta]\nharness = "codex"\nmodel = "m-b"\n',
+      "utf8",
+    );
+    const s = stageProject();
+    const r = runProject(s.repo, lanesOnly, "postmaster.harness=claude");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("team.postmaster needs a harness and a model");
+    expect(existsSync(join(s.repo, ".postmaster", "settings.toml"))).toBe(false);
+  });
+
+  test("a fully answered postmaster writes against a lanes-only base", () => {
+    const lanesOnly = join(tmp, `proj-${projCounter}.lanes.toml`);
+    writeFileSync(
+      lanesOnly,
+      'projects_roots = ["~/Code"]\nconfine = "off"\n[lanes.alpha]\nharness = "claude"\nmodel = "m-a"\n[lanes.beta]\nharness = "codex"\nmodel = "m-b"\n',
+      "utf8",
+    );
+    const s = stageProject();
+    const r = runProject(s.repo, lanesOnly, "postmaster.harness=claude\npostmaster.model=m-p");
+    expect(r.code).toBe(0);
+    expect(settingsOf(s.repo)).toContain('postmaster = { harness = "claude", model = "m-p" }');
+  });
 });

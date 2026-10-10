@@ -102,7 +102,8 @@ this step: when the check names missing or blocked links, offer the install step
 the user's word.
 
 **Then the project step: the project's own settings or the global config as it is.**
-With no global config, setup goes straight to the project's own settings. Choosing the
+With no global config, the project step goes straight to the project's own settings,
+offering only them since there is no global config to keep as it is. Choosing the
 project's own settings writes them with `scripts/run setup --project <chosen>`, from the
 same answers file, and the file holds only what the user changed for that project;
 choosing the global config as it is writes nothing. When git does not ignore the project's
@@ -289,9 +290,11 @@ config supplies the machine's defaults. None of these sets a floor of
 turnpikes: a ticket names the turnpikes its run passes through (#40), and project settings
 only say what `default` means for that project. The person's file may name models, env
 files and other machine settings; the shared file names no credential and no filesystem
-path (`scripts/run project-settings`). Nothing in `.postmaster/` is committed by default;
-project.toml is committed on purpose with `git add -f`, and a tracked settings.toml is
-used only after the user has accepted it, and again after it changes.
+path (`scripts/run project-settings`). Run records and drafts are never committed;
+project.toml is committed on purpose with `git add -f`, and the person's settings file is
+ignored only on the user's yes during setup, so it is committed like any file to share it.
+A tracked settings.toml is used only after the user has accepted it, and again after it
+changes.
 
 ## Working on this repository
 
