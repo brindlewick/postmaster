@@ -301,7 +301,15 @@ describe("D5 and D6: the wait follows the host", () => {
       const config = writeMinimalConfig(dir);
       const r = run(
         RUN,
-        ["setup-verifiers", repo, "cli-examples", "browser-suite", "web-journey", "--run", dispatch],
+        [
+          "setup-verifiers",
+          repo,
+          "cli-examples",
+          "browser-suite",
+          "web-journey",
+          "--run",
+          dispatch,
+        ],
         { env: { POSTMASTER_HOST: "none", POSTMASTER_CONFIG: config } },
       );
       expect(r.code).toBe(2);
