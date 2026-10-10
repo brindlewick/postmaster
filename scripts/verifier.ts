@@ -16,7 +16,7 @@
 //   run verifier check <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
 //     [--folder <dir>] [--timeout <seconds>]
 //   run verifier land <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
-//     [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>]
+//     [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>] [--word]
 //   run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>]
 //     [--folder <dir>] [--correct]
 //   run verifier upkeep-prompt <repo> [--headless] [--folder <dir>] [--correct]
@@ -87,7 +87,10 @@
 //   --timeout  seconds to wait for the session (make, upkeep), or to run the project's
 //              checks for (check, land); past it the branch lands nothing and the
 //              waiting ends with the tab session left open (default 3600 each,
-//              at most 9 digits)
+//              at most 9 digits). make takes 0, which waits without a limit; check and
+//              land need a whole number of seconds past zero
+//   --word      the user gave the merge word for this landing, so a local landing
+//              merges without consulting merge authority (setup's launch-card yes)
 //
 //   exit 0  prompt or list printed; make: HANDOVER.md validated, the interactive session
 //           left open in its tab, the headless one ended with no wall;
@@ -124,7 +127,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { splitCommand } from "./clerk.ts";
 import { endingWallMessage, isWallMessage } from "./launch.ts";
 import { beside, scriptsDir } from "./lib/paths.ts";
-import { run } from "./lib/proc.ts";
+import { run, type RunResult } from "./lib/proc.ts";
 import { RESULT_RE } from "./verify.ts";
 
 const USAGE = `usage: run verifier prompt <repo> <surface>... [--headless]
@@ -133,14 +136,14 @@ const USAGE = `usage: run verifier prompt <repo> <surface>... [--headless]
        run verifier check <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
          [--folder <dir>] [--timeout <seconds>]
        run verifier land <repo> <branch> --run <dispatch> (--handover <file>|--report <file>)
-         [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>]
+         [--folder <dir>] [--timeout <seconds>] [--landing <local|pull-request>] [--word]
        run verifier upkeep <repo> --run <dispatch> [--timeout <seconds>]
          [--folder <dir>] [--correct]
        run verifier upkeep-prompt <repo> [--headless] [--folder <dir>] [--correct]
        run verifier upkeep-report <repo> --run <dispatch> --report <file> [--folder <dir>]
 
        each surface is cli, web, library, cli-examples, browser-suite, web-journey or library-tests;
-       landing is local or pull-request`;
+       landing is local or pull-request; make's timeout 0 waits without a limit`;
 
 /** The accepted surface names as the unknown-surface error lists them. */
 const KNOWN_SURFACES =
@@ -233,6 +236,7 @@ export interface ParsedLand {
   folder: string | null;
   timeout: number;
   landing: string | null;
+  wordGiven: boolean;
 }
 
 export interface ParsedUpkeep {
@@ -279,11 +283,13 @@ export type Parsed =
 
 function parseTimeoutText(
   value: string | undefined,
+  allowZero: boolean,
 ): { ok: true; timeout: number } | { ok: false; error: string } {
-  if (value === undefined || !/^[0-9]{1,9}$/u.test(value) || Number(value) <= 0) {
+  const n = Number(value);
+  if (value === undefined || !/^[0-9]{1,9}$/u.test(value) || n < 0 || (n === 0 && !allowZero)) {
     return { ok: false, error: `bad timeout: ${value ?? "none"}` };
   }
-  return { ok: true, timeout: Number(value) };
+  return { ok: true, timeout: n };
 }
 
 /** The upkeep commands' flags: upkeep and upkeep-report take --run, prompt takes --headless, and upkeep and prompt take --correct. */
@@ -322,7 +328,7 @@ function parseUpkeepArgs(
       j++;
     } else if (flag === "--timeout") {
       if (cmd !== "upkeep") return { ok: false, error: `unknown flag for ${cmd}: ${flag}` };
-      const parsed = parseTimeoutText(rest[j + 1]);
+      const parsed = parseTimeoutText(rest[j + 1], false);
       if (!parsed.ok) return parsed;
       timeout = parsed.timeout;
       j++;
@@ -414,7 +420,7 @@ export function parseArgs(argv: string[]): Parsed {
         dispatch = value;
         j++;
       } else if (flag === "--timeout") {
-        const parsed = parseTimeoutText(rest[j + 1]);
+        const parsed = parseTimeoutText(rest[j + 1], true);
         if (!parsed.ok) return parsed;
         timeout = parsed.timeout;
         j++;
@@ -435,6 +441,7 @@ export function parseArgs(argv: string[]): Parsed {
   let report: string | null = null;
   let folder: string | null = null;
   let landing: string | null = null;
+  let wordGiven = false;
   let timeout = DEFAULT_TIMEOUT;
   const rest = argv.slice(3);
   for (let j = 0; j < rest.length; j++) {
@@ -462,10 +469,13 @@ export function parseArgs(argv: string[]): Parsed {
       folder = normalized.folder;
       j++;
     } else if (flag === "--timeout") {
-      const parsed = parseTimeoutText(rest[j + 1]);
+      const parsed = parseTimeoutText(rest[j + 1], false);
       if (!parsed.ok) return parsed;
       timeout = parsed.timeout;
       j++;
+    } else if (flag === "--word") {
+      if (cmd !== "land") return { ok: false, error: `unknown flag for check: ${flag}` };
+      wordGiven = true;
     } else if (flag === "--landing") {
       if (cmd !== "land") return { ok: false, error: `unknown flag for check: ${flag}` };
       const value = rest[j + 1];
@@ -486,7 +496,7 @@ export function parseArgs(argv: string[]): Parsed {
     return { ok: false, error: `${cmd} needs --handover <file>` };
   }
   if (cmd === "land") {
-    const req: ParsedLand = { cmd, repo, branch, dispatch, folder, timeout, landing };
+    const req: ParsedLand = { cmd, repo, branch, dispatch, folder, timeout, landing, wordGiven };
     if (handover !== null) req.handover = handover;
     if (report !== null) req.report = report;
     return { ok: true, req };
@@ -845,6 +855,20 @@ export function verifyDirName(repoPath: string): string {
   return slug === "" ? "verify-app" : `verify-${slug}`;
 }
 
+/** The session's verifiers folder: one surface keeps #323's folder, several share one. */
+export function sessionFolder(repo: string, surfaces: Surface[]): string {
+  return surfaces.length === 1 ? verifyDirName(repo) : "verifier";
+}
+
+/** The verifier folders present at the repo top: the shared one, the single one, or both. */
+export function presentVerifierFolders(repo: string): string[] {
+  const out: string[] = [];
+  if (existsSync(join(repo, "verifier"))) out.push("verifier");
+  const single = verifyDirName(repo);
+  if (existsSync(join(repo, single))) out.push(single);
+  return out;
+}
+
 /** A stem numbered past names taken: the stem itself, then stem-2, stem-3. */
 function numbered(stem: string, taken: (name: string) => boolean): string {
   let name = stem;
@@ -1079,8 +1103,9 @@ export const HANDOVER_NAP_SECONDS = 5;
 /**
  * True once the worktree holds a file this session wrote, unchanged across one
  * nap: a report written in pieces must not read half done. An interactive
- * session has no marker, so the settled file is the completion signal. The
- * clock and the sleep are injected for tests.
+ * session has no marker, so the settled file is the completion signal. A
+ * timeout of 0 waits without a limit. The clock and the sleep are injected
+ * for tests.
  */
 export function waitForFile(
   wt: string,
@@ -1104,15 +1129,19 @@ export function waitForFile(
     } else {
       seen = null;
     }
-    const left = deadline - nowMs();
-    if (left <= 0) return false;
-    sleepMs(Math.min(left, HANDOVER_NAP_SECONDS * 1000));
+    if (timeoutSec > 0) {
+      const left = deadline - nowMs();
+      if (left <= 0) return false;
+      sleepMs(Math.min(left, HANDOVER_NAP_SECONDS * 1000));
+    } else {
+      sleepMs(HANDOVER_NAP_SECONDS * 1000);
+    }
   }
 }
 
 /**
  * True once the worktree holds a HANDOVER.md this session wrote. The prompt
- * orders the commit before it.
+ * orders the commit before it. A timeout of 0 waits without a limit.
  */
 export function waitForHandover(
   wt: string,
@@ -1850,6 +1879,16 @@ export function mergeAuthorityOf(runJsonText: string): "user" | "postmaster" {
   }
 }
 
+/** Whether the record is a setup run, whose launch-card yes is the merge word. */
+export function isSetupDispatch(runJsonText: string): boolean {
+  try {
+    const data = JSON.parse(runJsonText) as Record<string, unknown>;
+    return data["kind"] === "setup-verifiers";
+  } catch {
+    return false;
+  }
+}
+
 /** The landing route when none is named: pull-request with an origin remote. */
 export function defaultLanding(hasOrigin: boolean): "local" | "pull-request" {
   return hasOrigin ? "pull-request" : "local";
@@ -1975,12 +2014,12 @@ export function refuseLine(branch: string, reason: string): string {
 class UsageError extends Error {}
 class RunError extends Error {}
 
-function isRepo(repo: string): boolean {
+export function isRepo(repo: string): boolean {
   return git(repo, ["rev-parse", "--git-dir"]).code === 0;
 }
 
 /** The path is the top of its repo, not a path below it. Symlinks resolved both sides. */
-function isRepoTop(repo: string): boolean {
+export function isRepoTop(repo: string): boolean {
   const top = repoTop(repo);
   if (top === null) return false;
   try {
@@ -2216,6 +2255,25 @@ function readRunConfig(dispatch: string): unknown {
   }
 }
 
+/** Seconds in one chunk of a marker wait without a limit. wait-for-markers takes no infinite timeout. */
+export const UNLIMITED_WAIT_CHUNK_SECONDS = 86400;
+
+/**
+ * The wait-for-markers call that settles a session wait: one call with a
+ * timeout, or day-long calls until the marker lands when timeoutSec is 0. Only
+ * a landed marker or a failed wait ends an unlimited wait; a timed-out chunk
+ * waits on. The call is injected for tests.
+ */
+export function waitForMarker(
+  timeoutSec: number,
+  waitOnce: (seconds: number) => Pick<RunResult, "code" | "out" | "err">,
+): Pick<RunResult, "code" | "out" | "err"> {
+  for (;;) {
+    const waited = waitOnce(timeoutSec === 0 ? UNLIMITED_WAIT_CHUNK_SECONDS : timeoutSec);
+    if (waited.code === 0 || timeoutSec !== 0 || waited.code !== 3) return waited;
+  }
+}
+
 function launchAndWait(o: LaunchOpts, sessionStarted: { started: boolean }): Attempt {
   const base = join(o.logs, `verifier-${o.branch}-${o.role}`);
   const stream = `${base}-events.jsonl`;
@@ -2268,7 +2326,9 @@ function launchAndWait(o: LaunchOpts, sessionStarted: { started: boolean }): Att
     );
   }
   sessionStarted.started = true;
-  const waited = run(RUN, ["wait-for-markers", o.logs, basename(marker), "1", String(o.timeout)]);
+  const waited = waitForMarker(o.timeout, (seconds) =>
+    run(RUN, ["wait-for-markers", o.logs, basename(marker), "1", String(seconds)]),
+  );
   if (waited.code !== 0) {
     // Stopping an already-exited session is a no-op, so every wait failure
     // stops first; the stop result is checked before anything claims it.
@@ -2382,7 +2442,7 @@ function runMake(req: ParsedMake): number {
   const label = req.surfaces.join("-");
   const branch = pickBranch((name) => branchTaken(repo, name), label);
   const wt = pickWorktree(repo, label, existsSync);
-  const vdir = req.surfaces.length === 1 ? verifyDirName(repo) : "verifier";
+  const vdir = sessionFolder(repo, req.surfaces);
   const added = git(repo, ["worktree", "add", wt, "-b", branch, base]);
   if (added.code !== 0) {
     throw new RunError(`the worktree would not cut: ${added.err.trim() || added.out.trim()}`);
@@ -3451,11 +3511,14 @@ function runUpkeepReportCmd(req: ParsedUpkeepReport): number {
 }
 
 function landLocal(
-  o: { repo: string; branch: string; dispatch: string },
+  o: { repo: string; branch: string; dispatch: string; wordGiven: boolean },
   target: string,
 ): { line: string; verb: "note" | "merge"; code: number } {
-  const authority = mergeAuthorityOf(fileText(join(o.dispatch, "run.json")));
-  if (authority !== "postmaster") {
+  const runJson = fileText(join(o.dispatch, "run.json"));
+  // The launch-card yes this flag carries belongs to the setup flow alone: on
+  // any other dispatch the flag is ignored and authority decides as before.
+  const setupWord = o.wordGiven && isSetupDispatch(runJson);
+  if (!setupWord && mergeAuthorityOf(runJson) !== "postmaster") {
     return {
       line: `waiting: ${o.branch} is ready to merge into ${target}; waiting for the user's word`,
       verb: "note",
@@ -3600,7 +3663,10 @@ function runLandCmd(req: ParsedLand): number {
             },
             target,
           )
-        : landLocal({ repo: v.repo, branch: v.branch, dispatch: v.dispatch }, target);
+        : landLocal(
+            { repo: v.repo, branch: v.branch, dispatch: v.dispatch, wordGiven: req.wordGiven },
+            target,
+          );
   console.log(outcome.line);
   logVerdict(v.dispatch, v.branch, outcome.verb, outcome.line);
   return outcome.code;

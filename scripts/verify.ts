@@ -163,7 +163,8 @@ function pm(repo: string): string {
         : "npm";
 }
 
-function discover(repo: string): { found: string[]; suite: string } {
+/** The default checks discovery finds for a repo, before any declaration hides them. */
+export function discover(repo: string): { found: string[]; suite: string } {
   const pkgPath = join(repo, "package.json");
   const pkg = existsSync(pkgPath) ? loadJson(pkgPath) : null;
   if (pkg && typeof pkg === "object") {
