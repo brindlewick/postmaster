@@ -73,6 +73,22 @@ describe("C1: the stale mark", () => {
     }
   });
 
+  test("a change to a non-ASCII depended file marks the verifier", () => {
+    const { dir, repo } = freshScratch();
+    try {
+      writeRepoFile(repo, "src/café.md", "# café\n");
+      commitAll(repo, "add the cafe page");
+      const first = headOf(repo, "HEAD");
+      plantSingle(repo, { files: "src/café.md", confirmed: first });
+      changeFile(repo, "src/café.md", "change the cafe page");
+      const r = runStale(repo);
+      expect(r.code).toBe(0);
+      expect(r.out.trim()).toBe("stale: verify-app: src/café.md");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
   test("a commit changing no depended file marks nothing", () => {
     const { dir, repo } = freshScratch();
     try {
