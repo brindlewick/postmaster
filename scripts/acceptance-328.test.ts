@@ -565,6 +565,34 @@ describe("a corrected claim carries its page's change", () => {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
   });
+
+  test("a fix the session never committed fails the pass naming the file", () => {
+    const sandbox = makeSandbox();
+    try {
+      writeStubCorrectingSession(sandbox.bin);
+      const head = headOf(sandbox.repo, "HEAD");
+      const report = writeReport(sandbox.dir, REPORT_CORRECTED);
+      const overlay = writeOverlay(sandbox.dir, {
+        [LIST]: CORRECTED_PAGE,
+        [DONE]: CORRECTED_PAGE,
+        [MAP]: mapWith(head),
+        "notes.txt": "a scratch note at the top\n",
+      });
+      const env = makeEnv(sandbox, {
+        POSTMASTER_HOST: "none",
+        ORACLE_REPORT: report,
+        ORACLE_OVERLAY: overlay,
+      });
+      const before = headOf(sandbox.repo, "main");
+      const r = runPass(sandbox, env);
+      expectCode(r, 1);
+      expect(r.err).toMatch(/notes\.txt/u);
+      expect(r.out).not.toContain("every claim holds");
+      expect(headOf(sandbox.repo, "main")).toBe(before);
+    } finally {
+      rmSync(sandbox.dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the pass moves the index to the commit it drove", () => {
@@ -975,6 +1003,28 @@ describe("the landing judges every shape the repo holds", () => {
       expect(r.out).toContain("refuse: upkeep lands nothing: outside the verifiers' folder: ");
       expect(r.out).toContain(SHARED_ADD);
       expect(r.out).toContain(SHARED_INDEX);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("project code under an absent shape refuses naming the file", () => {
+    const { dir, repo } = appWithVerifiers();
+    try {
+      writeRepoFile(repo, "verifier/src/code.ts", "export const code = 1;\n");
+      commitAll(repo, "project code under verifier/");
+      const report = writeReport(dir, APP_REPORT);
+      const dispatch = makeDispatch(dir, "postmaster");
+      plantBranch(
+        repo,
+        "upkeep",
+        { ...appCorrections(repo), ["verifier/src/code.ts"]: "export const code = 2;\n" },
+        "corrections plus project code",
+      );
+      const r = runCheckReport(repo, "upkeep", dispatch, report);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("refuse: upkeep lands nothing: outside the verifiers' folder: ");
+      expect(r.out).toContain("verifier/src/code.ts");
     } finally {
       cleanup(dir);
     }
