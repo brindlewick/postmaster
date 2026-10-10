@@ -2640,16 +2640,23 @@ async function runCmd(args: string[]): Promise<void> {
     }
     // BASE's dispatch_info fails only when python itself breaks, which the port
     // has no equivalent of; an unreadable waybill reads as no worktree below.
+    // A dispatch without a waybill still names its space when it carries run.json:
+    // setup launches its verifier session before any ticket run, and its run dir
+    // holds the record but no waybill and no synthesis worktree.
     const underPath = dispatchInfo(under).worktree;
     let underPathIsDir = false;
     try {
       underPathIsDir = !!underPath && statSync(underPath).isDirectory();
     } catch {}
-    if (!underPathIsDir)
+    let underHasRun = false;
+    try {
+      underHasRun = statSync(join(under, "run.json")).isFile();
+    } catch {}
+    if (!underPathIsDir && !underHasRun)
       appendFailure(
         err,
         marker,
-        `the run at ${under} has no existing synthesis worktree to name its space`,
+        `the run at ${under} has no existing synthesis worktree or run.json to name its space`,
       );
   }
   if (dispatch) {

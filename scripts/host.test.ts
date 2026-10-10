@@ -1,4 +1,4 @@
-// Tests beside scripts/host.ts, moved from its --self-test on #109: 335 controls.
+// Tests beside scripts/host.ts, moved from its --self-test on #109: 337 controls.
 // host.ts's suite lives in ./host-self-test.ts's runControls (shared sequential fixture);
 // this file drives it once in beforeAll, splits its printed lines on the section headers,
 // and asserts each section's control count with no FAIL. Portable process controls are below.
@@ -30,8 +30,8 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "detect", count: 5 },
   { name: "launch labels and run identity", count: 31 },
   { name: "name: from the waybill, so no title is typed into a shell", count: 5 },
-  { name: "run, no host: headless launch", count: 16 },
-  { name: "a run launch without a named run space is refused", count: 1 },
+  { name: "run, no host: headless launch", count: 17 },
+  { name: "a run launch without a named run space is refused", count: 2 },
   { name: "stop: owned process trees and refusal controls", count: 5 },
   { name: "stop: registry identity and process membership", count: 13 },
   { name: "run, Herdr (stub): pane placement and environment handover", count: 16 },

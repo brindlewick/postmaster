@@ -1679,6 +1679,32 @@ export async function runControls(): Promise<number> {
       "the same for wait",
       () => invalidWait.code === 1 && !invalidWait.out.includes("controls"),
     );
+    const setupRun = join(root, "run-setup");
+    mkdirSync(setupRun, { recursive: true });
+    writeFileSync(join(setupRun, "run.json"), JSON.stringify({ config: {} }));
+    const setupLaunch = execHost(
+      [
+        "run",
+        f.name,
+        join(f.repo, ".worktrees/T-1-luna"),
+        "--role",
+        "coachman",
+        "--under",
+        setupRun,
+        "--run",
+        setupRun,
+        "--marker",
+        markerPath("n9"),
+        "--",
+        "./fixed.sh",
+      ],
+      noHost,
+    );
+    await pass(
+      "a dispatch carrying run.json but no waybill still launches",
+      () => setupLaunch.code === 0 && marker(markerPath("n9"), 15),
+      `${setupLaunch.out}${setupLaunch.err}`,
+    );
 
     console.log("a run launch without a named run space is refused");
     resetHarness(root);
@@ -1706,6 +1732,34 @@ export async function runControls(): Promise<number> {
         `${noSpace.out}${noSpace.err}`.includes("needs --under") &&
         !calls(root, "herdr").some((line) => line.includes("workspace\tcreate")),
       `${noSpace.out}${noSpace.err}`,
+    );
+    const bareRun = join(root, "run-bare");
+    mkdirSync(bareRun, { recursive: true });
+    const noSpaceNorRun = execHost(
+      [
+        "run",
+        SECURITY_LABEL,
+        f.clone,
+        "--role",
+        "reviewer",
+        "--under",
+        bareRun,
+        "--run",
+        run1,
+        "--marker",
+        markerPath("no-space-nor-run"),
+        "--",
+        "./fixed.sh",
+      ],
+      stubs,
+    );
+    await pass(
+      "a dispatch with neither a live worktree nor run.json is refused, and its marker lands",
+      () =>
+        noSpaceNorRun.code === 1 &&
+        existsSync(markerPath("no-space-nor-run")) &&
+        `${noSpaceNorRun.out}${noSpaceNorRun.err}`.includes("or run.json to name its space"),
+      `${noSpaceNorRun.out}${noSpaceNorRun.err}`,
     );
 
     console.log("stop: owned process trees and refusal controls");
