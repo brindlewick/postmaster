@@ -163,6 +163,21 @@ describe("positive controls", () => {
     }
   }, 120000);
 
+  test("setup lists the ticket_notes key with its two values and default, and writes each", () => {
+    const keys = run(SELF, ["setup", "--keys"]);
+    expect(keys.code).toBe(0);
+    expect(keys.out).toContain("ticket notes for lanes: given or held-back");
+    expect(keys.out).toMatch(/ticket_notes +given +ticket notes for lanes:/u);
+    for (const value of ["given", "held-back"]) {
+      answers(`notes-${value}`, `ticket_notes=${value}`);
+      expect(runSetup(`notes-${value}`)).toBe(0);
+      const cfg = tryTomlFile(join(tmp, `notes-${value}.toml`));
+      expect((cfg?.team as Record<string, unknown> | undefined)?.ticket_notes).toBe(value);
+    }
+    const cfg = tryTomlFile(join(tmp, "plain.toml"));
+    expect((cfg?.team as Record<string, unknown> | undefined)?.ticket_notes).toBe("given");
+  }, 120000);
+
   test("the adding verb inserts clerk in [team] and preserves the other config lines", () => {
     const before = `[team]\nworkhorses = ["alpha", "beta"]\npostmaster = { harness = "claude", model = "pm" }\n\n[postmaster]\npoll_seconds = 9\n`;
     writeFileSync(join(tmp, "legacy.toml"), before);
@@ -525,6 +540,15 @@ describe("negative controls", () => {
     expect(rc).toBe(1);
     expect(out).toContain("mode must be synthesis, single-thread or alternate");
     expect(existsSync(join(tmp, "mode-invalid.toml"))).toBe(false);
+  });
+
+  test("a ticket_notes other than given or held-back is refused, naming the two", () => {
+    answers("notes-invalid", "ticket_notes=sometimes");
+    const rc = runSetup("notes-invalid");
+    const out = readFileSync(join(tmp, "notes-invalid.out"), "utf8");
+    expect(rc).toBe(1);
+    expect(out).toContain("ticket_notes must be given or held-back");
+    expect(existsSync(join(tmp, "notes-invalid.toml"))).toBe(false);
   });
 
   const badLimits = [

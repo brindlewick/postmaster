@@ -2276,6 +2276,53 @@ describe("dispatch mode", () => {
     });
   });
 
+  test("a config with no team.ticket_notes records given, and the verb prints it unrecorded", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "notesplain");
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(0);
+      const rec = JSON.parse(readFileSync(join(m.dispatch, "run.json"), "utf8")) as {
+        config: { team: Record<string, unknown> };
+      };
+      expect(rec.config.team.ticket_notes).toBeUndefined();
+      const v = run(wrapper, ["run-meta", "ticket-notes", m.dispatch], { env: m.env });
+      expect(v.code).toBe(0);
+      expect(v.out).toBe(
+        "ticket-notes: given\nticket-notes source: unrecorded\nticket-notes setting: unrecorded\n",
+      );
+    });
+  });
+
+  test("held-back is recorded in the config, and the verb prints the three", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "notesheld", 'ticket_notes = "held-back"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(0);
+      const rec = JSON.parse(readFileSync(join(m.dispatch, "run.json"), "utf8")) as {
+        config: { team: Record<string, unknown> };
+      };
+      expect(rec.config.team.ticket_notes).toBe("held-back");
+      const v = run(wrapper, ["run-meta", "ticket-notes", m.dispatch], { env: m.env });
+      expect(v.code).toBe(0);
+      expect(v.out).toBe(
+        "ticket-notes: held-back\nticket-notes source: setting\nticket-notes setting: held-back\n",
+      );
+    });
+  });
+
+  test("a team.ticket_notes other than given or held-back is refused, and writes nothing", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const m = machine(tmp, "notesbad", 'ticket_notes = "sometimes"\n');
+      const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
+      expect(r.code).toBe(1);
+      expect(r.out + r.err).toContain("team.ticket_notes must be given or held-back");
+      expect(existsSync(join(m.dispatch, "run.json"))).toBe(false);
+    });
+  });
+
   test("alternate gives each dispatch the mode the project's latest run did not have", () => {
     withTempDir((raw) => {
       const tmp = realpathSync(raw);

@@ -1642,13 +1642,16 @@ describe("score: timing on whole copied runs with ticket-figure timelines (#265)
 });
 
 describe("score: premises are checked before workhorse dispatch", () => {
-  function recordOrder(name: string, rows: Array<Record<string, string>>): string {
+  function recordOrder(
+    name: string,
+    rows: Array<Record<string, string>>,
+    ticketNotes?: string,
+  ): string {
     const dispatch = join(tmp, `premises-${name}`);
     mkdirSync(dispatch, { recursive: true });
-    writeFileSync(
-      join(dispatch, "run.json"),
-      JSON.stringify({ config: { team: { workhorses: ["one", "two"] } } }),
-    );
+    const team: Record<string, unknown> = { workhorses: ["one", "two"] };
+    if (ticketNotes !== undefined) team["ticket_notes"] = ticketNotes;
+    writeFileSync(join(dispatch, "run.json"), JSON.stringify({ config: { team } }));
     writeFileSync(
       join(dispatch, "actions.jsonl"),
       `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
@@ -1657,6 +1660,12 @@ describe("score: premises are checked before workhorse dispatch", () => {
   }
 
   const premise = { actor: "coachman", action: "premises", target: "base", detail: "result=same" };
+  const postmasterPremise = {
+    actor: "postmaster",
+    action: "premises",
+    target: "base",
+    detail: "result=same",
+  };
   const laneDispatch = {
     actor: "coachman",
     action: "dispatch",
@@ -1684,6 +1693,37 @@ describe("score: premises are checked before workhorse dispatch", () => {
     const result = checkPremisesOrder(recordOrder("stopped", [premise]));
     expect(result.ok).toBe(true);
     expect(result.detail).toContain("no workhorse dispatched");
+  });
+
+  test("held-back takes the postmaster premises action before the first dispatch", () => {
+    const result = checkPremisesOrder(
+      recordOrder("held-before", [postmasterPremise, laneDispatch], "held-back"),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test("held-back with the dispatch first fails", () => {
+    const result = checkPremisesOrder(
+      recordOrder("held-after", [laneDispatch, postmasterPremise], "held-back"),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("precedes");
+  });
+
+  test("held-back with no postmaster premises action fails", () => {
+    const result = checkPremisesOrder(
+      recordOrder("held-missing", [laneDispatch], "held-back"),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no postmaster premises action");
+  });
+
+  test("held-back with a coachman premises action fails", () => {
+    const result = checkPremisesOrder(
+      recordOrder("held-coachman", [postmasterPremise, premise], "held-back"),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("already checked");
   });
 });
 

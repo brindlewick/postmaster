@@ -7,6 +7,7 @@
 //   run run-meta pin <repo> <commit> a shared checkout of <repo> at <commit> under $POSTMASTER_TOOL_PINS
 //   run run-meta path <dispatch>     print the canonical path of the run's tool checkout
 //   run run-meta mode <dispatch>     print the run's mode, its source and the setting at dispatch
+//   run run-meta ticket-notes <dispatch>  print the run's ticket notes, its source and the setting
 //   run run-meta check <dispatch>    the run's checkout still serves its dispatch commit
 //   run run-meta release <dispatch>  remove the pin when no claimed run is in flight
 //   run run-meta efforts <dispatch>  print the waybill's efforts line from run.json
@@ -21,6 +22,11 @@
 // the waybill's Team section `mode:` line with the record: both present and different fails
 // naming both, one side missing fails naming the side that has one, and a run with neither
 // is accepted.
+//
+// team.ticket_notes says what the coachman and the workhorses get from the ticket: given
+// (the default) is the whole ticket, held-back holds back its technical notes and verified
+// facts. A config without the key reads as given; anything else is refused at dispatch.
+// `ticket-notes` prints the value, its source and the setting, read from the run's record.
 //
 // Records when it was written; the run and project; the target repo's HEAD and branch; the
 // postmaster commit that dispatched it, and whether that checkout had uncommitted changes,
@@ -104,6 +110,7 @@ import {
 } from "./lib/effective-config.ts";
 import { runPinned } from "./lib/pinned.ts";
 import { toolRoot } from "./lib/paths.ts";
+import { resolveTicketNotes } from "./lib/ticket-notes.ts";
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
 import { processState } from "./lib/processes.ts";
 import { pySplitLines, pyTrim } from "./lib/text.ts";
@@ -914,6 +921,46 @@ export function mode(d: string): Outcome {
   return ok(`mode: ${m}\nmode source: ${source}\nmode setting: ${setting}\n`);
 }
 
+// ticket-notes <dispatch>: the run's ticket notes, its source and the setting's value at
+// dispatch. A record with no value is a given run from before the setting existed, so its
+// value prints as given and its sources as unrecorded.
+export function ticketNotesVerb(d: string): Outcome {
+  const runJson = join(d, "run.json");
+  if (!isFile(runJson)) return fail(`run-meta: no run.json in ${d}\n`);
+  let rec: unknown;
+  try {
+    rec = JSON.parse(readFileSync(runJson, "utf8")) as unknown;
+  } catch {
+    return fail(`run-meta: ${runJson} cannot be read\n`);
+  }
+  if (typeof rec !== "object" || rec === null || Array.isArray(rec)) {
+    return fail(`run-meta: ${runJson} is not an object\n`);
+  }
+  const config = (rec as Record<string, unknown>).config;
+  const team =
+    typeof config === "object" && config !== null && !Array.isArray(config)
+      ? (config as Record<string, unknown>).team
+      : undefined;
+  const recorded =
+    typeof team === "object" && team !== null && !Array.isArray(team)
+      ? (team as Record<string, unknown>).ticket_notes
+      : undefined;
+  if (
+    typeof recorded === "string" &&
+    recorded !== "" &&
+    recorded !== "given" &&
+    recorded !== "held-back"
+  ) {
+    return fail(
+      `run-meta: ${runJson} records team.ticket_notes ${recorded}, not given or held-back\n`,
+    );
+  }
+  const v = recorded === "held-back" ? "held-back" : "given";
+  const source = typeof recorded === "string" && recorded !== "" ? "setting" : "unrecorded";
+  const setting = typeof recorded === "string" && recorded !== "" ? recorded : "unrecorded";
+  return ok(`ticket-notes: ${v}\nticket-notes source: ${source}\nticket-notes setting: ${setting}\n`);
+}
+
 // check_mode <dispatch>: the waybill's Team section `mode:` line and the record's mode agree.
 // A mismatch fails naming both; a run that names neither is accepted, so a dispatch from
 // before the mode existed still passes. One side missing fails too: a missing line reads as
@@ -1019,6 +1066,9 @@ function buildRecord(
   }
   const mode = resolveRunMode(resolvedConfig, d, requestedMode);
   if ("error" in mode) return { ok: false, messages: [mode.error], notice: resolved.notice };
+  const notes = resolveTicketNotes(resolvedConfig);
+  if ("error" in notes)
+    return { ok: false, messages: [`run-meta: ${notes.error}`], notice: resolved.notice };
   const warnings = existsSync(join(resolvedRepo, ".postmaster", "fixture"))
     ? fixtureEfforts(resolvedConfig)
     : [];
@@ -1288,12 +1338,23 @@ if (import.meta.main) {
   }
   {
     const cmd = argv[0];
-    const verbs = ["pin", "path", "mode", "check", "release", "efforts", "run-pinned"];
+    const verbs = [
+      "pin",
+      "path",
+      "mode",
+      "ticket-notes",
+      "check",
+      "release",
+      "efforts",
+      "run-pinned",
+    ];
     let outcome: Outcome;
     if (cmd === "pin" && argv.length === 3)
       outcome = pin(argv[1] as string, argv[2] as string, readTools());
     else if (cmd === "path" && argv.length === 2) outcome = pathOf(argv[1] as string);
     else if (cmd === "mode" && argv.length === 2) outcome = mode(argv[1] as string);
+    else if (cmd === "ticket-notes" && argv.length === 2)
+      outcome = ticketNotesVerb(argv[1] as string);
     else if (cmd === "check" && argv.length === 2) {
       const pinCheck = checkPinAndConfinement(argv[1] as string);
       outcome = pinCheck.code !== 0 ? pinCheck : checkMode(argv[1] as string);
