@@ -7,6 +7,7 @@
 // with it in place (#325).
 //
 //   run verifier prompt <repo> <surface>... [--headless]
+//   run verifier list <repo>
 //   run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
 //   run verifier check <repo> <branch> --run <dispatch> --handover <file>
 //     [--folder <dir>] [--timeout <seconds>]
@@ -20,6 +21,9 @@
 //   prompt     print the session's instructions for the repo and surfaces, the
 //              interactive form, or with --headless the no-host form, which lists
 //              each question it could not ask in HANDOVER.md instead of asking
+//   list       print the verifiers the repo holds: one index: line per read-first
+//              entry, then one verifier:/surface:/features: block per verifier, or
+//              verifiers: none. The clerk's brief and discovery read this (#327)
 //   make       cut a worktree on a branch of its own beside the repo, removed again
 //              when make fails before any session starts, render the prompt, and open
 //              the coachman role's interactive form through run launch in a fresh tab
@@ -47,7 +51,7 @@
 //              for (check, land); past it the branch lands nothing (default 3600 each,
 //              at most 9 digits)
 //
-//   exit 0  prompt printed; make: HANDOVER.md validated, the interactive session
+//   exit 0  prompt or list printed; make: HANDOVER.md validated, the interactive session
 //           left open in its tab, the headless one ended with no wall;
 //           check: the branch lands; land: merged, or the pull request waits for the word
 //   exit 1  make failed: the launch would not start, the session was still running at the
@@ -64,6 +68,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -79,6 +84,7 @@ import { run } from "./lib/proc.ts";
 import { RESULT_RE } from "./verify.ts";
 
 const USAGE = `usage: run verifier prompt <repo> <surface>... [--headless]
+       run verifier list <repo>
        run verifier make <repo> <surface>... --run <dispatch> [--timeout <seconds>]
        run verifier check <repo> <branch> --run <dispatch> --handover <file>
          [--folder <dir>] [--timeout <seconds>]
@@ -143,6 +149,11 @@ export interface ParsedPrompt {
   headless: boolean;
 }
 
+export interface ParsedList {
+  cmd: "list";
+  repo: string;
+}
+
 export interface ParsedMake {
   cmd: "make";
   repo: string;
@@ -173,7 +184,7 @@ export interface ParsedLand {
 }
 
 export type Parsed =
-  | { ok: true; req: ParsedPrompt | ParsedMake | ParsedCheck | ParsedLand }
+  | { ok: true; req: ParsedPrompt | ParsedList | ParsedMake | ParsedCheck | ParsedLand }
   | { ok: false; error: string };
 
 function parseTimeoutText(
@@ -188,10 +199,16 @@ function parseTimeoutText(
 export function parseArgs(argv: string[]): Parsed {
   const cmd = argv[0];
   if (cmd === undefined) return { ok: false, error: "no command" };
-  if (cmd !== "prompt" && cmd !== "make" && cmd !== "check" && cmd !== "land") {
+  if (cmd !== "prompt" && cmd !== "list" && cmd !== "make" && cmd !== "check" && cmd !== "land") {
     return { ok: false, error: `unknown command: ${cmd}` };
   }
   const repo = argv[1];
+  if (cmd === "list") {
+    if (repo === undefined || argv.length !== 2) {
+      return { ok: false, error: "list takes a repo" };
+    }
+    return { ok: true, req: { cmd, repo } };
+  }
   if (cmd === "prompt" || cmd === "make") {
     if (repo === undefined) return { ok: false, error: `${cmd} takes a repo and a surface` };
     const names: string[] = [];
@@ -361,6 +378,159 @@ export function indexNames(text: string, kind: Surface): boolean {
     // never reads as the cli verifier, or a relative folder link [cli](cli/).
     return new RegExp(`verifier/${kind}(?![A-Za-z0-9_-])|\\]\\( *${kind}/`, "u").test(lower);
   });
+}
+
+export interface VerifierEntry {
+  /** Repo-relative folder, e.g. verifier/cli. */
+  folder: string;
+  /** The surface in prose, or "unstated". */
+  surface: string;
+  /** Repo-relative feature pages, sorted. */
+  pages: string[];
+}
+
+export interface VerifierListing {
+  /** Read-first entries: the shared index where one exists, else each verifier's README. */
+  indexes: string[];
+  /** The verifiers, sorted by folder. */
+  verifiers: VerifierEntry[];
+}
+
+/** The surface prose a multi folder kind names, or null for a kind unknown. */
+export function kindProse(kind: string): string | null {
+  const surface = surfaceKind(kind);
+  return surface === null ? null : PROSE[surface];
+}
+
+/** The surface a verifier README's head states, or null when it states none. */
+export function surfaceFromReadme(text: string): string | null {
+  // The head is the first 30 lines, as hasUpkeepLine reads it: the H1 subject
+  // comes first, so the earliest prose phrase wins over a later aside.
+  const head = text.split("\n").slice(0, 30).join("\n");
+  // LOWER: lowered for ASCII phrase matches
+  const lower = head.toLowerCase();
+  const phrases: Array<[string, Surface]> = [
+    ["command line", "cli"],
+    ["web pages", "web"],
+    ["library interface", "library"],
+  ];
+  let best: { at: number; surface: Surface } | null = null;
+  for (const [phrase, surface] of phrases) {
+    const at = lower.indexOf(phrase);
+    if (at !== -1 && (best === null || at < best.at)) best = { at, surface };
+  }
+  if (best !== null) return PROSE[best.surface];
+  // A minimal README may name only the short token, as src/cli.ts does. No
+  // library token: a bare "library" is usually the project's own code.
+  const tokens: Array<[RegExp, Surface]> = [
+    [/\bcli\b/u, "cli"], // ASCII: ASCII literals; an adjacent ASCII word char joins them
+    [/\bweb\b/u, "web"], // ASCII: ASCII literals; an adjacent ASCII word char joins them
+  ];
+  let tokenBest: { at: number; surface: Surface } | null = null;
+  for (const [re, surface] of tokens) {
+    const m = re.exec(lower);
+    if (m !== null && (tokenBest === null || m.index < tokenBest.at)) {
+      tokenBest = { at: m.index, surface };
+    }
+  }
+  return tokenBest === null ? null : PROSE[tokenBest.surface];
+}
+
+/** Feature pages from a features/ listing: markdown besides its index, sorted. */
+export function featurePageNames(names: string[]): string[] {
+  return names.filter((n) => n.endsWith(".md") && n !== "README.md").sort();
+}
+
+/** The list output for verifiers found, or "verifiers: none". */
+export function renderListing(listing: VerifierListing): string {
+  if (listing.verifiers.length === 0) return "verifiers: none";
+  const lines: string[] = [];
+  for (const index of listing.indexes) lines.push(`index: ${index}`);
+  for (const v of listing.verifiers) {
+    lines.push(`verifier: ${v.folder}`);
+    lines.push(`surface: ${v.surface}`);
+    lines.push(`features: ${v.pages.length === 0 ? "none" : v.pages.join(" ")}`);
+  }
+  return lines.join("\n");
+}
+
+function isFilePath(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isDirPath(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function childNames(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+}
+
+function readmeText(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** One verifier's entry from its folder, or null when the folder holds no verifier. */
+function readVerifier(repo: string, folder: string, kind: string | null): VerifierEntry | null {
+  if (!isFilePath(join(repo, folder, "README.md"))) return null;
+  const pages = featurePageNames(childNames(join(repo, folder, "features"))).map(
+    (n) => `${folder}/features/${n}`,
+  );
+  const fromKind = kind === null ? null : kindProse(kind);
+  const surface =
+    fromKind ?? surfaceFromReadme(readmeText(join(repo, folder, "README.md"))) ?? "unstated";
+  return { folder, surface, pages };
+}
+
+/**
+ * The repo's verifiers from its working tree, in both shapes: the multi
+ * verifier/ folder with its index, and any top-level folder starting with
+ * verify- that holds a README.md. A renamed repo keeps its old slug, so the
+ * single shape matches the prefix, never the slug of today.
+ */
+export function listVerifiers(repo: string): VerifierListing {
+  const verifiers: VerifierEntry[] = [];
+  const indexes: string[] = [];
+  const multiIndex = isFilePath(join(repo, "verifier", "README.md"));
+  if (multiIndex) indexes.push("verifier/README.md");
+  if (isDirPath(join(repo, "verifier"))) {
+    for (const kind of childNames(join(repo, "verifier")).sort()) {
+      if (!isDirPath(join(repo, "verifier", kind))) continue;
+      const entry = readVerifier(repo, `verifier/${kind}`, kind);
+      if (entry !== null) {
+        verifiers.push(entry);
+        // No shared index: each verifier's README is the read-first entry.
+        if (!multiIndex) indexes.push(`verifier/${kind}/README.md`);
+      }
+    }
+  }
+  for (const name of childNames(repo).sort()) {
+    if (!name.startsWith("verify-") || !isDirPath(join(repo, name))) continue;
+    const entry = readVerifier(repo, name, null);
+    if (entry !== null) {
+      verifiers.push(entry);
+      indexes.push(`${name}/README.md`);
+    }
+  }
+  verifiers.sort((a, b) => (a.folder < b.folder ? -1 : a.folder > b.folder ? 1 : 0));
+  indexes.sort();
+  return { indexes, verifiers };
 }
 
 /**
@@ -1057,6 +1227,14 @@ function runPrompt(req: ParsedPrompt): number {
   const base = defaultBase(repo);
   if (base === null) throw new UsageError(`no commit to cut from in ${req.repo}`);
   process.stdout.write(renderSessionPrompt(repo, req.surfaces, base, req.headless));
+  return 0;
+}
+
+function runListCmd(req: ParsedList): number {
+  const repo = resolve(req.repo);
+  if (!isRepo(repo)) throw new UsageError(`not a git repository: ${req.repo}`);
+  if (!isRepoTop(repo)) throw new UsageError(`not the top of its repository: ${req.repo}`);
+  console.log(renderListing(listVerifiers(repo)));
   return 0;
 }
 
@@ -2159,6 +2337,7 @@ function main(argv: string[]): number {
     const parsed = parseArgs(argv);
     if (!parsed.ok) throw new UsageError(parsed.error);
     if (parsed.req.cmd === "prompt") return runPrompt(parsed.req);
+    if (parsed.req.cmd === "list") return runListCmd(parsed.req);
     if (parsed.req.cmd === "check") return runCheckCmd(parsed.req);
     if (parsed.req.cmd === "land") return runLandCmd(parsed.req);
     return runMake(parsed.req);
