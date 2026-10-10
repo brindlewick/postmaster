@@ -2,7 +2,7 @@
 // session, and a stub tmux that records the interactive open. The tests spawn git
 // and scripts/run as subprocesses; nothing here imports the change. The stubs
 // assume a repo whose slug is "app", so its verifier folder is verify-app.
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, initRepo, RUN, writeRepoFile } from "./acceptance-323.ts";
@@ -30,7 +30,10 @@ const SESSION_WORK = [
 
 /** A temp repo named app with one commit, a bin dir, and a dispatch holding run.json. */
 export function makeSandbox(): Sandbox {
-  const dir = mkdtempSync(join(tmpdir(), "acceptance-344-"));
+  // Physical first: the launcher resolves its cwd before the harness starts,
+  // and the tmp dir may itself be a symlink (macOS /var), so every sandbox
+  // path is canonical and the stubs' guards compare like with like.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "acceptance-344-")));
   const repo = join(dir, "app");
   initRepo(repo);
   writeRepoFile(repo, "README.md", "# app\n");
@@ -83,11 +86,33 @@ function rootGuard(target: string): string[] {
   return [
     'if [ -z "${ORACLE_ROOT:-}" ]; then echo "stub refuses: ORACLE_ROOT is unset" >&2; exit 1; fi',
     `TARGET=${target}`,
+    // Canonical before comparing: the target may arrive logical (the tmp dir
+    // may be a symlink) while ORACLE_ROOT is physical, or the reverse.
+    'TARGET=$(CDPATH= cd "$TARGET" && pwd -P) || { echo "stub refuses: cannot resolve $TARGET" >&2; exit 1; }',
     'case "$TARGET" in',
     '  "${ORACLE_ROOT}"/*) ;;',
     '  *) echo "stub refuses: $TARGET is outside $ORACLE_ROOT" >&2; exit 1 ;;',
     "esac",
   ];
+}
+
+/**
+ * A stub `muse` that only satisfies the harness lookup: behind the stub tmux
+ * the interactive form is recorded, never run, so a real execution refuses.
+ * CI carries no harness binaries, and `launch` checks the lookup up front.
+ */
+export function writeStubMuse(bin: string): void {
+  const path = join(bin, "muse");
+  writeFileSync(
+    path,
+    [
+      "#!/bin/sh",
+      'echo "stub muse: the harness must not run behind the stub tmux" >&2',
+      "exit 1",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(path, 0o755);
 }
 
 /** A stub `claude` that plays a finished headless session in its cwd. */

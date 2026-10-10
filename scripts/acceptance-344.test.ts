@@ -19,10 +19,18 @@ import {
   promptOrThrow,
   RUN,
   summaryLine,
+  writeStubMuse,
   writeStubSession,
   writeStubTmux,
 } from "./acceptance-344.ts";
-import { run } from "./lib/proc.ts";
+import { run, type RunResult } from "./lib/proc.ts";
+
+/** Assert a driven command's exit code, quoting its stderr when it differs. */
+function expectCode(r: RunResult, code: number): void {
+  if (r.code !== code) {
+    throw new Error(`exited ${r.code}, expected ${code}: ${(r.err || r.out).trim()}`);
+  }
+}
 
 /** The #323 shape both renderings keep: repo, surface prose, sections, handover, credit. */
 function expectPromptShape(out: string, repo: string, prose: string): void {
@@ -125,7 +133,7 @@ describe("usage", () => {
     const sandbox = makeSandbox();
     try {
       const r = run(RUN, ["verifier", "prompt", sandbox.repo, "cli", "--fresh"]);
-      expect(r.code).toBe(2);
+      expectCode(r, 2);
       expect(r.err).toContain("usage: run verifier");
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
@@ -136,7 +144,7 @@ describe("usage", () => {
     const sandbox = makeSandbox();
     try {
       const r = run(RUN, ["verifier", "prompt", sandbox.repo, "telegraph", "--headless"]);
-      expect(r.code).toBe(2);
+      expectCode(r, 2);
       expect(r.err).toContain("usage: run verifier");
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
@@ -154,7 +162,7 @@ describe("stub confinement", () => {
         cwd: outside,
         env: { ORACLE_ROOT: sandbox.dir },
       });
-      expect(r.code).toBe(1);
+      expectCode(r, 1);
       expect(r.err).toContain("refuses");
       expect(existsSync(join(outside, "HANDOVER.md"))).toBe(false);
     } finally {
@@ -172,7 +180,7 @@ describe("stub confinement", () => {
       const r = run(join(sandbox.bin, "tmux"), ["new-session", "-n", "x", "-c", outside], {
         env: { ORACLE_ROOT: sandbox.dir, ORACLE_SESSION_WORK: "1" },
       });
-      expect(r.code).toBe(1);
+      expectCode(r, 1);
       expect(r.err).toContain("refuses");
       expect(existsSync(join(outside, "HANDOVER.md"))).toBe(false);
     } finally {
@@ -193,7 +201,7 @@ describe("make with no host: the headless fallback", () => {
         ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "120"],
         { env },
       );
-      expect(r.code).toBe(0);
+      expectCode(r, 0);
       expect(r.out).toContain("branch verify-cli");
       expect(r.out).toContain("role coachman");
       const handover = summaryLine(r.out, "handover");
@@ -224,7 +232,7 @@ describe("make with no host: the headless fallback", () => {
         ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "120"],
         { env },
       );
-      expect(r.code).toBe(0);
+      expectCode(r, 0);
       expect(r.out).toContain("branch verify-cli");
       const promptFile = summaryLine(r.out, "prompt");
       expect(promptFile).not.toBe("");
@@ -247,6 +255,7 @@ describe("make with a host: the interactive open", () => {
     try {
       const log = join(sandbox.dir, "tmux.log");
       writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
+      writeStubMuse(sandbox.bin);
       const env = makeEnv(sandbox, {
         POSTMASTER_HOST: "tmux",
         POSTMASTER_CONFIG: coachmanConfig(sandbox),
@@ -257,7 +266,7 @@ describe("make with a host: the interactive open", () => {
         ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "120"],
         { env },
       );
-      expect(r.code).toBe(0);
+      expectCode(r, 0);
       expect(r.out).toContain("branch verify-cli");
       expect(r.out).toContain("handle verifier-app-verify-cli");
       const calls = readFileSync(log, "utf8");
@@ -287,6 +296,7 @@ describe("make with a host: the interactive open", () => {
     try {
       const log = join(sandbox.dir, "tmux.log");
       writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
+      writeStubMuse(sandbox.bin);
       const env = makeEnv(sandbox, {
         POSTMASTER_HOST: "tmux",
         POSTMASTER_CONFIG: coachmanConfig(sandbox),
@@ -296,7 +306,7 @@ describe("make with a host: the interactive open", () => {
         ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "2"],
         { env },
       );
-      expect(r.code).toBe(1);
+      expectCode(r, 1);
       expect(r.err).toMatch(/left open/iu);
       expect(readFileSync(log, "utf8")).toContain("new-session");
       const actions = readFileSync(join(sandbox.dispatch, "actions.jsonl"), "utf8");
@@ -318,6 +328,8 @@ describe("make with a host: the interactive open", () => {
       expect(basename(b.repo)).toBe("app");
       const log = join(a.dir, "tmux.log");
       writeStubTmux(a.bin, log, join(a.dir, "tmux.state"));
+      writeStubMuse(a.bin);
+      writeStubMuse(b.bin);
       const config = coachmanConfig(a);
       const envA = makeEnv(a, {
         POSTMASTER_HOST: "tmux",
@@ -335,13 +347,13 @@ describe("make with a host: the interactive open", () => {
         ["verifier", "make", a.repo, "cli", "--run", a.dispatch, "--timeout", "120"],
         { env: envA },
       );
-      expect(ra.code).toBe(0);
+      expectCode(ra, 0);
       const rb = run(
         RUN,
         ["verifier", "make", b.repo, "cli", "--run", b.dispatch, "--timeout", "120"],
         { env: envB },
       );
-      expect(rb.code).toBe(0);
+      expectCode(rb, 0);
       const handleA = summaryLine(ra.out, "handle");
       const handleB = summaryLine(rb.out, "handle");
       expect(handleA).not.toBe("");
@@ -367,7 +379,7 @@ describe("make with a host: the interactive open", () => {
         ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "30"],
         { env },
       );
-      expect(r.code).toBe(1);
+      expectCode(r, 1);
       expect(r.err).toMatch(/no interactive command/iu);
       expect(existsSync(log)).toBe(false);
     } finally {
@@ -380,6 +392,7 @@ describe("make with a host: the interactive open", () => {
     try {
       const log = join(sandbox.dir, "tmux.log");
       writeStubTmux(sandbox.bin, log, join(sandbox.dir, "tmux.state"));
+      writeStubMuse(sandbox.bin);
       const env = makeEnv(sandbox, {
         POSTMASTER_HOST: "tmux",
         POSTMASTER_CONFIG: coachmanConfig(sandbox),
@@ -390,7 +403,7 @@ describe("make with a host: the interactive open", () => {
         ["verifier", "make", sandbox.repo, "cli", "--run", sandbox.dispatch, "--timeout", "30"],
         { env },
       );
-      expect(r.code).toBe(1);
+      expectCode(r, 1);
       expect(r.err).toMatch(/could not start/iu);
       const branches = run("git", ["-C", sandbox.repo, "branch", "--list", "verify-cli"]);
       expect(branches.out.trim()).toBe("");
