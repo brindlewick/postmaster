@@ -48,6 +48,7 @@ import {
   landTarget,
   lastLine,
   listVerifiers,
+  matchDependedFiles,
   mergeAuthorityOf,
   modeBlocks,
   normalizeFolder,
@@ -57,6 +58,7 @@ import {
   outsidePaths,
   outsideReason,
   parseArgs,
+  parseFilesList,
   parseHandover,
   parseUpkeepReport,
   parseVerifyResults,
@@ -209,6 +211,73 @@ describe("parseArgs", () => {
     );
     expect(parseArgs(["make", "/r", "web", "--run", "/d", "--fresh"]).ok).toBe(false);
     expect(parseArgs(["make", "/r", "web", "--run"]).ok).toBe(false);
+  });
+
+  test("stale takes a repo and an optional comparison commit", () => {
+    expect(parseArgs(["stale", "/r"])).toEqual({
+      ok: true,
+      req: { cmd: "stale", repo: "/r", at: null },
+    });
+    expect(parseArgs(["stale", "/r", "--at", "abc123"])).toEqual({
+      ok: true,
+      req: { cmd: "stale", repo: "/r", at: "abc123" },
+    });
+    expect(parseArgs(["stale"])).toEqual({ ok: false, error: "stale takes a repo" });
+    expect(parseArgs(["stale", "/r", "--bogus"])).toEqual({
+      ok: false,
+      error: "unknown flag for stale: --bogus",
+    });
+    expect(parseArgs(["stale", "/r", "--at"])).toEqual({
+      ok: false,
+      error: "stale needs --at <commit>",
+    });
+  });
+});
+
+describe("parseFilesList", () => {
+  test("a features-index line lists comma-separated paths", () => {
+    expect(parseFilesList("Files: src/cli.ts, src/store.ts")).toEqual([
+      "src/cli.ts",
+      "src/store.ts",
+    ]);
+  });
+
+  test("no label names nothing", () => {
+    expect(parseFilesList("# map\n\nAn index.\n")).toBeNull();
+  });
+
+  test("the value ends at a Confirmed label on a shared bullet", () => {
+    expect(
+      parseFilesList("- [cli](cli/) verifies the command line. Files: src/cli.ts. Confirmed: abc"),
+    ).toEqual(["src/cli.ts"]);
+  });
+
+  test("trailing slashes and the sentence's full stop are dropped", () => {
+    expect(parseFilesList("Files: src/, README.md.")).toEqual(["src", "README.md"]);
+  });
+
+  test("empty entries are dropped", () => {
+    expect(parseFilesList("Files: src/cli.ts,, ")).toEqual(["src/cli.ts"]);
+  });
+});
+
+describe("matchDependedFiles", () => {
+  test("a listed file matches itself, a listed folder matches beneath it", () => {
+    expect(matchDependedFiles(["src/cli.ts", "src/store.ts"], ["src/cli.ts"])).toEqual([
+      "src/cli.ts",
+    ]);
+    expect(matchDependedFiles(["src/cli.ts", "README.md"], ["src"])).toEqual(["src/cli.ts"]);
+  });
+
+  test("a folder never matches its prefix siblings, and matches sort", () => {
+    expect(matchDependedFiles(["src-extra/x.ts", "src/b.ts", "src/a.ts"], ["src"])).toEqual([
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+  });
+
+  test("nothing changed under the entries matches nothing", () => {
+    expect(matchDependedFiles(["README.md"], ["src/cli.ts"])).toEqual([]);
   });
 });
 
