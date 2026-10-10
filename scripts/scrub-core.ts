@@ -811,14 +811,19 @@ function privateFindings(line: string, out: Finding[]): void {
   );
   for (const m of line.matchAll(path)) {
     const before = line.slice(0, m.index ?? 0);
-    // Inside a backtick span, only a marker before the span's close reads
-    // as a template literal; one past the close (or before the span) leaves
-    // markdown, which flags. An unclosed span reads as a literal's start.
-    // Review round 11 (bug-61).
+    // Inside a backtick span, only an expansion inside the path itself
+    // reads as a template literal; one later in the span leaves markdown,
+    // which flags, and one past the close (or before the span) likewise.
+    // An expansion right after the path falls through to the composed
+    // check below, and one right before never matches (the lookbehind
+    // bars } and $). An unclosed span reads as a literal's start.
+    // Review round 11 (bug-61), round 14 (bug-82).
     if ((before.match(/`/gu)?.length ?? 0) % 2 === 1) {
       const rest = line.slice(m.index ?? 0);
       const close = rest.indexOf("`");
-      if ((close === -1 ? rest : rest.slice(0, close)).includes("${")) continue;
+      if (close === -1) {
+        if (rest.includes("${")) continue;
+      } else if (m[0].includes("${")) continue;
     }
     // A path that continues into an expansion is composed in code.
     if (line[(m.index ?? 0) + m[0].length] === "$") continue;

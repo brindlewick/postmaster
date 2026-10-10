@@ -655,3 +655,21 @@ test("a markdown code span flags beside a template marker anywhere else", () => 
   const composed = joined("open ", "/home/", "bluejay", "$suffix", " now");
   expect(rules(composed)).not.toContain("private-path");
 });
+
+test("a code span flags a path beside a non-adjacent expansion, either order", () => {
+  // Review round 14 (bug-82): a ${ anywhere later in the span used to
+  // exempt the path, so a real path plus an unrelated expansion escaped.
+  // Only an adjacent expansion exempts now, in both orders.
+  const shell = joined("run `cat ", "/home/", "alice", "/notes.txt ", "${FILE}", "` now");
+  expect(rules(shell)).toContain("private-path");
+  const gap3 = joined("run `cat ", "/home/", "alice", "/x with ", "${FILE}", "` now");
+  expect(rules(gap3)).toContain("private-path");
+  const beforeGap = joined("run `echo ", "${OUT}", " ", "/home/", "alice", "/x` now");
+  expect(rules(beforeGap)).toContain("private-path");
+  const beforeFar = joined("run `echo ", "${OUT}", " and ", "/home/", "alice", "/x` now");
+  expect(rules(beforeFar)).toContain("private-path");
+  const afterTouching = joined("run `cat ", "/home/", "alice", "/x", "${Y}", "` now");
+  expect(rules(afterTouching)).not.toContain("private-path");
+  const beforeTouching = joined("run `echo ", "${d}", "/home/", "alice", "/x` now");
+  expect(rules(beforeTouching)).not.toContain("private-path");
+});
