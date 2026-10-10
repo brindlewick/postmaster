@@ -2276,21 +2276,58 @@ describe("dispatch mode", () => {
     });
   });
 
-  test("a config with no team.ticket_notes records given, and the verb prints it unrecorded", () => {
+  test("a config with no team.ticket_notes records given from the setting, and the verb prints the three", () => {
     withTempDir((raw) => {
       const tmp = realpathSync(raw);
       const m = machine(tmp, "notesplain");
       const r = run(wrapper, ["run-meta", m.dispatch, m.repo], { env: m.env });
       expect(r.code).toBe(0);
+      expect(r.out).toContain("ticket_notes=given");
+      expect(r.out).toContain("ticket_notes_source=setting");
+      expect(r.out).toContain("ticket_notes_setting=given");
       const rec = JSON.parse(readFileSync(join(m.dispatch, "run.json"), "utf8")) as {
         config: { team: Record<string, unknown> };
+        ticket_notes: string;
+        ticket_notes_source: string;
+        ticket_notes_setting: string;
       };
       expect(rec.config.team.ticket_notes).toBeUndefined();
+      expect(rec.ticket_notes).toBe("given");
+      expect(rec.ticket_notes_source).toBe("setting");
+      expect(rec.ticket_notes_setting).toBe("given");
       const v = run(wrapper, ["run-meta", "ticket-notes", m.dispatch], { env: m.env });
       expect(v.code).toBe(0);
       expect(v.out).toBe(
-        "ticket-notes: given\nticket-notes source: unrecorded\nticket-notes setting: unrecorded\n",
+        "ticket-notes: given\nticket-notes source: setting\nticket-notes setting: given\n",
       );
+    });
+  });
+
+  test("a record from before the user could name a value prints its config's value", () => {
+    withTempDir((raw) => {
+      const tmp = realpathSync(raw);
+      const cases: Array<{ name: string; team: Record<string, unknown>; expected: string }> = [
+        {
+          name: "legacy-held",
+          team: { ticket_notes: "held-back" },
+          expected:
+            "ticket-notes: held-back\nticket-notes source: setting\nticket-notes setting: held-back\n",
+        },
+        {
+          name: "legacy-plain",
+          team: {},
+          expected:
+            "ticket-notes: given\nticket-notes source: unrecorded\nticket-notes setting: unrecorded\n",
+        },
+      ];
+      for (const c of cases) {
+        const dispatch = join(tmp, c.name);
+        mkdirSync(dispatch, { recursive: true });
+        writeFileSync(join(dispatch, "run.json"), JSON.stringify({ config: { team: c.team } }));
+        const v = run(wrapper, ["run-meta", "ticket-notes", dispatch]);
+        expect(v.code).toBe(0);
+        expect(v.out).toBe(c.expected);
+      }
     });
   });
 
