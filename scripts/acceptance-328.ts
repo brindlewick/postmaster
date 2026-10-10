@@ -16,11 +16,12 @@ function rootGuard(target: string): string[] {
   return [
     'if [ -z "${ORACLE_ROOT:-}" ]; then echo "stub refuses: ORACLE_ROOT is unset" >&2; exit 1; fi',
     `TARGET=${target}`,
-    // Canonical before comparing: the target may arrive logical (the tmp dir
-    // may be a symlink) while ORACLE_ROOT is physical, or the reverse.
+    // Canonical before comparing: either side may arrive logical (the tmp dir
+    // may be a symlink, as macOS /var is) while the other is physical.
     'TARGET=$(CDPATH= cd "$TARGET" && pwd -P) || { echo "stub refuses: cannot resolve $TARGET" >&2; exit 1; }',
+    'ROOT=$(CDPATH= cd "${ORACLE_ROOT}" && pwd -P) || { echo "stub refuses: cannot resolve $ORACLE_ROOT" >&2; exit 1; }',
     'case "$TARGET" in',
-    '  "${ORACLE_ROOT}"/*) ;;',
+    '  "$ROOT"/*) ;;',
     '  *) echo "stub refuses: $TARGET is outside $ORACLE_ROOT" >&2; exit 1 ;;',
     "esac",
   ];

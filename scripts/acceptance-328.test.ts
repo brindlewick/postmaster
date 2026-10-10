@@ -9,7 +9,18 @@
 // by hand during implementation, and the artifacts with their comparison sit in
 // the run record. Every case drives git or scripts/run as a subprocess.
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, gitOrThrow, initRepo, writeRepoFile } from "./acceptance-323.ts";
 import { makeSandbox, RUN } from "./acceptance-318.ts";
@@ -1076,7 +1087,11 @@ describe("C2: after the user's word the corrections land by the route", () => {
   });
 
   test("after landing, a second pass drives the corrected claims and holds", () => {
-    const { dir, repo } = appWithVerifiers();
+    const app = appWithVerifiers();
+    // Physical first, as the pass sandboxes do: the tmp dir may itself be a
+    // symlink (macOS /var), and the session's guard compares canonical paths.
+    const dir = realpathSync(app.dir);
+    const repo = join(dir, "app");
     try {
       const report = writeReport(dir, APP_REPORT);
       const dispatch = makeDispatch(dir, "postmaster");
@@ -1135,7 +1150,27 @@ describe("C2: after the user's word the corrections land by the route", () => {
         { POSTMASTER_HOST: "none", ORACLE_REPORT: second, ORACLE_OVERLAY: overlay },
       );
       const r = runPass({ dir, repo, bin, dispatch: passDispatch }, env);
-      expectCode(r, 0);
+      try {
+        expectCode(r, 0);
+      } catch (e) {
+        const wt = join(dir, "app-upkeep");
+        const listing = [dir, wt]
+          .map((p) => {
+            try {
+              return `${p}:\n${readdirSync(p).join("\n")}`;
+            } catch {
+              return `${p}: (missing)`;
+            }
+          })
+          .join("\n");
+        let worktrees: string;
+        try {
+          worktrees = gitOrThrow(repo, "worktree", "list");
+        } catch (e2) {
+          worktrees = `git worktree list failed: ${(e2 as Error).message}`;
+        }
+        throw new Error(`${(e as Error).message}\n${listing}\n${worktrees}`);
+      }
       expect(r.out).toContain("branch upkeep-2");
       expect(r.out).toContain("every claim holds");
       const diff = gitOrThrow(repo, "diff", "--name-only", "main...upkeep-2").trim();
@@ -1232,6 +1267,34 @@ describe("upkeep-prompt --correct: the correcting instructions", () => {
       expect(r.err).toMatch(/no verifiers/u);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the stub guard canonicalizes both spellings", () => {
+  test("a logical ORACLE_ROOT over a physical checkout passes", () => {
+    // The macOS shape, reproducible anywhere with a symlink: the root
+    // arrives through the link while the checkout resolves physical.
+    const real = realpathSync(mkdtempSync(join(tmpdir(), "acceptance-328-link-")));
+    const logical = `${real}-link`;
+    try {
+      symlinkSync(real, logical);
+      const bin = join(real, "bin");
+      mkdirSync(bin, { recursive: true });
+      writeStubCorrectingSession(bin);
+      const report = join(real, "UPKEEP-src.md");
+      writeFileSync(report, "# Upkeep pass\n");
+      const wt = join(real, "wt");
+      mkdirSync(wt, { recursive: true });
+      const r = run(join(bin, "claude"), [], {
+        cwd: wt,
+        env: { ORACLE_ROOT: logical, ORACLE_REPORT: report },
+      });
+      expect(r.code).toBe(0);
+      expect(readFileSync(join(wt, "UPKEEP.md"), "utf8")).toBe("# Upkeep pass\n");
+    } finally {
+      rmSync(logical, { force: true });
+      rmSync(real, { recursive: true, force: true });
     }
   });
 });
