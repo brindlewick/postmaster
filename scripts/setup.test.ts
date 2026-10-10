@@ -40,6 +40,35 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+// expectOk asserts a setup run exited 0, attaching its output on failure so
+// a red run says why instead of showing only the code.
+function expectOk(r: { code: number; out: string; err: string }, what: string): void {
+  if (r.code !== 0) {
+    throw new Error(`${what}: exit ${r.code}\n--- stdout ---\n${r.out}\n--- stderr ---\n${r.err}`);
+  }
+}
+
+// promptOrder runs an interactive setup command with seed input and returns
+// the prompts it asked, in order, split from stderr. Project prompts always
+// end "): " (their hint is parenthesized); a global prompt ends ": " with
+// the next prompt starting uppercase or indented, while a mid-prompt ": "
+// is always followed by a lowercase letter. Answering by the returned order
+// keeps a test independent of the question count: uname-gated blocks like
+// the launch limits are asked on Linux only. The seed must drive the run to
+// completion, and values placed by key must not open a conditional branch
+// the seed run skipped.
+function promptOrder(
+  args: string[],
+  env: Record<string, string | undefined>,
+  seed: string,
+  mode: "project" | "global",
+): string[] {
+  const probe = run(SELF, args, { env, input: seed });
+  expectOk(probe, `prompt probe ${args.join(" ")}`);
+  const parts = mode === "project" ? probe.err.split("): ") : probe.err.split(/: (?=[A-Z \t\n])/u);
+  return parts.map((s) => s.trim()).filter((s) => s !== "");
+}
+
 function answers(name: string, extra?: string): void {
   const lines = [
     "lanes=alpha, beta, sentinel",
@@ -444,42 +473,41 @@ describe("positive controls", () => {
   });
 
   test("interactive setup where no launch can be capped reports uncapped launches once", () => {
-    const answers = [
+    const env = { PATH: otherSystemPath() };
+    const args = ["setup", "--dry-run"];
+    // Bootstrap input that completes the probe run everywhere today; the
+    // probe maps the real prompt order and the values below land by key.
+    const bootstrap = [
       "",
-      "", // roots and lane names
+      "",
       "bash",
       "lane-alpha",
       "",
-      "", // alpha
+      "",
       "bash",
       "lane-beta",
       "",
-      "", // beta
-      "",
-      "", // workhorses and reviewers
       "",
       "",
-      "", // style, bug and security reviewer overrides
+      "",
+      "",
+      "",
+      "",
       "bash",
       "coachman",
       "",
-      "", // coachman
+      "",
       "bash",
       "fallback",
       "",
-      "", // fallback
+      "",
       "bash",
       "postmaster",
       "",
-      "", // postmaster
+      "",
       "bash",
       "clerk",
       "",
-      "", // clerk
-      "",
-      "", // run count and poll interval
-      "",
-      "", // tracker and confinement
       "",
       "",
       "",
@@ -487,13 +515,30 @@ describe("positive controls", () => {
       "",
       "",
       "",
-      "", // create tickets, timeout, merge, checkpoint, links
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
     ].join("\n");
-    const interactive = run(SELF, ["setup", "--dry-run"], {
-      env: { PATH: otherSystemPath() },
-      input: `${answers}\n`,
-    });
-    expect(interactive.code).toBe(0);
+    const order = promptOrder(args, env, `${bootstrap}\n`, "global");
+    const answers = Array<string>(order.length + 10).fill("");
+    for (const [i, p] of order.entries()) {
+      if (/harness( \(|$)/u.test(p)) answers[i] = "bash";
+      else if (p.includes("model id")) {
+        const who = /^[ \t]*([a-z]+): model id/u.exec(p)?.[1] ?? "";
+        answers[i] = who === "alpha" ? "lane-alpha" : who === "beta" ? "lane-beta" : who;
+      }
+    }
+    const placed = answers.filter((a) => a !== "");
+    expect(placed.filter((a) => a === "bash")).toHaveLength(6);
+    for (const name of ["lane-alpha", "lane-beta", "coachman", "fallback", "postmaster", "clerk"]) {
+      expect(placed).toContain(name);
+    }
+    const interactive = run(SELF, args, { env, input: `${answers.join("\n")}\n` });
+    expectOk(interactive, "interactive setup");
     expect(interactive.out).not.toContain("Launch limits:");
     expect(interactive.out).not.toContain("[limits]");
     expect(interactive.out.match(/without memory or process limits/gu)?.length).toBe(1);
@@ -973,19 +1018,26 @@ review_link = ""
 
   test("an interactive blank link answer clears it too", () => {
     const s = stageProject();
-    // Every question blank except tracker=local at position 34: lanes,
-    // workhorses, reviewers, 3 lens lists, 16 role keys, max_runs, mode,
-    // poll_seconds, 8 limit keys, then tracker.
-    const input = [...Array<string>(33).fill(""), "local", ...Array<string>(8).fill("")].join("\n");
-    const r = run(SELF, ["setup", "--project", s.repo], {
-      env: {
-        ...(process.env as Record<string, string>),
-        PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
-        POSTMASTER_CONFIG: s.config,
-      },
-      input: `${input}\n`,
-    });
-    expect(r.code).toBe(0);
+    const env = {
+      ...(process.env as Record<string, string>),
+      PATH: `${join(tmp, "bin")}:${process.env.PATH}`,
+      POSTMASTER_CONFIG: s.config,
+    };
+    // Map the questions from a dry run on this same repo: dry runs ask
+    // everything and write nothing, so the map fits the real run exactly
+    // on every platform, whatever uname-gated blocks appear.
+    const order = promptOrder(
+      ["setup", "--project", s.repo, "--dry-run"],
+      env,
+      "\n".repeat(300),
+      "project",
+    );
+    const trackerAt = order.findIndex((p) => p.includes("How are tickets tracked"));
+    if (trackerAt < 0) throw new Error(`tracker prompt missing, saw:\n${order.join("\n")}`);
+    const lines = Array<string>(order.length + 10).fill("");
+    lines[trackerAt] = "local";
+    const r = run(SELF, ["setup", "--project", s.repo], { env, input: `${lines.join("\n")}\n` });
+    expectOk(r, "interactive setup");
     const data = settingsData(s.repo);
     expect(tableOf(data.tracker).kind).toBe("local");
     expect(tableOf(data.ship).review_link).toBe("");
