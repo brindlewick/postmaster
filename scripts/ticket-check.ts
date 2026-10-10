@@ -9,9 +9,11 @@
 //   run ticket-check --body <body-file> [--title <title>] [--project <repo>] a body file, as an adapter's create
 //                                                         takes it; the title is judged only when
 //                                                         --title gives one
-//   run ticket-check --splice <base-body> <sections>       print <base-body> with each `##` section
-//                                                         of <sections> in place of the one it
-//                                                         names, or added where the shape puts it
+//   run ticket-check --splice <base-body> <sections> [--out <file>]
+//                                                         <base-body> with each `##` section of
+//                                                         <sections> in place of the one it names,
+//                                                         or added where the shape puts it: to
+//                                                         <file> when --out gives one, else stdout
 //   run ticket-check --has-journey <file>                  print `journey` or `no journey`: whether
 //                                                         the phrase "user journey" occurs anywhere in
 //                                                         the text, case-insensitively, with whitespace
@@ -154,8 +156,8 @@ const RANK: Record<string, number> = {
 function loadText(path: string): string {
   try {
     return readFileSync(path, "utf8").replace(/^\ufeff/u, "");
-  } catch (e: any) {
-    dieT(`cannot read ${path}: ${e?.message ?? e}`);
+  } catch (e) {
+    dieT(`cannot read ${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -289,7 +291,7 @@ function hasWords(lines: Array<[string, boolean]>): boolean {
 
 function prose(lines: Array<[string, boolean]>): string {
   return lines
-    .filter(([_, code]) => !code)
+    .filter(([, code]) => !code)
     .map(([t]) => t)
     .join("\n")
     .replace(SPAN, " ");
@@ -555,7 +557,7 @@ function splice(baseText: string, sectionsText: string, _turnpikesPath: string):
     } else {
       const before = out
         .map((s, k) => [k, RANK[s[0] ?? ""] ?? rank] as const)
-        .filter(([_, r]) => r < rank);
+        .filter(([, r]) => r < rank);
       if (before.length > 0) {
         at = before[before.length - 1]?.[0] + 1;
         while (at < out.length && RANK[out[at]?.[0] ?? ""] === undefined) at++;
@@ -614,7 +616,8 @@ function _checkPrinted(text: string, turnpikesPath: string): number {
 const TURNPIKES = join(scriptsDir(import.meta), "run");
 
 const USAGE =
-  "usage: run ticket-check <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>] | --splice <base-body> <sections> | --has-journey <file>";
+  "usage: run ticket-check <repo> <ticket-id> | --body <body-file> [--title <title>] [--project <repo>]" +
+  " | --splice <base-body> <sections> [--out <file>] | --has-journey <file>";
 
 function usage(): never {
   console.error(USAGE);
@@ -687,13 +690,16 @@ function main(argv: string[]): number {
     usage();
   }
   if (mode === "--splice") {
-    if (argv.length !== 3) {
+    const wantsOut = argv.length === 5 && argv[3] === "--out";
+    if (argv.length !== 3 && !wantsOut) {
       usage();
     }
     try {
       const baseText = loadText(argv[1]!);
       const sectionsText = loadText(argv[2]!);
-      process.stdout.write(splice(baseText, sectionsText, TURNPIKES));
+      const spliced = splice(baseText, sectionsText, TURNPIKES);
+      if (wantsOut) writeFileSync(argv[4]!, spliced);
+      else process.stdout.write(spliced);
       return 0;
     } catch (e) {
       if (e instanceof DieError) {

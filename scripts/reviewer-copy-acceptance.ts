@@ -1,6 +1,7 @@
 // Acceptance oracle for #342: every reviewer works in its own copy of the repository.
-// The review cut and its pre-launch check in coachman.md pass --clone <BASE> under
-// every lens; the paths table, the brief wording, the bug lens text, the host
+// The review cut and its pre-launch check run through review-round, which passes
+// --clone <BASE> under every lens; coachman.md says so in prose, and the paths
+// table, the brief wording, the bug lens text, the host
 // placement text and the review-skills wiki page call the reviewer folders clones.
 // Stale checks name one pre-change sentence each, matched after newlines are folded
 // (carriage returns stripped first, so CRLF never hides one), and two match the claim
@@ -148,13 +149,13 @@ export function accept(root: string): AcceptResult {
     coach,
     COACH,
     "passes --clone for every lens in the review cut",
-    'cut-scratch <repo> <synthesis-wt> "$DEST" "$SNAP" --clone <BASE>',
+    "the scratch is cut at the snapshot, from a clone with `--clone <BASE>` under every lens",
   );
   present(
     coach,
     COACH,
     "requires a clone for every lens in the pre-launch check",
-    'cut-scratch --check <repo>/.worktrees/<TICKET>-rev-$LENS-$L "$SNAP" --clone <BASE>',
+    "checks every scratch with `cut-scratch --check`",
   );
   present(
     coach,

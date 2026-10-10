@@ -6,6 +6,10 @@
 //                                             global config with the person's file applied
 //   run project-settings accept <repo>        record the user's acceptance of the tracked file
 //   run project-settings ensure <repo>         create .postmaster/.gitignore, no settings
+//   run project-settings run-root <target>      create <root>/.postmaster/runs/postmaster and
+//                                               the ignore rule; print <root>/.postmaster/runs
+//   run project-settings exclude-worktrees <repo>
+//                                               keep `.worktrees/` in the repo's git exclude
 //   run project-settings write <repo> project|local [<toml-file>]
 //                                             validate, then write the agreed settings
 //
@@ -19,6 +23,8 @@
 // and other machine settings. Missing files are normal. A settings file git tracks is
 // used only after the user accepts it, and again after it changes; until then every
 // reader uses the global value and says the file waits for acceptance.
+import { existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   asTable,
   effectiveConfig,
@@ -35,10 +41,13 @@ import {
   recordAcceptance,
   scanMachineData,
   sortedJson,
+  strictRead,
   validateCommon,
   writeProfile,
   type Rec,
 } from "./lib/effective-config.ts";
+import { run } from "./lib/proc.ts";
+import { pySplitLines } from "./lib/text.ts";
 
 // Backwards-compatible names for the suite beside this file; readers import the
 // loader itself.
@@ -58,7 +67,77 @@ export type { Rec };
 
 const USAGE =
   "usage: run project-settings inspect|report <repo> | effective <repo> [<machine-config>]" +
-  " | accept <repo> | ensure <repo> | write <repo> project|local [<toml-file>]";
+  " | accept <repo> | ensure <repo> | write <repo> project|local [<toml-file>]" +
+  " | run-root <target> | exclude-worktrees <repo>";
+
+const isSymlink = (p: string): boolean => {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+/** The project's git toplevel: the run root lives at its <root>/.postmaster/runs. */
+// Git's location variables override -C, so every git child runs without them.
+const unsetGit = {
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_COMMON_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_OBJECT_DIRECTORY: undefined,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+  GIT_NAMESPACE: undefined,
+};
+const gitToplevel = (raw: string): string => {
+  const target = projectRoot(raw);
+  const g = run("git", ["-C", target, "rev-parse", "--show-toplevel"], { env: unsetGit });
+  if (g.code !== 0) fail(`not a git repository: ${raw}`);
+  return g.out.trim();
+};
+
+/**
+ * runRootPath <target>: create <root>/.postmaster/runs/postmaster and the folder's
+ * ignore rule, and return <root>/.postmaster/runs, which names this project's runs.
+ */
+export const runRootPath = (raw: string): string => {
+  const root = gitToplevel(raw);
+  for (const part of [
+    join(root, ".postmaster"),
+    join(root, ".postmaster", "runs"),
+    join(root, ".postmaster", "runs", "postmaster"),
+  ]) {
+    if (isSymlink(part)) fail(`${part} must be a directory inside the project, not a symlink`);
+  }
+  mkdirSync(join(root, ".postmaster", "runs", "postmaster"), { recursive: true });
+  ensureIgnore(root, true);
+  return join(root, ".postmaster", "runs");
+};
+
+/**
+ * ensureWorktreesExcluded <repo>: keep `.worktrees/` in the repository's own
+ * git exclude, so a pre-flight never reads the run's working copies as dirt.
+ * Idempotent, and returns the file it holds.
+ */
+export const ensureWorktreesExcluded = (raw: string): string => {
+  const repo = projectRoot(raw);
+  // --git-path, not --absolute-git-dir: in a linked worktree the latter is the
+  // worktree's private dir, while git reads info/exclude from the common one.
+  const g = run("git", ["-C", repo, "rev-parse", "--git-path", "info/exclude"], {
+    env: unsetGit,
+  });
+  if (g.code !== 0) fail(`not a git repository: ${raw}`);
+  const file = resolve(repo, g.out.trim());
+  const existing = existsSync(file) ? strictRead(file) : "";
+  if (!pySplitLines(existing).includes(".worktrees/")) {
+    let text = existing;
+    if (text !== "" && !text.endsWith("\n")) text += "\n";
+    text += ".worktrees/\n";
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  }
+  return file;
+};
 
 const report = (repo: string): void => {
   const notice = pendingNoticeFor(repo);
@@ -112,6 +191,11 @@ const main = (): void => {
     console.log(recordAcceptance(projectRoot(rest[0]!), globalConfigPath()));
   } else if (cmd === "write" && (rest.length === 2 || rest.length === 3)) {
     writeProfile(projectRoot(rest[0]!), rest[1]!, rest.length === 3 ? rest[2]! : "-");
+  } else if (cmd === "run-root" && rest.length === 1) {
+    console.log(runRootPath(rest[0]!));
+  } else if (cmd === "exclude-worktrees" && rest.length === 1) {
+    const file = ensureWorktreesExcluded(rest[0]!);
+    console.log(`project-settings: excluded .worktrees/ in ${file}`);
   } else {
     fail(USAGE);
   }

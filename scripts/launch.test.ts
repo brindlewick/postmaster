@@ -2429,29 +2429,6 @@ beforeAll(() => {
       "--run",
       runDir("run-onlane"),
     );
-    {
-      const c = calls(
-        join(here, "../skills/postmaster/coachman.md"),
-        join(here, "../skills/postmaster/postmaster.md"),
-      );
-      const gotLines = c.out
-        .trim()
-        .split("\n")
-        .filter((l) => l !== "");
-      const unrun = gotLines.filter((l) => l.startsWith("unrun "));
-      const hasCoachman = gotLines.some(
-        (l) => l.startsWith("run ") && l.includes("/coachman.md: "),
-      );
-      const hasPostmaster = gotLines.some(
-        (l) => l.startsWith("run ") && l.includes("/postmaster.md: "),
-      );
-      if (c.code === 0 && unrun.length === 0 && hasCoachman && hasPostmaster) {
-        ok("no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>");
-      } else {
-        fail("no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>");
-      }
-    }
-
     console.log("muse");
     writeFileSync(
       join(tmp, "muse.toml"),
@@ -5207,9 +5184,6 @@ describe("negative controls", () => {
   test("a recorded leg on a lane's model is refused, though the live config passes", () => {
     assertControl("a recorded leg on a lane's model is refused, though the live config passes");
   });
-  test("no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>", () => {
-    assertControl("no launch or resume in coachman.md or postmaster.md lacks --run <dispatch>");
-  });
 });
 
 describe("attempt phase: launch and resume witness the harness start", () => {
@@ -6031,8 +6005,7 @@ function launchStep(
     "--run",
     c.d,
   ];
-  const r = spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
-  const rc = r.status ?? 1;
+  spawnSync("bash", [argv[0]!, ...argv.slice(1)], { encoding: "utf8", env: baseEnv() });
   const waited = waitForMarker(join(c.d, "logs"), `${out}.done`, 60);
   return { rc: waited, marker, actions: join(c.d, "actions.jsonl") };
 }

@@ -38,7 +38,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { processStart } from "./lib/processes.ts";
-import { pyWords } from "./lib/text.ts";
 import { readWalls } from "./walls.ts";
 import { isDraftRecord } from "./scrub-report.ts";
 

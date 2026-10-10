@@ -114,10 +114,10 @@ beforeAll(async () => {
     ): Promise<{ code: number; out: string }> => {
       // Bun.spawn without env does not inherit this process's environment, so the
       // current environment always crosses explicitly.
-      const child: any = Bun.spawn([wrapper, "run-meta", ...args], {
+      const child = Bun.spawn([wrapper, "run-meta", ...args], {
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, ...(env ?? {}) },
+        env: { ...process.env, ...env },
       });
       return (async () => {
         const code = (await child.exited) as number;
@@ -130,9 +130,22 @@ beforeAll(async () => {
     const sh = (s: string): string => s.replace(TRAIL_NL_RE, "");
     const gitOut = (args: string[]): string => run("git", args).out.trim();
     const headOf = (where: string): string => gitOut(["-C", where, "rev-parse", "HEAD"]);
-    const runJson = (dir: string): Record<string, any> =>
-      JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, any>;
-    const checkJson = (label: string, fn: (r: Record<string, any>) => boolean): void => {
+    interface RunRecord {
+      coachman_contract: number;
+      config: {
+        lanes: Record<string, { model: string; env_file: string }>;
+        team: { workhorses: string[] };
+      };
+      harness_versions: Record<string, string>;
+      postmaster: { checkout: string; commit: string };
+      project: string;
+      project_settings: { shared_present: boolean; sources: Record<string, string> };
+      run: string;
+      target: { head: string; branch: string };
+    }
+    const runJson = (dir: string): RunRecord =>
+      JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as RunRecord;
+    const checkJson = (label: string, fn: (r: RunRecord) => boolean): void => {
       try {
         if (fn(runJson(d))) ok(label);
         else fail(label);
@@ -208,8 +221,11 @@ beforeAll(async () => {
       const secs = (Date.now() - t0) / 1000;
       let ver = "";
       try {
-        ver = (JSON.parse(readFileSync(join(slowD, "run.json"), "utf8")) as Record<string, any>)
-          .harness_versions.slowharness as string;
+        ver = (
+          JSON.parse(readFileSync(join(slowD, "run.json"), "utf8")) as {
+            harness_versions: Record<string, string>;
+          }
+        ).harness_versions.slowharness as string;
       } catch {
         ver = "";
       }
@@ -739,7 +755,7 @@ beforeAll(async () => {
     );
     writeFileSync(join(krel, "manifest.json"), '{"stage": "done"}\n');
     {
-      const relChild: any = Bun.spawn([wrapper, "run-meta", "release", krel], {
+      const relChild = Bun.spawn([wrapper, "run-meta", "release", krel], {
         stdout: "pipe",
         stderr: "pipe",
         env: { ...process.env, POSTMASTER_SCAN_HOLD_MS: "20000" },
@@ -1457,7 +1473,10 @@ beforeAll(async () => {
     const dAbsent = mkConfRun("absent", "");
     const modeOf = (dir: string): unknown => {
       try {
-        const r = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, any>;
+        const r = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<
+          string,
+          unknown
+        >;
         return (r.confinement as Record<string, unknown> | undefined)?.mode;
       } catch {
         return undefined;
@@ -1472,10 +1491,14 @@ beforeAll(async () => {
     }
     // A mode that disagrees with the config fails. Edited copies share the
     // dispatch's pin, so the pin check passes and the mode check decides.
-    const editRun = (src: string, tag: string, edit: (r: Record<string, any>) => void): string => {
+    const editRun = (
+      src: string,
+      tag: string,
+      edit: (r: Record<string, unknown>) => void,
+    ): string => {
       const dir = join(tmp, `confrun-${tag}`);
       mkdirSync(dir, { recursive: true });
-      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
+      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, unknown>;
       edit(r);
       writeFileSync(join(dir, "run.json"), JSON.stringify(r));
       writeFileSync(join(dir, "brief.md"), "# Waybill: T1\n\n## Team\nmode: synthesis\n");
@@ -1513,12 +1536,16 @@ beforeAll(async () => {
     // An old unpinned waybill holds its mode to its config too. The edited
     // copies drop the checkout (kind "no") and name it from a waybill, so the
     // pin check passes on the waybill path and the mode check decides.
-    const unpinRun = (src: string, tag: string, edit: (r: Record<string, any>) => void): string => {
+    const unpinRun = (
+      src: string,
+      tag: string,
+      edit: (r: Record<string, unknown>) => void,
+    ): string => {
       const dir = join(tmp, `confrun-${tag}`);
       mkdirSync(dir, { recursive: true });
-      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, any>;
-      const checkout = (r.postmaster as Record<string, any>).checkout as string;
-      delete (r.postmaster as Record<string, any>).checkout;
+      const r = JSON.parse(readFileSync(join(src, "run.json"), "utf8")) as Record<string, unknown>;
+      const checkout = (r.postmaster as Record<string, unknown>).checkout as string;
+      delete (r.postmaster as Record<string, unknown>).checkout;
       edit(r);
       writeFileSync(join(dir, "run.json"), JSON.stringify(r));
       writeFileSync(
@@ -2034,7 +2061,7 @@ describe("pin lock beside the bash flow", () => {
         writeFileSync(lock, "");
         const past = new Date(Date.now() - 60000);
         utimesSync(lock, past, past);
-        const holder: any = Bun.spawn(["flock", "-x", lock, "sleep", "8"], {
+        const holder = Bun.spawn(["flock", "-x", lock, "sleep", "8"], {
           stdout: "ignore",
           stderr: "ignore",
         });
@@ -2162,8 +2189,13 @@ describe("dispatch mode", () => {
     return { env, repo, runsRoot, dispatch, config };
   }
 
-  const recordOf = (dispatch: string): Record<string, any> =>
-    JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8")) as Record<string, any>;
+  interface ModeRecord {
+    mode: string;
+    mode_source: string;
+    mode_setting: string;
+  }
+  const recordOf = (dispatch: string): ModeRecord =>
+    JSON.parse(readFileSync(join(dispatch, "run.json"), "utf8")) as ModeRecord;
 
   const seedRun = (
     root: string,

@@ -33,6 +33,7 @@ import { parseTomlText, tryTomlFile } from "./lib/data.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
 import { PY_DOT, PY_S_CLASS, pySplitLines } from "./lib/text.ts";
+import { thrownCode, thrownMessage } from "./lib/thrown.ts";
 
 const HERE = scriptsDir(import.meta);
 const DECLARATION = ".postmaster/project.toml";
@@ -271,12 +272,12 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
   if (settings.code !== 0) dieV(settings.err.trim() || "project settings could not be read");
   const p = join(repo, DECLARATION);
   if (!existsSync(p)) return null;
-  let table: Record<string, any>;
+  let table: Record<string, unknown> | null;
   try {
     const parsed = parseTomlText(readFileSync(p, "utf-8"));
-    table = (parsed.checks as Record<string, any>) ?? null;
-  } catch (e: any) {
-    dieV(`${DECLARATION} does not parse: ${e.message || e}`);
+    table = (parsed.checks as Record<string, unknown> | null) ?? null;
+  } catch (e) {
+    dieV(`${DECLARATION} does not parse: ${thrownMessage(e) || e}`);
   }
   if (!table || (typeof table === "object" && Object.keys(table).length === 0)) return null;
   if (typeof table !== "object" || Array.isArray(table)) {
@@ -284,17 +285,18 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
   }
   const faults: string[] = [];
   const out: Check[] = [];
-  for (const [name, c] of Object.entries(table)) {
+  for (const [name, c0] of Object.entries(table)) {
     const at = `[checks.${name}]`;
     const before = faults.length;
     if (!NAME_RE.test(name)) {
       faults.push(`${at}: a check's name is a lowercase word`);
       continue;
     }
-    if (!c || typeof c !== "object") {
+    if (!c0 || typeof c0 !== "object") {
       faults.push(`${at} must be a table`);
       continue;
     }
+    const c = c0 as Record<string, unknown>;
     const extra = Object.keys(c)
       .filter((k) => !KEYS.includes(k))
       .sort();
@@ -319,7 +321,7 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
     }
     let check: Check | null = null;
     if (hasUse) {
-      if (name === "gate" || !USABLE.includes(c.use)) {
+      if (name === "gate" || !USABLE.includes(c.use as string)) {
         faults.push(
           `${at}: use names a default, one of ${USABLE.join(", ")}; the gate takes a command`,
         );
@@ -330,7 +332,14 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
         );
       }
       if (faults.length === before) {
-        check = mkDefault(c.use, gate, suite, name, shows, `declared:${c.use}`);
+        check = mkDefault(
+          c.use as string,
+          gate,
+          suite,
+          name,
+          shows as string | undefined,
+          `declared:${c.use}`,
+        );
       }
     } else {
       if (typeof c.command !== "string" || !c.command.trim()) {
@@ -353,22 +362,22 @@ function declared(repo: string, gate: string, suite: string): Check[] | null {
       } else if (hasScore) {
         try {
           // ASCII: BASE compiles user score patterns with no flags.
-          const re = new RegExp(c.score);
+          const re = new RegExp(c.score as string);
           if (typeof c.score !== "string" || re.source.match(/\((?!\?)/gu)?.length !== 1) {
             faults.push(`${at}: score is a regular expression with one group, the number`);
           }
-        } catch (e: any) {
-          faults.push(`${at}: score is not a regular expression: ${e.message || e}`);
+        } catch (e) {
+          faults.push(`${at}: score is not a regular expression: ${thrownMessage(e) || e}`);
         }
         if (typeof c.threshold !== "number" || typeof c.threshold === "boolean") {
           faults.push(`${at}: threshold is a number`);
         }
-        check.score = c.score;
-        check.threshold = c.threshold;
+        check.score = c.score as string;
+        check.threshold = c.threshold as number;
       }
     }
     if (check !== null) {
-      if ("timeout" in c) check.timeout = c.timeout;
+      if ("timeout" in c) check.timeout = c.timeout as number;
       out.push(check);
     }
   }
@@ -438,12 +447,12 @@ function topOf(wt: string): string {
 
 function recordedChecks(dispatch: string): Check[] {
   const d = loadJson(join(dispatch, "checks.json"));
-  if (!d || typeof d !== "object" || !Array.isArray((d as any).checks)) {
+  if (!d || typeof d !== "object" || !Array.isArray((d as Record<string, unknown>).checks)) {
     dieV(
       `no checks recorded at ${join(dispatch, "checks.json")}: the postmaster records them at dispatch with run verify record`,
     );
   }
-  return (d as any).checks;
+  return (d as Record<string, unknown>).checks as Check[];
 }
 
 const TICKET_LINE_RE = new RegExp(`^##[${PY_S_CLASS}]+Ticket[${PY_S_CLASS}]*$`, "u");
@@ -519,12 +528,12 @@ function listedFiles(files: string[]): string {
 
 let _runningPgid: number | null = null;
 
-function _runOne(
+async function _runOne(
   c: Check,
   top: string,
   env: Record<string, string>,
   log: string,
-): { result: string; code: number | null; secs: number; why: string } {
+): Promise<{ result: string; code: number | null; secs: number; why: string }> {
   if (!c.command) {
     return {
       result: "not run",
@@ -644,7 +653,7 @@ function _runOne(
       }
       resolvePromise({ result, code: exitCode, secs, why });
     });
-  }) as any; // sync wrapper not possible; handled below
+  }); // sync wrapper not possible; handled below
 }
 
 // Synchronous version using spawnSync with a timeout
@@ -700,7 +709,7 @@ function runOneSync(
   const last = (outLines.length > 0 ? outLines[outLines.length - 1]! : "(no output)").slice(0, 300);
 
   // Detect timeout: spawnSync sets error ETIMEDOUT or signal SIGKILL after timeout
-  if (r.error && (r.error as any).code === "ETIMEDOUT") {
+  if (r.error && thrownCode(r.error) === "ETIMEDOUT") {
     timedOut = true;
   }
 
@@ -780,12 +789,12 @@ function runChecks(wt: string, dispatch: string | null): never {
   } else {
     spec = join(top, SPEC);
     const d = loadJson(join(spec, "spec.json"));
-    if (!d || typeof d !== "object" || !Array.isArray((d as any).checks)) {
+    if (!d || typeof d !== "object" || !Array.isArray((d as Record<string, unknown>).checks)) {
       dieV(
-        `${top} is not armed: ${join(spec, "spec.json")} is missing; the coachman arms each workhorse worktree with run verify arm`,
+        `${top} is not armed: ${join(spec, "spec.json")} is missing; the coachman arms each workhorse copy with run verify arm`,
       );
     }
-    checks = (d as any).checks;
+    checks = (d as Record<string, unknown>).checks as Check[];
   }
   const dirt = uncommitted(top);
   if (dirt.length > 0) {
@@ -877,9 +886,9 @@ function logged(dispatch: string): Array<{ target: string; ts: string; m: RegExp
   for (let n = 0; n < lines.length; n++) {
     const line = lines[n]!;
     if (!line.trim()) continue;
-    let e: any;
+    let e: Record<string, unknown>;
     try {
-      e = JSON.parse(line);
+      e = JSON.parse(line) as Record<string, unknown>;
     } catch {
       if (line.includes('"verify"')) {
         dieV(`line ${n + 1} of ${f} does not parse, so the checks' results cannot be read from it`);
