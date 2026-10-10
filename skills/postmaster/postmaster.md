@@ -79,7 +79,7 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    each flag one whole name; a lone flag with a comma is refused as ambiguous.
    On exit 2, start a booking clerk with
    `<tool>/scripts/run clerk start <repo> <id>`, then log the dispatch yourself with
-   `<tool>/scripts/run log-action --project <repo> postmaster dispatch clerk ticket=<id>`.
+   `<tool>/scripts/run log-action --project <repo> postmaster dispatch clerk "ticket=<id>"`.
    Do not create a run directory, branch or worktree for this
    ticket. Continue with other tickets the
    user asked you to implement. If a clerk is already open, tell the user and do not start a
@@ -124,8 +124,8 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    to the old run — archive it, rename it, or pick another id — and Stage B starts again on
    their word. On exit 1 the refusal goes to the user the same way.
 5. **Exclude worktrees without a commit,** before any is cut, or the next pre-flight reads
-   them as dirt: `grep -qxF '.worktrees/' <repo>/.git/info/exclude || echo '.worktrees/' >>
-   <repo>/.git/info/exclude`.
+   them as dirt: `<tool>/scripts/run project-settings exclude-worktrees <repo>` keeps
+   `.worktrees/` in the repository's own git exclude.
 6. **Create the run directory** `<runs>/<TICKET>/` with `logs/`, `audit/` and `render/`, and the
    manifest: `{"stage": "dispatched", "leg": 1, "base": "<sha>", "lanes": {}, "coachman":
    {"legs": {}}}`. You own `leg`, `base`, `coachman` and the terminal stages, `done` and
@@ -176,9 +176,9 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    prints the legs for the `turnpikes:` line step 1 printed, before anything is launched.
    Record `coachman contract fixture: pending` and `contract fixture check: -`; no
    implementation branch exists yet to classify. Where the target is a fixture copy
-   (`<tool>/scripts/run front-door` reports one), add the brief's line `wall ruling: go on —
+   (`<tool>/scripts/run front-door` reports one), add the brief's line "wall ruling: go on —
    this fixture run asks nobody: the postmaster rules every wall go on itself as soon as it
-   is told; the coachman escalates and waits`, so the run's postmaster
+   is told; the coachman escalates and waits", so the run's postmaster
    rules its own walls and a fixture run never waits on a user (D7).
 9. **Move the ticket to in-progress** through the tracker adapter and log `ticket-state`. Under
    contract 2 the coachman never touches the ticket's state and the postmaster marks it done
@@ -697,7 +697,8 @@ missed.
    "<text>"` prints its plan and changes nothing; read it, then run the same command
    without `--dry-run`. The command saves each run folder's leftovers into
    `<dispatch>/stray/`, closes the folder's windows, removes the folder, stops the
-   preview, closes the run's windows, writes the closing line, moves the ticket to done
+   preview, stops a fixture copy's root launches, closes the run's windows, writes
+   the closing line, moves the ticket to done
    (leaving a cancelled ticket as it is) and posts the closing comment, marks the run done
    (stage timings come from `actions.jsonl`; never write them by hand) and releases its
    pinned tool, logging every action as it happens. On exit 2 or 3, do the next step it
@@ -795,7 +796,8 @@ On `.card-ready`, read `<dispatch>/card.md` and `<dispatch>/handoff-3.md`:
 
 **Abandoning a run** happens only on the user's word for that run: log `note` with the
 word, stop launches in every folder the run created with `<tool>/scripts/run host stop-run
-<dispatch>` while the run still counts as in flight and holds its pin, then set the stage with
+<dispatch>` while the run still counts as in flight and holds its pin — on a fixture copy run
+that from outside the copy, since `stop` refuses from inside it — then set the stage with
 `<tool>/scripts/run stage <dispatch> abandoned postmaster`. Close all of its spaces with
 `<tool>/scripts/run host close-run <dispatch>` before removing each folder after preserving
 stray files, a workhorse copy the way a reviewer's is removed, with

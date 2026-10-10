@@ -38,6 +38,7 @@ way on every row, only less visibly on the last.
 | send it a message | `herdr agent prompt` | paste the text bracketed, then Enter as a key of its own | resume its thread with the message as the prompt |
 | wait for it to settle | the same call, `herdr agent prompt --wait`: idle, done or blocked | its screen unchanged for 10 seconds | its marker lands |
 | read what it said | `herdr agent read --source recent-unwrapped` | `tmux capture-pane -p -J` | its final message (`harnesses.md`) |
+| close one spawned session | the recorded tab dies with its agent | the recorded window dies | nothing recorded: nothing closes |
 | close a worktree's space | `herdr workspace close`, before the worktree is removed | kill the worktree's windows | nothing to close |
 
 ```sh
@@ -48,10 +49,12 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host name <dispatch> review <lane> <lens> <round>
 <tool>/scripts/run host name <dispatch> postmaster
 <tool>/scripts/run host name <dispatch> role <text...>
-<tool>/scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting ...
-<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role lane|coachman|reviewer] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
-<tool>/scripts/run host limits [--role lane|coachman|reviewer] [--run <dispatch>|--project <repo>]
+<tool>/scripts/run host leg <launch|resume|takeover|retry|outcome|backfill|waiting> ...
+<tool>/scripts/run host run <name> <cwd> [--under <dispatch>] [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>] [--out <file>] [--err <file>] [--append] [--marker <file>] [--pidfile <file>] -- <command...>
+<tool>/scripts/run host workhorse <dispatch> <lane> <worktree>
+<tool>/scripts/run host limits [--role <lane|coachman|reviewer>] [--run <dispatch>] [--project <repo>]
 <tool>/scripts/run host stop <worktree>
+<tool>/scripts/run host stop-pidfile <pidfile>
 <tool>/scripts/run host close <worktree>
 <tool>/scripts/run host stop-run <dispatch>
 <tool>/scripts/run host close-run <dispatch>
@@ -59,6 +62,7 @@ way on every row, only less visibly on the last.
 <tool>/scripts/run host send <handle> <file> [--wait [<seconds>]]
 <tool>/scripts/run host wait <handle> [<seconds>]
 <tool>/scripts/run host read <handle> [<lines>]
+<tool>/scripts/run host close-handle <handle>
 ```
 
 **Send and wait as one command, `send --wait`.** On Herdr a separate `wait` straight after a
@@ -71,6 +75,12 @@ takes input and drop what it is sent, so read the session before sending the mes
 first start to ask something, such as whether to trust the folder: the user answers it in the
 pane. A booking clerk is spawned the same way (`postmaster.md`, Stage B).
 `spawn`, `send`, `wait` and `read` exit 3 on `none`.
+`run host close-handle <handle>` closes every session recorded under the handle, and only
+those: on Herdr the tabs the placement records name for the handle, on tmux the windows
+carrying its handle tag. A live session with no record is refused, and an unknown handle reports `no
+session`, exit 0. A booking clerk session closes this way once its ticket is marked ready: the
+mark arms a closer that waits for the clerk's turn to end, then closes its tab and drops its
+record. A session spawned from before this form exists has no record and closes by hand.
 
 ## Run, on every host
 
@@ -119,8 +129,12 @@ onto the fragment it supersedes.
   labels and prompt text never identify ownership. A user pane split into a launch tab or window
   survives: `run host` closes only its own pane and leaves the shared tab or window open. The event
   stream and logs stay on disk.
-- **`--pidfile` gets its pid, which is also its process group:** `kill -- -<pid>` stops all of
-  it. `run host run` returns as soon as the launch has started. The wait still goes in the same
+- **`--pidfile` gets its pid, which is also its process group, with the start, boot and
+  command that prove it:** `<tool>/scripts/run host stop-pidfile <pidfile>` stops the recorded
+  launch and its group only while that identity still matches. Members it cannot prove are
+  never killed: they are reported as leftover members, each pid with its command, and the
+  stop exits 2. `run host run` returns as soon as the launch has started.
+  The wait still goes in the same
   command as the launch, as `<tool>/scripts/run wait-for-markers`, or for a review round
   `<tool>/scripts/run review-round wait`.
 - **`--role` selects per-role limits; `--run` selects the dispatch's recorded config.** Use
@@ -194,6 +208,11 @@ onto the fragment it supersedes.
   log, including workhorse and scratch clones that Git does not list as worktrees, plus any pane
   or window still tagged for the run. Either exits 2 when the run's records cannot be read; a round
   record or action-log line it can read but not use is named in the refusal.
+- On a fixture copy (`run fixture new`), which exists for one run, the run's entries include the
+  copy's own space with its postmaster's and watcher's tabs: the first launch marks that space
+  opened, `stop-run` stops the copy's root launches, and `close-run` closes the space with the
+  run's. The project's own watcher is told apart from the copy's by the checkout recorded at
+  launch, never by a label, and stays.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `run host`
   prints `host=none` rather than where it would have been.
@@ -233,9 +252,9 @@ onto the fragment it supersedes.
   recorded pane itself carries no attributable tab, only that pane closes,
   never the tab. Closing a reviewer scratch therefore removes its tabs
   without closing the run space; when they are its last tabs Herdr destroys the tabless space
-  with them. It never closes a repository's own space, a scratch clone's aside, never uses
-  `workspace close --group`, and never runs `herdr worktree remove`, which deletes the checkout.
-  Close a space before removing its worktree.
+  with them. It never closes a repository's own space, a scratch clone's or a fixture copy's
+  aside, never uses `workspace close --group`, and never runs `herdr worktree remove`, which
+  deletes the checkout. Close a space before removing its worktree.
 - **State.** The pane reports its launch `working` as it starts, under the agent label
   `headless`, and releases it (`pane release-agent`, same label) when the launch exits. Left to
   itself Herdr shows a headless harness as idle. A closing `idle` report does not work: Herdr
@@ -281,7 +300,8 @@ with `herdr agent start`. It is a pane whose agent `run host` reports. So when i
 - `run host close <worktree>` closes only the recorded pane IDs run host opened for that worktree
   once no launch runs there. A split window stays open with its other panes and the close
   reports the refusal (exit 2); an unrecorded pane is never selected by its window name or
-  other text.
+  other text. `run host close-handle <handle>` closes the window carrying that handle's tag,
+  and refuses a window merely named for it.
 - Sending: `tmux load-buffer` from the file, `tmux paste-buffer -p` so an application that asked
   for bracketed paste gets it, then `tmux send-keys Enter` as a key of its own. Settled means
   the screen has not changed for 10 seconds (`POSTMASTER_HOST_QUIET`).
@@ -291,7 +311,7 @@ with `herdr agent start`. It is a pane whose agent `run host` reports. So when i
 
 - A launch is a detached process in a session of its own, with no terminal. There is nothing to
   watch but its files: `<tool>/scripts/run runs-status`, the events file, and
-  `<tool>/scripts/run view-stream < <events-file>` for the readable form.
+  `<tool>/scripts/run view-stream <events-file>` for the readable form.
 - **The postmaster runs headless, as a native session**, like every other role:
   `<tool>/scripts/run host run "postmaster" <repo> --out <runs>/postmaster/events.jsonl
   --err <runs>/postmaster/postmaster.err --marker <runs>/postmaster/.exited -- <tool>/scripts/run launch
@@ -319,5 +339,6 @@ checks the uncapped notice and successful launch.
 ticket's controls against the hosts on this machine, in a scratch repository it creates: a
 postmaster using the project's first tab; a coachman in a ticket-labeled run space with no spare
 shell tab; a workhorse and style, bug, and security launches under that run, including a security
-clone whose tab closes without closing the run space; then the same launch with no host and on
-tmux. It opens only its own spaces and tmux session, and closes them.
+clone whose tab closes without closing the run space; a spawned session that `close-handle`
+closes from its placement record, and the handle spawns again; then the same launch with no
+host and on tmux. It opens only its own spaces and tmux session, and closes them.

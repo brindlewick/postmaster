@@ -8,10 +8,12 @@
 // shows, and tells the user to open the clerk by hand when no host answers.
 // The session is named for the ticket's number and title, as the adapter
 // reads them. The postmaster logs the dispatch; this script records only the
-// open session.
+// open session. Once the ticket is marked ready the session closes when the
+// clerk's turn ends, and a later start opens a new session under a new handle.
 //
 // Exit 0 done; 3 no session host; 1 anything else.
 
+import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { effectiveConfigForProject, globalConfigPath } from "./lib/effective-config.ts";
@@ -291,21 +293,23 @@ function writeBrief(repo: string, id: string): Brief {
   };
 }
 
-function sessionPath(repo: string, id: string): string {
+export function clerkSessionPath(repo: string, id: string): string {
   return join(sessionDir(repo), `${encodeURIComponent(id)}.json`);
 }
 
 function recordOpen(repo: string, id: string, name: string, brief: string, handle: string): void {
   mkdirSync(sessionDir(repo), { recursive: true });
   writeFileSync(
-    sessionPath(repo, id),
+    clerkSessionPath(repo, id),
     `${JSON.stringify({ ticket: name, brief, handle, opened: new Date().toISOString() })}\n`,
   );
 }
 
 function readSession(repo: string, id: string): { handle: string } | null {
   try {
-    const raw = JSON.parse(readFileSync(sessionPath(repo, id), "utf8")) as { handle?: unknown };
+    const raw = JSON.parse(readFileSync(clerkSessionPath(repo, id), "utf8")) as {
+      handle?: unknown;
+    };
     if (typeof raw.handle !== "string") return null;
     return { handle: raw.handle };
   } catch {
@@ -386,7 +390,11 @@ function cmdStart(repo: string, id: string): number {
   if (form.length === 0) die("run launch printed no interactive command for the clerk");
   // The handle names the project and the ticket's id, since both hosts check
   // session names globally; the tab carries the session's number and title.
-  const handle = clerkHandle(repo, id);
+  // One handle per session, never one per ticket: the closer a mark arms closes
+  // this session only, and a later clerk for the same ticket starts untouched.
+  const stem = clerkHandle(repo, id);
+  const nonce = randomBytes(2).toString("hex");
+  const handle = stem.length + 5 <= 32 ? `${stem}-${nonce}` : `${stem.slice(0, 27)}-${nonce}`;
   const started = runScript("host", [
     "spawn",
     handle,

@@ -754,6 +754,18 @@ export const isTracked = (repo: string, file: string): boolean => {
   return false;
 };
 
+/** The work-tree top level a path is in, or empty when git cannot say.
+ * Settings live at the repository root, whatever subdirectory names the
+ * target; front-door and check-setup resolve it through this. */
+export const repoTopLevel = (path: string): string => {
+  // An empty path is unresolvable: git -C "" would silently mean the process cwd.
+  if (!path) return "";
+  const env: Record<string, string | undefined> = {};
+  for (const k of GIT_ENV_KEYS) env[k] = undefined;
+  const r = run("git", ["-C", path, "rev-parse", "--show-toplevel"], { env });
+  return r.code === 0 ? r.out.trim() : "";
+};
+
 const canonRepo = (repo: string): string => {
   try {
     return realpathSync(repo);
