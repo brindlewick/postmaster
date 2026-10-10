@@ -211,8 +211,9 @@ describe("upkeep-report: the verdict from a finished pass", () => {
       const r = reportRun(sandbox, REPORT_CLEAN);
       expectCode(r, 0);
       expect(r.out).toContain("features driven: 5, stale: 0, unchecked: 0");
-      expect(r.out).not.toContain("stale:");
-      expect(r.out).not.toContain("unchecked:");
+      const lines = r.out.split("\n");
+      expect(lines.filter((l) => l.startsWith("stale:"))).toEqual([]);
+      expect(lines.filter((l) => l.startsWith("unchecked:"))).toEqual([]);
     } finally {
       rmSync(sandbox.dir, { recursive: true, force: true });
     }
@@ -237,7 +238,8 @@ describe("upkeep-report: the verdict from a finished pass", () => {
   test("a report missing a feature page is refused naming the page", () => {
     const sandbox = makeSandbox();
     try {
-      const missing = REPORT_CLEAN.replace(`## Feature: ${STORE}\nOutcome: clean\n\n`, "");
+      const missing = REPORT_CLEAN.replace(`## Feature: ${STORE}\nOutcome: clean\n`, "");
+      expect(missing).not.toContain(STORE);
       const r = reportRun(sandbox, missing);
       expectCode(r, 1);
       expect(r.err).toMatch(/store\.md/u);
