@@ -256,6 +256,17 @@ describe("parseFilesList", () => {
     expect(parseFilesList("Files: src/, README.md.")).toEqual(["src", "README.md"]);
   });
 
+  test("a folder last keeps no slash after the sentence's full stop", () => {
+    expect(parseFilesList("Files: src/cli.ts, docs/.")).toEqual(["src/cli.ts", "docs"]);
+  });
+
+  test("wrapping backticks and a leading ./ are not the path", () => {
+    expect(parseFilesList("Files: `src/cli.ts`, ./src/store.ts")).toEqual([
+      "src/cli.ts",
+      "src/store.ts",
+    ]);
+  });
+
   test("empty entries are dropped", () => {
     expect(parseFilesList("Files: src/cli.ts,, ")).toEqual(["src/cli.ts"]);
   });

@@ -1849,10 +1849,11 @@ export function indexFileFor(vdir: string, shared: boolean): string {
  * The project paths a verifier's index scope lists after its `Files:` label,
  * comma-separated, each relative to the repo top, or null when the scope names
  * none. The scope is one features-index line or one shared-index bullet span.
- * The value ends at a `Confirmed:` label or the scope's end; each entry is
- * trimmed of whitespace and trailing slashes, and one trailing full stop (the
- * sentence's, as the shared bullets read) is dropped. The label is
- * case-sensitive, as the instructions write it.
+ * The value ends at a `Confirmed:` label or the scope's end; each entry drops
+ * wrapping backticks and a leading `./`, then one trailing full stop (the
+ * sentence's, as the shared bullets read), then trailing slashes, so a folder
+ * last in the list matches. The label is case-sensitive, as the instructions
+ * write it.
  */
 export function parseFilesList(scope: string): string[] | null {
   const at = scope.indexOf("Files:");
@@ -1863,8 +1864,13 @@ export function parseFilesList(scope: string): string[] | null {
   const entries: string[] = [];
   // ASCII: widening to Unicode whitespace only folds more runs, never splits an entry
   for (const raw of value.replace(/\s+/gu, " ").split(",")) {
-    let entry = raw.trim().replace(/\/+$/u, "");
+    // The sentence's full stop drops before trailing slashes, so a folder last
+    // in the list keeps no slash; wrapping backticks and a leading ./ are the
+    // markdown framing agents write, not the path.
+    let entry = raw.trim().replace(/^`+|`+$/gu, "");
+    if (entry.startsWith("./")) entry = entry.slice("./".length);
     if (entry.endsWith(".") && entry.length > 1) entry = entry.slice(0, -1);
+    entry = entry.replace(/\/+$/u, "");
     if (entry !== "") entries.push(entry);
   }
   return entries;
@@ -2264,10 +2270,10 @@ function staleDetail(repo: string, vdir: string, shared: boolean, at: string): s
   let sha: string | null = null;
   if (indexFile === "verifier/README.md") {
     const spans = indexBullets(text).filter((span) => spanNamesDir(span, vdir));
-    if (spans.length === 1) {
-      scope = (spans[0] ?? []).join("\n");
-      sha = confirmedSha(scope);
-    }
+    if (spans.length === 0) return "unconfirmed (not in the shared index)";
+    if (spans.length > 1) return "unconfirmed (ambiguous shared index entry)";
+    scope = (spans[0] ?? []).join("\n");
+    sha = confirmedSha(scope);
   } else {
     // ASCII: indentation before the label is plain spaces
     scope = text.split("\n").find((l) => /^\s*Files:/u.test(l)) ?? null;
@@ -2276,8 +2282,11 @@ function staleDetail(repo: string, vdir: string, shared: boolean, at: string): s
   const files = scope === null ? null : parseFilesList(scope);
   if (files === null) return "unconfirmed (no Files: list)";
   if (sha === null) return "unconfirmed (no Confirmed: commit)";
-  if (git(repo, ["cat-file", "-e", sha]).code !== 0) return `unconfirmed (unknown commit ${sha})`;
-  const diff = git(repo, ["diff", "--name-only", sha, at]);
+  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]).code !== 0)
+    return `unconfirmed (unknown commit ${sha})`;
+  // Rename detection would report only the destination, hiding the listed
+  // source path the verifier depends on.
+  const diff = git(repo, ["diff", "--name-only", "--no-renames", sha, at]);
   if (diff.code !== 0) throw new RunError(`the commits ${sha} and ${at} could not be compared`);
   const changed = diff.out
     .split("\n")
