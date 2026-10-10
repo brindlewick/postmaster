@@ -12,7 +12,14 @@
 // wiring, and the transcripts sit in the run record. Every case drives git or
 // scripts/run as a subprocess.
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUN, commitAll, gitOrThrow, writeRepoFile } from "./acceptance-323.ts";
