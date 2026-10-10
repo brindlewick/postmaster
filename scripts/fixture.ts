@@ -742,7 +742,9 @@ function checkStages(dispatch: string): { ok: boolean; detail: string } {
 /**
  * The base check must be recorded before the first workhorse dispatch: the
  * coachman's, or the postmaster's in a run without the notes, where the
- * coachman skips the step and records none.
+ * coachman skips the step and records none. Without the notes the postmaster's
+ * line must also precede the first leg dispatch, since the premises are
+ * checked at dispatch before any leg starts.
  */
 export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: string } {
   const events = readActions(dispatch);
@@ -783,6 +785,11 @@ export function checkPremisesOrder(dispatch: string): { ok: boolean; detail: str
     if (postmasterPremises < 0) return { ok: false, detail: "no postmaster premises action" };
     if (coachmanPremises >= 0)
       return { ok: false, detail: "the coachman recorded premises the postmaster already checked" };
+    const legIndex = events.findIndex(
+      (event) => event.action === "dispatch" && event.actor === "postmaster",
+    );
+    if (legIndex >= 0 && postmasterPremises >= legIndex)
+      return { ok: false, detail: "the first leg dispatch precedes the premises action" };
     if (dispatchIndex >= 0 && postmasterPremises >= dispatchIndex)
       return { ok: false, detail: "the first workhorse dispatch precedes the premises action" };
     if (dispatchIndex < 0)

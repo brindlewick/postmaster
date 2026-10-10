@@ -1672,6 +1672,12 @@ describe("score: premises are checked before workhorse dispatch", () => {
     target: "one",
     detail: "workhorse",
   };
+  const legDispatch = {
+    actor: "postmaster",
+    action: "dispatch",
+    target: "coachman",
+    detail: "leg 1",
+  };
 
   test("a premises action before the first workhorse dispatch passes", () => {
     expect(checkPremisesOrder(recordOrder("before", [premise, laneDispatch])).ok).toBe(true);
@@ -1722,6 +1728,21 @@ describe("score: premises are checked before workhorse dispatch", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.detail).toContain("already checked");
+  });
+
+  test("held-back with the first leg dispatched before the premises action fails", () => {
+    const result = checkPremisesOrder(
+      recordOrder("held-leg-first", [legDispatch, postmasterPremise], "held-back"),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("precedes");
+  });
+
+  test("held-back with the premises action before the first leg dispatch passes", () => {
+    const result = checkPremisesOrder(
+      recordOrder("held-leg-after", [postmasterPremise, legDispatch], "held-back"),
+    );
+    expect(result.ok).toBe(true);
   });
 });
 
