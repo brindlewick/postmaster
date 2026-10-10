@@ -1989,10 +1989,17 @@ describe("upkeep scope", () => {
     expect(isFeaturePage("verify-app", "verify-app/features/a.md")).toBe(true);
     expect(isFeaturePage("verifier", "verifier/cli/features/a.md")).toBe(true);
     expect(isFeaturePage("verify-app", "verify-app/features/README.md")).toBe(false);
+    expect(isFeaturePage("verifier", "verifier/cli/features/README.md")).toBe(false);
     expect(isFeaturePage("verify-app", "verify-app/README.md")).toBe(false);
     expect(isFeaturePage("verify-app", "verify-app/features/helper.ts")).toBe(false);
     expect(isFeaturePage("verify-app", "other/features/a.md")).toBe(false);
-    expect(isFeaturePage("verify-app", "verify-app/features/deep/a.md")).toBe(false);
+    expect(isFeaturePage("verify-app", "verify-app/features.md")).toBe(false);
+    expect(isFeaturePage("verify-app", "verify-app/features-old/a.md")).toBe(false);
+  });
+
+  test("a nested page counts, as make counts it", () => {
+    expect(isFeaturePage("verify-app", "verify-app/features/deep/a.md")).toBe(true);
+    expect(isFeaturePage("verifier", "verifier/cli/features/deep/a.md")).toBe(true);
   });
 
   test("detectFolder prefers the multi index, then the single front page", () => {
@@ -2032,6 +2039,25 @@ describe("upkeep scope", () => {
       ]);
       expect(featurePages(repo, "missing")).toEqual([]);
       expect(featurePages(join(dir, "nowhere"), "verify-app")).toBe(null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("featurePages lists nested pages with the flat ones", () => {
+    const dir = tempDir();
+    try {
+      const repo = join(dir, "app");
+      initRepo(repo);
+      writeRepoFile(repo, "verify-app/README.md", "# v\n");
+      writeRepoFile(repo, "verify-app/features/README.md", "# i\n");
+      writeRepoFile(repo, "verify-app/features/a.md", "# a\n");
+      writeRepoFile(repo, "verify-app/features/deep/b.md", "# b\n");
+      commitAll(repo, "first");
+      expect(featurePages(repo, "verify-app")).toEqual([
+        "verify-app/features/a.md",
+        "verify-app/features/deep/b.md",
+      ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

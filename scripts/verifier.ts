@@ -762,12 +762,18 @@ export function detectFolder(repo: string, explicit: string | null): string | nu
   return null;
 }
 
-/** A feature page: a markdown file in a features/ folder, besides its index. */
+/**
+ * A feature page: a markdown file under a features/ folder, besides its
+ * index. Nested pages count, as make counts them: a page make accepts is a
+ * page the pass drives.
+ */
 export function isFeaturePage(folder: string, path: string): boolean {
   if (!path.startsWith(`${folder}/`) || !path.endsWith(".md")) return false;
-  const segs = path.slice(folder.length + 1).split("/");
-  if (segs.length < 2 || segs[segs.length - 2] !== "features") return false;
-  return segs[segs.length - 1] !== "README.md";
+  const rest = path.slice(folder.length + 1).split("/");
+  const at = rest.indexOf("features");
+  if (at === -1 || at === rest.length - 1) return false;
+  const below = rest.slice(at + 1);
+  return !(below.length === 1 && below[0] === "README.md");
 }
 
 /** The folder's feature pages at the current commit, sorted, or null when unreadable. */
@@ -843,8 +849,7 @@ export function committedFeaturePages(repo: string, branch: string, vdir: string
   // -z: NUL-separated and never quoted, so non-ASCII names count as written.
   const r = git(repo, ["ls-tree", "-z", "-r", "--name-only", branch, "--", `${vdir}/features/`]);
   if (r.code !== 0) return null;
-  const index = `${vdir}/features/README.md`;
-  return r.out.split("\0").filter((l) => l !== "" && l !== index && l.endsWith(".md"));
+  return r.out.split("\0").filter((l) => l !== "" && isFeaturePage(vdir, l));
 }
 
 /** A committed blob's text, or null when the branch has no such file. */
@@ -868,8 +873,7 @@ export function addedUnder(added: string[], dir: string): string[] {
 
 /** Added markdown pages under a features folder, besides its index. */
 export function addedFeaturePages(added: string[], vdir: string): string[] {
-  const index = `${vdir}/features/README.md`;
-  return added.filter((p) => p.startsWith(`${vdir}/features/`) && p !== index && p.endsWith(".md"));
+  return added.filter((p) => isFeaturePage(vdir, p));
 }
 
 /** Added paths with nowhere to be: HANDOVER.md alone sits beside verifier/. */
