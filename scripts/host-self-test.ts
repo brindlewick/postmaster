@@ -4035,6 +4035,141 @@ export async function runControls(): Promise<number> {
       await pass("the sweep settles when no server answers", () => sweepSettle.code === 0);
       await pass("and the window survives either way", () => "@9" in (tmuxState().windows ?? {}));
       resetHarness(root);
+
+      console.log("374 review round 1 fixes, Herdr (stub)");
+      resetHarness(root);
+      finishDelay = "3600";
+      const g1run = execHost(
+        ["run", NAME, luna, "--under", run1, "--marker", "../logs/g1.done", "--", "./fixed.sh"],
+        stubs,
+        f.caller,
+        { POSTMASTER_HOST: "herdr" },
+      );
+      const g1state = calls(root, "herdr").filter(
+        (line) => line.startsWith("pane\trun\t") && line.includes("run-state"),
+      );
+      await pass(
+        "a run launch lands and starts its state pane",
+        () => g1run.code === 0 && g1state.length === 1,
+        `${g1run.out}${g1run.err}`,
+      );
+      await pass(
+        "the state pane runs through the isolated entry",
+        () => g1state.length === 1 && (g1state[0] ?? "").includes("scripts/run"),
+        g1state.join("\n"),
+      );
+      await pass(
+        "not as a bare Bun call from the worktree",
+        () => g1state.length === 1 && !(g1state[0] ?? "").includes("host.ts"),
+        g1state.join("\n"),
+      );
+      resetHarness(root);
+      const g2dispatch = realpathSync(closeDispatch);
+      const g2record = (pane: string) =>
+        join(
+          root,
+          "state",
+          "placements",
+          `${createHash("sha256").update(pane).digest("hex")}.json`,
+        );
+      const g2tab = join(
+        root,
+        "state",
+        "runtabs",
+        `${createHash("sha256").update(g2dispatch).digest("hex")}.json`,
+      );
+      const g2state = (rogue: boolean): HerdrStubState => {
+        const panes: Record<string, StubPane> = {
+          pState: {
+            ws: "w1",
+            tab: "w1:t2",
+            cwd: lunaReal,
+            tokens: { postmaster: "launch", role: "runstate" },
+          },
+          p1: {
+            ws: "w1",
+            tab: "w1:t2",
+            cwd: lunaReal,
+            tokens: { postmaster: "launch", state: "done" },
+          },
+        };
+        if (rogue) panes.rogue = { ws: "w1", cwd: realpathSync(f.repo), tokens: {} };
+        return {
+          n: 10,
+          spaces: {
+            w1: {
+              label: basename(f.repo),
+              tokens: {},
+              panes: rogue ? ["pState", "p1", "rogue"] : ["pState", "p1"],
+              tabs: ["w1:t2"],
+              path: realpathSync(f.repo),
+            },
+          },
+          panes,
+          tabs: { "w1:t2": { ws: "w1", pane: "pState", cwd: lunaReal, label: "T-1" } },
+          open: { [realpathSync(f.repo)]: "w1" },
+          agents: [],
+          agentPanes: {},
+          tab_n: { w1: 2 },
+        };
+      };
+      const g2records = () => {
+        mkdirSync(join(root, "state", "placements"), { recursive: true });
+        save(g2record("p1"), {
+          workspace: "w1",
+          tab: "w1:t2",
+          pane: "p1",
+          cwd: lunaReal,
+          run: g2dispatch,
+        });
+        mkdirSync(join(root, "state", "runtabs"), { recursive: true });
+        save(g2tab, { workspace: "w1", tab: "w1:t2", pane: "pState", run: g2dispatch });
+      };
+      save(join(stub, "herdr.json"), g2state(true));
+      g2records();
+      const g2close = execHost(["close-run", closeDispatch], stubs, root, {
+        POSTMASTER_HOST: "herdr",
+      });
+      await pass(
+        "close-run refuses a run tab with a pane it cannot place",
+        () =>
+          g2close.code === 2 && !calls(root, "herdr").some((line) => line === "tab\tclose\tw1:t2"),
+        `${g2close.out}${g2close.err}`,
+      );
+      await pass(
+        "names what it cannot place and keeps the record",
+        () => `${g2close.out}${g2close.err}`.includes("cannot place") && existsSync(g2tab),
+        `${g2close.out}${g2close.err}`,
+      );
+      save(join(stub, "herdr.json"), g2state(false));
+      g2records();
+      const g2retry = execHost(["close-run", closeDispatch], stubs, root, {
+        POSTMASTER_HOST: "herdr",
+      });
+      await pass(
+        "and closes it once every pane is placed",
+        () =>
+          g2retry.code === 0 &&
+          (herdrState().tabs ?? {})["w1:t2"] === undefined &&
+          !existsSync(g2tab),
+        `${g2retry.out}${g2retry.err}`,
+      );
+      resetHarness(root);
+      save(join(stub, "herdr.json"), g2state(false));
+      mkdirSync(join(root, "state", "runtabs"), { recursive: true });
+      save(g2tab, { workspace: "w1", tab: "w1:t2", pane: "pState", run: g2dispatch });
+      rmSync(join(root, "state", "placements"), { recursive: true, force: true });
+      const g3close = execHost(["close-run", closeDispatch], stubs, root, {
+        POSTMASTER_HOST: "herdr",
+      });
+      mkdirSync(join(root, "state", "placements"), { recursive: true });
+      await pass(
+        "close-run still closes the run tab with no placements recorded",
+        () => g3close.code === 0 && (herdrState().tabs ?? {})["w1:t2"] === undefined,
+        `${g3close.out}${g3close.err}`,
+      );
+      await pass("and drops the run tab record", () => !existsSync(g2tab));
+      resetHarness(root);
     }
 
     console.log("teardown reads only the round records");

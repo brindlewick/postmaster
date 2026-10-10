@@ -148,18 +148,19 @@ import {
   processCommandLine,
   processCommandLines,
   processInfo,
+  processIsLive,
   processStart,
   processState,
-  processTable as sharedProcessTable,
   sameBoot,
+  processTable as sharedProcessTable,
 } from "./lib/processes.ts";
 import {
   BOUND_L,
   BOUND_R,
+  casefold,
   END_OF_STRING,
   PY_DOT,
   PY_S_CLASS,
-  casefold,
   pySplitLines,
   pyTrim,
   pyWords,
@@ -616,6 +617,7 @@ function runStateWaiting(dispatch: string, stage: string, pending: string[]): st
       return "landing";
     case "shipped":
     case "done":
+    case "abandoned":
       return "nothing — the run is complete";
     default:
       return "unknown — the run's records name no stage run host knows";
@@ -624,7 +626,7 @@ function runStateWaiting(dispatch: string, stage: string, pending: string[]): st
 
 function runStateLines(dispatch: string): string[] {
   const info = dispatchInfo(dispatch);
-  const name = info.name || basename(dispatch);
+  const name = clean(info.name || basename(dispatch));
   let stage = "unknown";
   let leg = "";
   let pending: string[] = [];
@@ -1200,8 +1202,28 @@ function runTabById(tab: string): boolean {
 // The first launch of a run creates its tab. Launches start one at a time,
 // so this lock is belt and braces for two shells racing: a mkdir lock, stale
 // after 30 seconds, since a holder this slow already failed its placement.
-// On a timeout the launch runs in the background instead of risking a
-// second tab.
+// The holder stamps its pid and start time inside; a contender evicts only a
+// stale lock whose owner is gone, never a live holder, however slow its Herdr
+// calls, and releases only a lock it still owns. On a timeout the launch runs
+// in the background instead of risking a second tab.
+function readRunTabLockOwner(lock: string): { pid: number; start: string } | null {
+  let lines: string[];
+  try {
+    lines = readFileSync(join(lock, "owner"), "utf8").split("\n");
+  } catch {
+    return null;
+  }
+  const pid = Number(lines[0]?.trim() ?? "");
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  return { pid, start: (lines[1] ?? "").trim() };
+}
+export function runTabLockOwnerAlive(lock: string): boolean {
+  const owner = readRunTabLockOwner(lock);
+  if (!owner) return false;
+  if (!processIsLive(owner.pid)) return false;
+  if (!owner.start) return true;
+  return processStart(owner.pid) === owner.start;
+}
 function withRunTabLock<T>(fn: () => T | null): T | null {
   const directory = runTabDir();
   try {
@@ -1210,14 +1232,21 @@ function withRunTabLock<T>(fn: () => T | null): T | null {
     return null;
   }
   const lock = join(directory, ".lock");
+  const me = process.pid;
   const deadline = Date.now() + 60000;
   for (;;) {
     try {
       mkdirSync(lock);
+      try {
+        writeFileSync(join(lock, "owner"), `${me}\n${processStart(me) ?? ""}\n`);
+      } catch {
+        rmSync(lock, { recursive: true, force: true });
+        return null;
+      }
       break;
     } catch {
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 30000) {
+        if (Date.now() - statSync(lock).mtimeMs > 30000 && !runTabLockOwnerAlive(lock)) {
           rmSync(lock, { recursive: true, force: true });
           continue;
         }
@@ -1229,7 +1258,9 @@ function withRunTabLock<T>(fn: () => T | null): T | null {
   try {
     return fn();
   } finally {
-    rmSync(lock, { recursive: true, force: true });
+    try {
+      if (readRunTabLockOwner(lock)?.pid === me) rmSync(lock, { recursive: true, force: true });
+    } catch {}
   }
 }
 
@@ -1743,7 +1774,10 @@ function createRunTab(
     rollbackRunTab(tab);
     return null;
   }
-  const loop = `cd -- ${quote(runPath)} && ${quote(process.execPath)} ${quote(join(HERE, "host.ts"))} run-state --watch ${quote(dispatch)}`;
+  // Through the isolated entry, never a bare Bun call: the pane starts in the
+  // synthesis worktree, and a bare call would load that project's .env and
+  // Bun config into this flow-owned loop.
+  const loop = `cd -- ${quote(runPath)} && ${quote(join(HERE, "run"))} host run-state --watch ${quote(dispatch)}`;
   if (herdr(["pane", "run", rootPane, loop]).code !== 0)
     warn(`could not start the run state pane in tab ${tab}; leaving it at its prompt`);
   if (!writeRunTab(dispatch, source, tab, rootPane)) {
@@ -6577,6 +6611,14 @@ function herdrCloseRunTab(dispatch: string, space: string, tab: string): number 
     warn(`could not verify ownership of run tab ${tab}; left it open`);
     return 2;
   }
+  // A row counts as placed only when its tab_id has the shape Herdr sends;
+  // anything else is unattributable and may sit in this tab, so one such row
+  // refuses the close, as a launch close does.
+  const placed = (value: unknown): boolean => typeof value === "string" && HERDR_TAB_ID.test(value);
+  if (rows.some((row) => !placed(row.tab_id))) {
+    warn(`run tab ${tab} in space ${space} holds panes run host cannot place; left it open`);
+    return 2;
+  }
   const held = rows.filter((row) => row.tab_id === tab);
   if (!held.length) {
     removeRunTab(dispatch);
@@ -6609,11 +6651,9 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     if (!fixture || item.run !== "") return false;
     return typeof item.cwd === "string" && realpathLoose(item.cwd) === repo;
   };
-  try {
-    if (!statSync(join(STATE, "placements")).isDirectory()) return 0;
-  } catch {
-    return 0;
-  }
+  // No early return when placements are missing: the run tab has its own
+  // record outside them, and it still needs closing. The placement loops
+  // below are no-ops over an empty list.
   // BASE collects, then joins: one non-mapping file, or one non-string
   // workspace id, aborts the print, so no space closes from this list.
   const found = new Set<string>();
@@ -6702,9 +6742,6 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
       }
       herdrForgetSpace(ws);
     } else if (verdict === "space was not opened by run host") {
-      // The repository's space is shared: run host closes the run tab, never
-      // the space, so a space it did not open is simply not its to sweep.
-      continue;
     } else {
       warn(`${verdict}; left run space ${ws} open`);
       rc = 2;

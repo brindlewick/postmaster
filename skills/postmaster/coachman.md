@@ -515,7 +515,7 @@ the same as it always was:
 `run host` takes the name from `host name`, so neither name is typed into a shell, gives the
 lane its events, error and marker paths under `<dispatch>/logs/`, and runs the launch with the
 prompt at `<dispatch>/<lane>-prompt.txt`, its `--last` file and `--run <dispatch>`; the
-dispatch makes its synthesis worktree space carry the ticket name.
+dispatch makes the run tab in the repository's space carry the ticket name.
 A resume is the launch's `host run` composition with `--append` and the resume child:
 `<tool>/scripts/run host run <name> <workhorse-wt> --under <dispatch> --role lane --run <dispatch> --out <dispatch>/logs/<lane>-events.jsonl --err <dispatch>/logs/<lane>.err --append --marker <dispatch>/logs/<lane>.done -- <tool>/scripts/run launch resume <lane> <workhorse-wt> <thread-id> <prompt-file> --last <dispatch>/logs/<lane>-last.md --run <dispatch>`,
 with `<name>` as `host name <dispatch> workhorse <lane>` prints it;
@@ -1005,12 +1005,12 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    <tool>/scripts/run review-round teardown <dispatch> <round> <repo>
    ```
 
-   For each scratch it stops what still runs there (`run host stop`), closes its space
+   For each scratch it stops what still runs there (`run host stop`), closes its panes
    (`run host close`) and removes it (`run cut-scratch --remove`, which takes away a scratch of
    either kind and refuses anything else), each only once the one before has succeeded, and
    logs `teardown`. A reviewer it names as stopped before it had finished is DEGRADED for the
    round. A scratch it leaves in place is named with its reason, such as the user having its
-   space open, and reported; it is never removed by hand. A scratch never holds work, and its
+   tab open, and reported; it is never removed by hand. A scratch never holds work, and its
    contents were just checked.
    **Check reach and restore before any fix.** Once every reviewer has been harvested and each
    scratch's tracked diff has been checked, but before teardown or triage, run:
@@ -1359,7 +1359,7 @@ on the ticket carries the run summary.
 Never delete the dispatch directory or the manifest, they are the run's history. Archive
 finished threads where the harness has an archive form (`harnesses.md`). After the merge, tear
 down the workhorse worktrees, preserving any stray file first (a workhorse killed mid-run leaves
-real artifacts) and closing each one's space before it is removed (`<tool>/scripts/run host close <wt>`),
+real artifacts) and closing each one's panes before it is removed (`<tool>/scripts/run host close <wt>`),
 and hand the synthesis worktree to the postmaster for removal from outside it.
 Keep the `wb/<TICKET>-<lane>` branches as a local archive. Durable process learnings go to the
 project's own docs, not this runbook. Residue contract: a clean run leaves only torn-down-able
