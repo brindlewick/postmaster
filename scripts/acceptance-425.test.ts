@@ -11,7 +11,7 @@
 // Covered: C1-C4. Not covered: the fresh-clone frozen install (the gate runs
 // it on every pull request).
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   PARSER_MARKER,
@@ -47,6 +47,13 @@ describe("C1: only the pinned version of each library ever runs", () => {
 
   test("the check script calls no bunx", () => {
     expect(readManifest().scripts.check).not.toContain("bunx");
+  });
+
+  test("the helper scripts call no bunx", () => {
+    // An invocation passes "bunx" as a string; a comment may name it.
+    for (const file of ["scripts/acceptance-232.ts", "scripts/no-explicit-any-acceptance.ts"]) {
+      expect(readFileSync(join(repoRoot(), file), "utf8")).not.toContain('"bunx"');
+    }
   });
 
   test("bunfig.toml disables auto-install", () => {
@@ -128,6 +135,28 @@ describe("C2: no version younger than seven days is taken without a waiver", () 
       expect(existsSync(bundle)).toBe(true);
       expect(readFileSync(bundle, "utf8")).toContain(PARSER_MARKER);
       expect(readFileSync(join(vendor, "VERSION"), "utf8")).toContain(fx.oldVersion);
+    } finally {
+      cleanup(fx.dir, root);
+    }
+  });
+
+  test("refresh-parser takes an explicit version with no latest tag", () => {
+    const fx = makeRefreshFixture();
+    const root = makeTempDir("postmaster-425-root-");
+    try {
+      const packument = join(fx.dir, "packument.json");
+      const doc = JSON.parse(readFileSync(packument, "utf8")) as Record<string, unknown>;
+      delete doc["dist-tags"];
+      writeFileSync(packument, JSON.stringify(doc));
+      const scan = writeScanFixture(fx.dir, {});
+      const r = runRefresh([fx.oldVersion], {
+        POSTMASTER_REFRESH_FIXTURE: fx.dir,
+        POSTMASTER_REFRESH_ROOT: root,
+        POSTMASTER_SCAN_FIXTURE: scan,
+      });
+      expect(r.code).toBe(0);
+      const vendor = join(root, "scripts", "lib", "vendor");
+      expect(readFileSync(join(vendor, "babel-parser.js"), "utf8")).toContain(PARSER_MARKER);
     } finally {
       cleanup(fx.dir, root);
     }
