@@ -21,7 +21,7 @@
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { toolRoot } from "./lib/paths.ts";
 
 export interface AcceptResult {
@@ -46,9 +46,11 @@ const RULE_RENDERED = `${RULE.replace("/", "(")})`;
 const PROBE_REL = "scripts/zz-probe.ts";
 const PROBE_SRC = "export const z = (x: any): number => x;\n";
 /** The installed oxlint under the repo root: the pinned binary, never bunx,
- * which would fetch an unpinned oxlint where none is installed. */
+ * which would fetch an unpinned oxlint where none is installed. Absolute,
+ * since the runner spawns it with the root as its working directory and a
+ * relative binary would resolve under the root twice. */
 function oxlintBin(root: string): string {
-  return join(root, "node_modules", ".bin", "oxlint");
+  return resolve(root, "node_modules", ".bin", "oxlint");
 }
 
 // The count invocation, shared by the clean count and its planted control so
