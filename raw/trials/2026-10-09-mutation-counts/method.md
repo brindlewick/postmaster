@@ -42,8 +42,8 @@ reader had seen none of this.
 
 From the ticket (D1): both counts cover every non-test module under `scripts/`, and the first exempts
 no module as being at the edge. The record tags each flagged place by whether its own function reads
-the environment or the clock, touches files or starts processes, so the page's exemption for edge
-code can be read off afterwards.
+the environment or the clock, touches files, starts processes or uses the operating system, so the
+page's exemption for edge code can be read off afterwards.
 
 **Settled with the user during the session, before any join or draw:** the first count holds every
 kind of change to something the function did not create, whether or not the ticket's list names it.
@@ -123,8 +123,9 @@ declaration and not under `scripts/fixtures/`. The same selection runs at every 
 - Oxlint 1.86.0, the version the gate pins, runs the rule through its JavaScript plugin interface
   (`apparatus/mutation-rule.ts`). It was installed from the registry into a scratch folder; nothing
   was added to the project. Bun 1.4.2 runs every script of the apparatus, as
-  `bun --no-env-file --config=/dev/null <script>`. The scripts use only Bun and Node built-ins and run
-  on Linux and macOS.
+  `bun --no-env-file --config=/dev/null <script>`. The scripts use only Bun and Node built-ins, with
+  `git` and `tar` for the export. They were run on Linux only. Nothing in them is specific to Linux
+  that was found, but they have not been run on macOS.
 
 ## What is run
 
@@ -279,8 +280,8 @@ the first count reads 323 to 422 and the second 3,112 to 3,949, on 45,000 to 48,
 changed at any commit.
 
 **Edge code.** The first count was run with nothing exempt (decision D1). Of the 360 places, 115 lie in a
-function that reads the environment or the clock, touches files or starts processes, and 355 lie in a
-module that does. So the page's exemption for edge code, applied by function, would leave 245
+function that reads the environment or the clock, touches files, starts processes or uses the
+operating system, and 355 lie in a module that does. So the page's exemption for edge code, applied by function, would leave 245
 places, and applied by module, 5.
 
 ### Findings in flagged functions (check C1)

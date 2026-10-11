@@ -774,7 +774,7 @@ from a nested one. Nothing was exempt as being at the edge.
   on arguments, 44 on module-level variables, none on imports, 37 on process-wide objects (29 of them `process.env`, 5 `process.exitCode`, 3 `globalThis`), 32 on
   the object a method was called on and 166 on a variable of an enclosing function. At the 19 snapshots the first count reads
   323 to 422 and the second 3,112 to 3,949. Of the 360, 115 lie in a function that reads the environment or the clock,
-  touches files or starts processes, and 355 in a module that does, so the exemption for edge code would leave 245 places
+  touches files, starts processes or uses the operating system, and 355 in a module that does, so the exemption for edge code would leave 245 places
   by function and 5 by module [@trials/2026-10-09-mutation-counts/results/counts-by-commit.tsv]
   [@trials/2026-10-09-mutation-counts/results/edge-tags-main.txt].
 - **Hazards.** Of 30 places drawn at random, the first reader marked 4 hazards and 26 harmless, none unclear. That puts about
