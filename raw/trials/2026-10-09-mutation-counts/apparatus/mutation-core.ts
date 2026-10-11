@@ -2,8 +2,58 @@
 // environment or a process: the Oxlint rule hands it syntax nodes and a way to resolve a name,
 // and the driver hands it the rule's output. Only erasable TypeScript, so Node can load it too.
 
-// biome-ignore lint/suspicious/noExplicitAny: a syntax node of the ESTree family, read by field name
-export type Node = { readonly type: string; readonly [key: string]: any };
+/** A position in the source text, as the parser reports it. */
+export type Position = Readonly<{ line: number; column: number }>;
+
+/**
+ * A syntax node of the ESTree family, as Oxlint's plugin interface hands it out. Only the fields
+ * the counts read are named. Each is present on some kinds of node and absent from the rest, so a
+ * field that the kind being read always has is read through `need`.
+ */
+export type Node = Readonly<{
+  type: string;
+  range: readonly [number, number];
+  loc: Readonly<{ start: Position; end: Position }>;
+  parent?: Node | null;
+  /** an identifier's name */
+  name?: string;
+  /** a literal's value, or the node that is a property's value */
+  value?: unknown;
+  operator?: string;
+  kind?: string;
+  computed?: boolean;
+  importKind?: string;
+  id?: Node | null;
+  key?: Node;
+  init?: Node | null;
+  source?: Node | null;
+  object?: Node;
+  property?: Node;
+  callee?: Node;
+  argument?: Node;
+  expression?: Node;
+  left?: Node;
+  right?: Node;
+  consequent?: Node;
+  alternate?: Node;
+  arguments?: readonly Node[];
+  elements?: readonly (Node | null)[];
+  properties?: readonly Node[];
+  expressions?: readonly Node[];
+}>;
+
+/** A field that a node of the kind being read always has; its absence is a tree no parser makes. */
+export const need = <T>(value: T | null | undefined): T => {
+  if (value === null || value === undefined) {
+    throw new Error("a syntax node lacks a field that its kind has");
+  }
+  return value;
+};
+
+export const isNode = (value: unknown): value is Node =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { type?: unknown }).type === "string";
 
 /** What the scope analysis says about one name. */
 export type Binding = Readonly<{
@@ -118,13 +168,13 @@ const NOT_OBJECTS: ReadonlySet<string> = new Set(["undefined", "NaN", "Infinity"
 
 export const unwrap = (node: Node): Node => {
   let n = node;
-  while (WRAPPERS.has(n.type)) n = n.expression;
+  while (WRAPPERS.has(n.type)) n = need(n.expression);
   return n;
 };
 
 export const propertyName = (member: Node): string | null => {
-  if (!member.computed) return member.property.type === "Identifier" ? member.property.name : null;
-  const p = member.property;
+  const p = need(member.property);
+  if (!member.computed) return p.type === "Identifier" ? (p.name ?? null) : null;
   return p.type === "Literal" && typeof p.value === "string" ? p.value : null;
 };
 
@@ -136,15 +186,16 @@ export const patternTargets = (pattern: Node): Node[] => {
     case "MemberExpression":
       return [p];
     case "AssignmentPattern":
-      return patternTargets(p.left);
+      return patternTargets(need(p.left));
     case "RestElement":
-      return patternTargets(p.argument);
+      return patternTargets(need(p.argument));
     case "ArrayPattern":
-      return p.elements.flatMap((e: Node | null) => (e === null ? [] : patternTargets(e)));
+      return need(p.elements).flatMap((e) => (e === null ? [] : patternTargets(e)));
     case "ObjectPattern":
-      return p.properties.flatMap((q: Node) =>
-        q.type === "RestElement" ? patternTargets(q.argument) : patternTargets(q.value),
-      );
+      return need(p.properties).flatMap((q) => {
+        if (q.type === "RestElement") return patternTargets(need(q.argument));
+        return isNode(q.value) ? patternTargets(q.value) : [];
+      });
     default:
       return [];
   }
@@ -152,13 +203,13 @@ export const patternTargets = (pattern: Node): Node[] => {
 
 /** The change a call expression makes in place, by the ticket's list of method names. */
 export const callSite = (call: Node): Site | null => {
-  const callee = unwrap(call.callee);
+  const callee = unwrap(need(call.callee));
   if (callee.type !== "MemberExpression") return null;
   const name = propertyName(callee);
   if (name === null) return null;
-  const object = unwrap(callee.object);
+  const object = unwrap(need(callee.object));
   if (name === "assign" && object.type === "Identifier" && object.name === "Object") {
-    const first = call.arguments[0];
+    const first = need(call.arguments)[0];
     return first === undefined ? null : { op: "assign", how: "Object.assign", target: first };
   }
   return IN_PLACE_METHODS.has(name) ? { op: "call", how: name, target: object } : null;
@@ -182,7 +233,7 @@ export const aliasRoot = (
   switch (e.type) {
     case "Identifier": {
       const b = ctx.resolve(e);
-      if (b === null) return NOT_OBJECTS.has(e.name) ? null : "global";
+      if (b === null) return NOT_OBJECTS.has(e.name ?? "") ? null : "global";
       if (b.kind === "import") return "import";
       if (b.kind === "param") return b.rest && !elements ? null : "param";
       if (b.owner === null && ctx.fn !== null) return "module";
@@ -199,41 +250,43 @@ export const aliasRoot = (
       return null;
     }
     case "MemberExpression":
-      return again(e.object);
+      return again(need(e.object));
     case "ThisExpression":
       return ctx.thisIsOwn ? null : "this";
     case "ConditionalExpression":
-      return again(e.consequent) ?? again(e.alternate);
+      return again(need(e.consequent)) ?? again(need(e.alternate));
     case "LogicalExpression":
-      return again(e.left) ?? again(e.right);
+      return again(need(e.left)) ?? again(need(e.right));
     case "AssignmentExpression":
-      return again(e.right);
-    case "SequenceExpression":
-      return again(e.expressions[e.expressions.length - 1]);
+      return again(need(e.right));
+    case "SequenceExpression": {
+      const list = need(e.expressions);
+      return again(need(list[list.length - 1]));
+    }
     case "AwaitExpression":
-      return again(e.argument);
+      return again(need(e.argument));
     case "ArrayExpression":
       if (!elements) return null;
-      for (const item of e.elements as (Node | null)[]) {
+      for (const item of need(e.elements)) {
         const r =
-          item === null ? null : again(item.type === "SpreadElement" ? item.argument : item);
+          item === null ? null : again(item.type === "SpreadElement" ? need(item.argument) : item);
         if (r !== null) return r;
       }
       return null;
     case "NewExpression": {
-      const callee = unwrap(e.callee);
-      const first = e.arguments[0];
+      const callee = unwrap(need(e.callee));
+      const first = need(e.arguments)[0];
       const copies =
         callee.type === "Identifier" && (callee.name === "Set" || callee.name === "Map");
       return elements && copies && first !== undefined ? again(first) : null;
     }
     case "CallExpression": {
-      const callee = unwrap(e.callee);
+      const callee = unwrap(need(e.callee));
       if (callee.type !== "MemberExpression") return null;
       const name = propertyName(callee);
       if (name === null) return null;
-      const object = unwrap(callee.object);
-      const first = e.arguments[0];
+      const object = unwrap(need(callee.object));
+      const first = need(e.arguments)[0];
       if (object.type === "Identifier" && ctx.resolve(object) === null) {
         const takes =
           (object.name === "Object" && (name === "values" || name === "entries")) ||
@@ -281,12 +334,14 @@ export const classifyTarget = (expr: Node, ctx: Ctx, depth = 0): Target => {
   const e = unwrap(expr);
   switch (e.type) {
     case "MemberExpression":
-      return classifyTarget(e.object, ctx, depth + 1);
+      return classifyTarget(need(e.object), ctx, depth + 1);
     case "ThisExpression":
       return { root: ctx.thisIsOwn ? "local" : "this", alias: false };
     case "Identifier": {
       const b = ctx.resolve(e);
-      if (b === null) return { root: NOT_OBJECTS.has(e.name) ? "temp" : "global", alias: false };
+      if (b === null) {
+        return { root: NOT_OBJECTS.has(e.name ?? "") ? "temp" : "global", alias: false };
+      }
       if (b.kind === "param" && b.rest && depth === 0) return { root: "local", alias: false };
       const own = bindingRoot(b, ctx);
       if (own === "local" || own === "captured") {

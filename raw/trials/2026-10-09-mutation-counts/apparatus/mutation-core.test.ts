@@ -15,14 +15,16 @@ import {
   wilson,
 } from "./mutation-core.ts";
 
-const id = (name: string): Node => ({ type: "Identifier", name, range: [0, 0] });
-const member = (object: Node, property: string): Node => ({
-  type: "MemberExpression",
-  computed: false,
-  object,
-  property: id(property),
+const HERE = { start: { line: 1, column: 0 }, end: { line: 1, column: 0 } } as const;
+const node = (type: string, fields: Partial<Node> = {}): Node => ({
+  type,
   range: [0, 0],
+  loc: HERE,
+  ...fields,
 });
+const id = (name: string): Node => node("Identifier", { name });
+const member = (object: Node, property: string): Node =>
+  node("MemberExpression", { computed: false, object, property: id(property) });
 const fn = (
   n: number,
   parent: number,
@@ -42,51 +44,39 @@ const fn = (
 });
 
 test("a call of a method on the ticket's list is a site on its receiver", () => {
-  const call: Node = {
-    type: "CallExpression",
+  const call = node("CallExpression", {
     callee: member(id("xs"), "push"),
     arguments: [id("y")],
-    range: [0, 0],
-  };
+  });
   expect(callSite(call)?.how).toBe("push");
   expect(callSite(call)?.target.name).toBe("xs");
 });
 
 test("a method off the list is no site, and Object.assign's target is its first argument", () => {
-  const map: Node = {
-    type: "CallExpression",
-    callee: member(id("xs"), "map"),
-    arguments: [],
-    range: [0, 0],
-  };
+  const map = node("CallExpression", { callee: member(id("xs"), "map"), arguments: [] });
   expect(callSite(map)).toBeNull();
-  const assign: Node = {
-    type: "CallExpression",
+  const assign = node("CallExpression", {
     callee: member(id("Object"), "assign"),
     arguments: [id("opts"), id("defaults")],
-    range: [0, 0],
-  };
+  });
   expect(callSite(assign)?.op).toBe("assign");
   expect(callSite(assign)?.how).toBe("Object.assign");
   expect(callSite(assign)?.target.name).toBe("opts");
 });
 
 test("unwrap strips type assertions, non-null marks and optional chains", () => {
-  const wrapped: Node = {
-    type: "ChainExpression",
-    expression: {
-      type: "TSNonNullExpression",
-      expression: { type: "TSAsExpression", expression: id("x") },
-    },
-  };
+  const wrapped = node("ChainExpression", {
+    expression: node("TSNonNullExpression", {
+      expression: node("TSAsExpression", { expression: id("x") }),
+    }),
+  });
   expect(unwrap(wrapped).name).toBe("x");
 });
 
 test("patternTargets lists every name or member a destructuring writes to", () => {
-  const pattern: Node = {
-    type: "ArrayPattern",
-    elements: [id("a"), null, member(id("o"), "b"), { type: "RestElement", argument: id("rest") }],
-  };
+  const pattern = node("ArrayPattern", {
+    elements: [id("a"), null, member(id("o"), "b"), node("RestElement", { argument: id("rest") })],
+  });
   expect(patternTargets(pattern).map((t) => t.type)).toEqual([
     "Identifier",
     "MemberExpression",

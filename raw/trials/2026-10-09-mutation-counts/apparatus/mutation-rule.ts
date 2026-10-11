@@ -11,6 +11,7 @@ import {
   callSite,
   classifyRebind,
   classifyTarget,
+  need,
   patternTargets,
   propertyName,
   unwrap,
@@ -37,29 +38,68 @@ const moduleTag = (source: string): FileEvent[1] | null =>
         ? "os"
         : null;
 
+// What the rule uses of Oxlint's ESLint-style plugin interface, named here so that none of it is `any`.
+type Reference = Readonly<{
+  identifier: Node;
+  resolved: Variable | null;
+  /** the expression a write gives the name; null for a read */
+  writeExpr: Node | null;
+  isWrite(): boolean;
+}>;
+type Definition = Readonly<{
+  /** ImportBinding, Parameter, Variable, FunctionName, CatchClause, ... */
+  type: string;
+  node: Node;
+  name?: Node;
+  parent?: Node | null;
+}>;
+type Variable = Readonly<{
+  defs: readonly Definition[];
+  scope: Scope;
+  references: readonly Reference[];
+}>;
+type Scope = Readonly<{
+  set: ReadonlyMap<string, Variable>;
+  upper: Scope | null;
+  variableScope: Scope;
+  block: Node;
+  references: readonly Reference[];
+}>;
+type SourceCode = Readonly<{
+  lines: readonly string[];
+  scopeManager: Readonly<{ scopes: readonly Scope[] }>;
+  getScope(node: Node): Scope;
+  getText(node: Node): string;
+}>;
+type RuleContext = Readonly<{
+  sourceCode: SourceCode;
+  report(descriptor: Readonly<{ node: Node; message: string }>): void;
+}>;
+type Visitors = Readonly<Record<string, (node: Node) => void>>;
+
 type Open = { id: number; node: Node; isArrow: boolean; isCtor: boolean };
 
 const rule = {
   meta: { type: "suggestion", schema: [] },
-  // biome-ignore lint/suspicious/noExplicitAny: Oxlint hands the rule an ESLint-style context
-  create(context: any) {
+  create(context: RuleContext): Visitors {
     const sc = context.sourceCode;
     const functions: Record<string, unknown>[] = [];
     const stack: Open[] = [];
     const places: Record<string, unknown>[] = [];
     const events: FileEvent[] = [];
     const imports: [string, boolean][] = [];
-    const bindings = new Map<unknown, Binding | null>();
+    const bindings = new Map<Variable, Binding | null>();
 
-    const variableOf = (id: Node) => {
-      for (let s = sc.getScope(id); s; s = s.upper) {
-        const v = s.set.get(id.name);
-        if (v) return v;
+    const variableOf = (id: Node): Variable | null => {
+      const name = id.name ?? "";
+      for (let s: Scope | null = sc.getScope(id); s !== null; s = s.upper) {
+        const v = s.set.get(name);
+        if (v !== undefined) return v;
       }
       return null;
     };
 
-    const bindingOf = (v: any): Binding | null => {
+    const bindingOf = (v: Variable): Binding | null => {
       const cached = bindings.get(v);
       if (cached !== undefined) return cached;
       const def = v.defs[0];
@@ -78,16 +118,19 @@ const rule = {
             iterated: [],
           };
         } else {
-          const declaration = def.type === "Variable" ? def.parent : null;
+          const declaration = def.type === "Variable" ? (def.parent ?? null) : null;
           const loop = declaration?.parent;
-          const iterated =
+          const looped = loop?.right;
+          const iterated: Node[] =
             (loop?.type === "ForOfStatement" || loop?.type === "ForInStatement") &&
-            loop.left === declaration
-              ? [loop.right]
+            loop.left === declaration &&
+            looped !== undefined
+              ? [looped]
               : [];
-          const assigned: Node[] = v.references
-            .filter((r: any) => r.isWrite() && r.writeExpr)
-            .map((r: any) => r.writeExpr);
+          const assigned: Node[] = [];
+          for (const r of v.references) {
+            if (r.isWrite() && r.writeExpr) assigned.push(r.writeExpr);
+          }
           made = { kind: "var", owner, rest: false, assigned, iterated };
         }
       }
@@ -143,7 +186,7 @@ const rule = {
     const assignTargets = (left: Node, how: string, at: Node): void => {
       for (const t of patternTargets(left)) {
         if (t.type === "Identifier") addPlace("rebind", how, t, at, true);
-        else addPlace("prop", how, t.object, at, false);
+        else addPlace("prop", how, need(t.object), at, false);
       }
     };
 
@@ -171,18 +214,20 @@ const rule = {
       if (node.id?.name) return node.id.name;
       const p = node.parent;
       if (p === undefined || p === null) return "";
-      if (p.type === "VariableDeclarator" && p.id.type === "Identifier") return p.id.name;
+      const pid = p.id;
+      if (p.type === "VariableDeclarator" && pid?.type === "Identifier") return pid.name ?? "";
+      const key = p.key;
       if (
         (p.type === "Property" ||
           p.type === "MethodDefinition" ||
           p.type === "PropertyDefinition") &&
-        p.key
+        key
       ) {
-        return p.key.type === "Identifier" ? p.key.name : squash(sc.getText(p.key), 40);
+        return key.type === "Identifier" ? (key.name ?? "") : squash(sc.getText(key), 40);
       }
-      if (p.type === "AssignmentExpression") return squash(sc.getText(p.left), 40);
+      if (p.type === "AssignmentExpression") return squash(sc.getText(need(p.left)), 40);
       if (p.type === "CallExpression" && p.callee !== node) {
-        return `callback of ${squash(sc.getText(p.callee), 40)}`;
+        return `callback of ${squash(sc.getText(need(p.callee)), 40)}`;
       }
       return "";
     };
@@ -200,41 +245,42 @@ const rule = {
       "ArrowFunctionExpression:exit": exit,
 
       AssignmentExpression(node: Node) {
-        assignTargets(node.left, node.operator, node);
+        assignTargets(need(node.left), node.operator ?? "", node);
       },
       UpdateExpression(node: Node) {
-        assignTargets(node.argument, node.operator, node);
+        assignTargets(need(node.argument), node.operator ?? "", node);
       },
       UnaryExpression(node: Node) {
         if (node.operator !== "delete") return;
-        const arg = unwrap(node.argument);
-        if (arg.type === "MemberExpression") addPlace("delete", "delete", arg.object, node, false);
+        const arg = unwrap(need(node.argument));
+        if (arg.type === "MemberExpression") {
+          addPlace("delete", "delete", need(arg.object), node, false);
+        }
       },
       CallExpression(node: Node) {
+        const callee = unwrap(need(node.callee));
         const site = callSite(node);
         if (site !== null) {
-          const callee = unwrap(node.callee);
-          const at = site.op === "call" ? callee.property : node;
+          const at = site.op === "call" ? need(callee.property) : node;
           addPlace(site.op, site.how, site.target, at, false);
         }
-        const callee = unwrap(node.callee);
         if (callee.type === "MemberExpression") {
-          const object = unwrap(callee.object);
+          const object = unwrap(need(callee.object));
           const name = propertyName(callee);
           if (object.type === "Identifier" && isGlobal(object) && name !== null) {
             if (object.name === "Date" && name === "now") event(node, "clock");
             if (object.name === "performance" && name === "now") event(node, "clock");
           }
         } else if (callee.type === "Identifier" && callee.name === "require" && isGlobal(callee)) {
-          const first = node.arguments[0];
+          const first = need(node.arguments)[0];
           const tag = first?.type === "Literal" ? moduleTag(String(first.value)) : null;
           if (tag !== null) event(node, tag);
         }
       },
       NewExpression(node: Node) {
-        const callee = unwrap(node.callee);
+        const callee = unwrap(need(node.callee));
         if (callee.type === "Identifier" && callee.name === "Date" && isGlobal(callee)) {
-          if (node.arguments.length === 0) event(node, "clock");
+          if (need(node.arguments).length === 0) event(node, "clock");
         }
       },
       ImportExpression(node: Node) {
@@ -243,10 +289,10 @@ const rule = {
         if (tag !== null) event(node, tag);
       },
       ImportDeclaration(node: Node) {
-        imports.push([String(node.source.value), node.importKind === "type"]);
+        imports.push([String(need(node.source).value), node.importKind === "type"]);
       },
       MemberExpression(node: Node) {
-        const object = unwrap(node.object);
+        const object = unwrap(need(node.object));
         const name = propertyName(node);
         if (name === null) return;
         if (object.type === "MetaProperty" && name === "env") event(node, "env");
@@ -258,38 +304,44 @@ const rule = {
       },
       VariableDeclarator(node: Node) {
         // const { env } = process;  const { file, write } = Bun;
-        const init = node.init === null ? null : unwrap(node.init);
+        const init = node.init ? unwrap(node.init) : null;
+        const pattern = node.id;
         if (init === null || init.type !== "Identifier" || !isGlobal(init)) return;
-        if (node.id.type !== "ObjectPattern") return;
-        for (const q of node.id.properties) {
-          if (q.type !== "Property" || q.key.type !== "Identifier") continue;
-          if (init.name === "process" && q.key.name === "env") event(q, "env");
-          if (init.name === "Bun" && Object.hasOwn(BUN_TAGS, q.key.name)) {
-            event(q, BUN_TAGS[q.key.name] as FileEvent[1]);
+        if (pattern?.type !== "ObjectPattern") return;
+        for (const q of need(pattern.properties)) {
+          const key = q.key;
+          if (q.type !== "Property" || key?.type !== "Identifier") continue;
+          const name = key.name ?? "";
+          if (init.name === "process" && name === "env") event(q, "env");
+          if (init.name === "Bun" && Object.hasOwn(BUN_TAGS, name)) {
+            event(q, BUN_TAGS[name] as FileEvent[1]);
           }
         }
       },
       ForInStatement(node: Node) {
-        if (node.left.type !== "VariableDeclaration") assignTargets(node.left, "for-in", node);
+        const left = need(node.left);
+        if (left.type !== "VariableDeclaration") assignTargets(left, "for-in", node);
       },
       ForOfStatement(node: Node) {
-        if (node.left.type !== "VariableDeclaration") assignTargets(node.left, "for-of", node);
+        const left = need(node.left);
+        if (left.type !== "VariableDeclaration") assignTargets(left, "for-of", node);
       },
 
       "Program:exit"(node: Node) {
         // a name that comes from fs, child_process or os, used anywhere, is an event where it is used
         for (const scope of sc.scopeManager.scopes) {
           for (const ref of scope.references) {
-            const v = ref.resolved;
-            const def = v?.defs[0];
+            const def = ref.resolved?.defs[0];
             if (def?.type !== "ImportBinding") continue;
-            if (def.parent.importKind === "type" || def.node.importKind === "type") continue;
-            const tag = moduleTag(String(def.parent.source.value));
+            const declaration = def.parent;
+            if (declaration === null || declaration === undefined) continue;
+            if (declaration.importKind === "type" || def.node.importKind === "type") continue;
+            const tag = moduleTag(String(need(declaration.source).value));
             if (tag !== null) event(ref.identifier, tag);
           }
         }
         const blank: number[] = [];
-        sc.lines.forEach((text: string, i: number) => {
+        sc.lines.forEach((text, i) => {
           if (text.trim() === "") blank.push(i + 1);
         });
         context.report({

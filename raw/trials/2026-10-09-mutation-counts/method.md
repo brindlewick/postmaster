@@ -385,3 +385,11 @@ place, the line count (fault 3 above) and the golden test of the draw. After the
 `mutation-rule.ts`, `mutation-core.ts` or `count.ts`, so the population and the sample are as drawn: the
 summary and tally scripts, the share of lines in or around a flagged function, the width of the rows
 for findings out of scope (fault 4), the operation table of `edge-tags.ts`, and the controls of each.
+
+After the pull request was opened, `main` brought in the lint rule against an explicit `any`, and the
+wiki workflow lints these scripts. The syntax node (`Node` in `mutation-core.ts`) and the parts of
+Oxlint's plugin interface the rule uses (`mutation-rule.ts`) are typed with named fields instead of
+`any`, and a field a kind of node always has is read through `need`. No comment switches a rule off.
+No count changed: the counts, the join, the draw, the tally and the controls were made again from
+fresh exports of the same commits with the typed scripts, and every result file is byte for byte the
+committed one.
