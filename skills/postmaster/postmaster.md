@@ -764,8 +764,15 @@ every project and does not change that project's gate.
 3. **Put what needs the user to the user once aftercare ends:** each flagged folder — the
    ones aftercare's summary flags as holding work no branch's commits have, with the files
    it names — then tool faults and style-sort proposals as Legacy Stage G steps 4 and 5
-   describe. Archive finished threads where the harness has an archive form
-   (`harnesses.md`).
+   describe. Then check whether any verifier may have gone stale on the landing: advance
+   `<repo>`'s checkout of the default branch to the landed merge commit first, so the stale
+   query reads the landing's own index, then run `<tool>/scripts/run verifier stale
+   <repo> --at <merge>` once; for the verifiers it marks, offer one correcting upkeep pass
+   (`run verifier upkeep <repo> --run <dispatch> --correct`), naming the changed files,
+   and a yes starts it; when the pass completes, land its branch (`run verifier land <repo>
+   <branch> --run <dispatch> --report <report>`), so the new confirmation reaches the default
+   branch; a landing it clears offers nothing. Archive finished threads where the
+   harness has an archive form (`harnesses.md`).
 4. Dispatch the next ticket.
 
 ## Legacy Stage F: the gate (run.json has no coachman_contract 2)
