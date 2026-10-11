@@ -516,6 +516,16 @@ describe("positive controls", () => {
     expect(last !== null && last.detail === "base=def5678 result=moved").toBe(true);
   });
 
+  test("the postmaster logs the premises line for a run without the notes", () => {
+    const before = lines();
+    const r = logAction(["postmaster", "premises", "abc1234", "base=def5678", "result=same"]);
+    expect(r.code).toBe(0);
+    expect(lines()).toBe(before + 1);
+    const last = lastLine();
+    expect(last !== null && last.action === "premises" && last.target === "abc1234").toBe(true);
+    expect(last !== null && last.detail === "base=def5678 result=same").toBe(true);
+  });
+
   test("an approved switch-off is written", () => {
     const before = lines();
     const r = logAction([
@@ -805,6 +815,14 @@ describe("negative controls: nothing is written", () => {
     expect(r.code).toBe(1);
     expect(lines()).toBe(before);
     expect(r.err.includes("base=<commit>")).toBe(true);
+  });
+
+  test("a premise result from a lane is refused", () => {
+    const before = lines();
+    const r = logAction(["lane:one", "premises", "abc1234", "base=def5678", "result=same"]);
+    expect(r.code).toBe(1);
+    expect(lines()).toBe(before);
+    expect(r.err.includes("coachman or postmaster")).toBe(true);
   });
 
   test("a switch-off with a target out of shape", () => {

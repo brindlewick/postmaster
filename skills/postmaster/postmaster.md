@@ -140,7 +140,9 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    absent, or single-thread, or alternate, which gives this project the mode its latest run did
    not have — **except that a mode the user named for this ticket wins: pass it as
    `<tool>/scripts/run run-meta <dispatch> <repo> --mode <synthesis|single-thread>`**, and a
-   refusal naming the two values goes to the user. The pin is a worktree of this repo at the
+   refusal naming the two values goes to the user. The record keeps the machine config's
+   `team.ticket_notes` in its config — given when the key is absent, or held-back — and
+   `run-meta` refuses anything else at dispatch. The pin is a worktree of this repo at the
    dispatch commit, shared by every run
    dispatched at it; the waybill names it as `tool:`, and every leg of this run reads its
    runbooks and runs its scripts from there. Log the `run run-meta` output as a `note`, keeping
@@ -156,7 +158,24 @@ waits in the ready queue until the watcher sees room under `team.max_runs`.
    <sha>`. The coachman's cwd is that worktree from its first leg, so the project's ambient
    context loads for it.
 8. **Write `brief.md`** from the template in `SKILL.md`: the `turnpikes:` line step 1's check
-   printed, whole, under the waybill's title, then the ticket verbatim, the project profile (gate,
+   printed, whole, under the waybill's title, then the ticket: whole when the run's ticket
+   notes are given, and without its technical notes and verified facts when they are held
+   back, as `<tool>/scripts/run run-meta ticket-notes <dispatch>` prints them from the
+   record step 6 wrote. When the notes are held back, write the whole ticket body step 1
+   read to a temporary file outside the run directory and run `<tool>/scripts/run ticket-cut`
+   on it, then check the ticket's premises on that temporary file before writing the waybill,
+   since the waybill no longer carries them: `<tool>/scripts/run premises <repo> <whole-body-file>
+   <BASE>`, logged as your own `premises` line with the verified commit, `base=<BASE>` and
+   `result=<result>`. `same` holds, `moved` holds elsewhere, and `changed`, `missing` or
+   `unknown` does not; when a premise does not hold, ask the user whether to go on or send
+   the ticket back before any leg starts, as Stage E step 4 says but with no leg started —
+   on go on, write the waybill and dispatch, on send it back, abandon as that step says —
+   and in a fixture run, with no user to ask, abandon the run rather than dispatch on
+   premises that do not hold. Paste the cut output as the waybill's ticket only once the
+   check holds or the ruling says go on, then remove the file; the whole ticket stays in the
+   tracker and no copy of it sits where the run reads. Without the notes the coachman skips
+   this step. Then the
+   project profile (gate,
    build, browser suite, landing (`pull-request` or `local`), the checks as
    `<tool>/scripts/run verify record` printed them, docs to read first, tracker, risk
    surfaces), the team from `run.json` — the resolved machine config step 6 recorded — with
@@ -740,8 +759,15 @@ every project and does not change that project's gate.
 3. **Put what needs the user to the user once aftercare ends:** each flagged folder — the
    ones aftercare's summary flags as holding work no branch's commits have, with the files
    it names — then tool faults and style-sort proposals as Legacy Stage G steps 4 and 5
-   describe. Archive finished threads where the harness has an archive form
-   (`harnesses.md`).
+   describe. Then check whether any verifier may have gone stale on the landing: advance
+   `<repo>`'s checkout of the default branch to the landed merge commit first, so the stale
+   query reads the landing's own index, then run `<tool>/scripts/run verifier stale
+   <repo> --at <merge>` once; for the verifiers it marks, offer one correcting upkeep pass
+   (`run verifier upkeep <repo> --run <dispatch> --correct`), naming the changed files,
+   and a yes starts it; when the pass completes, land its branch (`run verifier land <repo>
+   <branch> --run <dispatch> --report <report>`), so the new confirmation reaches the default
+   branch; a landing it clears offers nothing. Archive finished threads where the
+   harness has an archive form (`harnesses.md`).
 4. Dispatch the next ticket.
 
 ## Legacy Stage F: the gate (run.json has no coachman_contract 2)
