@@ -1452,6 +1452,27 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper f-sendback`, and release it
    when the report lands.
 
+   After the pull request is open, main keeps moving, and the user's Update branch merges it into
+   the branch without the flow. When a review arrives, the user says main moved, or the branch's
+   tip is a merge of main since the card, brief a helper to review what main changed before you
+   answer the review, handing it the default-branch commit the card verified as `<since>`:
+
+```helper
+Helper brief `f-drift` for run `<TICKET>` at `<dispatch>`: review what main changed.
+Read the brief contract under `Helpers` in `<tool>/skills/postmaster/postmaster.md` first.
+Run `<tool>/scripts/run main-drift <repo> <since> <default-ref> <branch-tip> --name drift-<k>`
+with the repo, the default-branch commit the card verified, the default ref, the branch's tip
+and the number the postmaster hands you, then the surveyor call it prints, and read the survey
+in `<dispatch>/surveys/drift-<k>.md`. Report it whole: `no drift found`, or each drift it
+names. A surveyor that cannot run is a degrade, never a pass: report that. Decide nothing.
+Write your report to `<dispatch>/helper-f-drift-<subject>-<rand>.md`, subject the run's
+ticket and rand six hex digits you pick fresh, before you end, and end as the brief contract says.
+```
+
+   This brief changes run `<TICKET>`: hold it first with
+   `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper f-drift`, and release it when
+   the report lands. A drift it names goes to the user with the review's comments.
+
    Check switch-offs after the claims and before step 2's landing route, on both routes,
    through a helper:
 
