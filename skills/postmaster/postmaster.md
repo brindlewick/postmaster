@@ -951,7 +951,13 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
   state through a helper (finish the remaining part, or restore `manifest.json`'s leg)
   rather than taking the step fresh.
 - **TAKEOVER:** the attempt record says `walled` on the primary coachman. Log `degrade`
-  yourself, then brief a helper to write the takeover prompt and take the leg over:
+  yourself. Starting the fallback launches a new session, so the agent is the user's to
+  confirm first: ask in a plain sentence that names the run's recorded fallback
+  (`config.team.coachman_fallback` in `run.json`, which a `u-read` helper reads for you) and
+  recommends one, and start only on their answer. Then brief a helper to write the takeover
+  prompt and take the leg over, handing it `--recorded` for the recorded fallback, or
+  `--model <m> --effort <e>` (and `--harness`, `--env-file` where they differ) for another
+  agent the user named:
 
 ```helper
 Helper brief `d-takeover` for run `<TICKET>` at `<dispatch>`: take the leg over on the fallback.
@@ -963,9 +969,11 @@ you: "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
 worktree's `git log` and `git status`. Treat every uncommitted change as unverified. Log
 `handoff-accept` and finish the leg." with `<rt>` the run's tool checkout expanded to its
 absolute path. Then run `<tool>/scripts/run run-meta run-pinned <dispatch> host leg takeover
-<dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n> <dispatch>/leg-<n>-takeover.txt`. The
-script preserves the old stream, starts a fresh fallback stream and records its outcome and
-thread id. Report the takeover and the thread id.
+<dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n> <dispatch>/leg-<n>-takeover.txt` with the
+flags the postmaster hands you, `--recorded` or `--model <m> --effort <e>` (and `--harness`,
+`--env-file` where they differ): the command refuses to start with neither, and then you start
+nothing and report the refusal. The script preserves the old stream, starts a fresh fallback
+stream and records its outcome and thread id. Report the takeover and the thread id.
 Write your report to `<dispatch>/helper-d-takeover-<subject>-<rand>.md`, subject the run's
 ticket and rand six hex digits you pick fresh, before you end, and end as the brief contract says.
 ```
@@ -979,7 +987,8 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
   failed, which the wake names. Brief the `c-resume` brief with "Continue leg <n>; your last
   written state is in the dispatch directory and the worktree". A fourth transient end is
   judgment: resume again, take the leg over on the fallback, or wait out the provider — say
-  which and why, then brief `c-resume` or `d-takeover`, or nothing.
+  which and why, then brief `c-resume`, or `d-takeover` once the user has confirmed the agent as
+  TAKEOVER says, or nothing.
 - **READ:** a checkpoint card is waiting. Brief a helper to read it and clear its marker:
 
 ```helper
