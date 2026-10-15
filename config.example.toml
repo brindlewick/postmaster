@@ -181,3 +181,11 @@ review_link = ""
 # word, and only then do its checks decide the merge. A project's own settings
 # may turn drafts on for that project alone (scripts/run setup --project).
 draft_pull_requests = "off"
+
+# Knowledge sources: wikis, knowledge bases and standards pages kept on this machine, registered once by
+# name. A project's .postmaster/notes.md names one as source:<name>/<path>, so the notes carry no machine
+# path; applies_to says which repos it is proposed for. scripts/run setup asks for them.
+# [sources.company-wiki]
+# path = "~/Code/company/wiki"
+# about = "Coding standards, review specs and domain knowledge"
+# applies_to = ["~/Code/company/*"]

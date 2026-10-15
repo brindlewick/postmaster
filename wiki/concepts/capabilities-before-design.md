@@ -98,7 +98,10 @@ name by file and owner, under a key of the draft's words. `scripts/run ticket-ca
 --candidates` refuses a menu made from an older draft or without the draft, and an entry with a
 custom part and no `Searched:` part.
 
-Not changed, and open: a design lens among the review turnpikes, and the coachman's use of
-"do-not-reopen" on architecture. Both sit in the coachman contract, so each needs a fixture run
-that scores clean. Related: [a ticket's shape](ticket-shape.md),
-[the turnpikes](turnpikes.md).
+The review loop gains a design lens, opt-in through a project's default turnpikes, that applies a
+ladder to the change: a library's setting, then a function the repository already has, then a thin
+wrapper, then new code. Its finding names a mechanism and never an identifier, and a swap for a
+library's setting goes to the user for a ruling. Only a detail is marked do-not-reopen in a hand-off,
+never an architecture. Both sit in the coachman contract, so each needs a fixture run that scores
+clean. Related: [a ticket's shape](ticket-shape.md), [the turnpikes](turnpikes.md),
+[a project's notes](project-notes.md).

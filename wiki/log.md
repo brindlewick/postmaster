@@ -42,6 +42,14 @@ the step. The menu of the libraries is made for every library the project declar
 with the names near the draft, every function and method, and a file for each library's own menu. Standing unchanged:
 `claimed`, with no record behind it.
 
+## [2026-10-15] ingest | a project's notes are routed and copied into the flow
+
+At the user's request, after a run's reviewers never opened the wiki that held the stricter form of the rules a
+review bot then enforced. Wrote [the page](concepts/project-notes.md) at standing `claimed`, with no record behind
+it, and added `scripts/run project-notes`, the knowledge-sources step of setup, a gate on written rules, style batches,
+grading by the criterion a finding breaks, a design lens, a drift review after a clean merge, and a takeover that names
+its agent. No standing changed.
+
 ## [2026-10-15] ingest | capabilities are checked before a ticket picks a design
 
 At the user's request, after a run built a consent mechanism beside the one its analytics SDK already offered and a
