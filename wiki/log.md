@@ -42,6 +42,13 @@ the step. The menu of the libraries is made for every library the project declar
 with the names near the draft, every function and method, and a file for each library's own menu. Standing unchanged:
 `claimed`, with no record behind it.
 
+## [2026-10-15] lint | the notes file is ignored by git, and a link that leaves the project is refused
+
+Found while drafting a project's first notes: the folder's ignore rules did not list `notes.md`, so a checkout would
+have shown it as untracked, and a link inside the project that pointed outside it was followed. Added `notes.md` to the
+records the folder ignores and made a named file count only when every link in its path stays inside the project or the
+source. No standing changed.
+
 ## [2026-10-15] ingest | a project's notes are routed and copied into the flow
 
 At the user's request, after a run's reviewers never opened the wiki that held the stricter form of the rules a

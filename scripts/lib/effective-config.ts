@@ -1330,14 +1330,15 @@ export const generatedFilesOf = (repo: string, opts?: { storePath?: string }): s
 };
 
 // --- writes ----------------------------------------------------------------------------------------
-// The folder's own ignore rules: run records, drafts, local verifiers and the
-// experiments record stay ignored whatever the user answers. The person's
-// settings file is never ignored here: setup offers to have git ignore it,
-// and only the user's yes adds that rule (ignoreSettings).
+// The folder's own ignore rules: run records, drafts, local verifiers, the
+// experiments record and the project's notes stay ignored whatever the user
+// answers. The person's settings file is never ignored here: setup offers to
+// have git ignore it, and only the user's yes adds that rule (ignoreSettings).
 const IGNORE_RECORDS = [
   "runs/",
   "clerk/",
   "project.toml",
+  "notes.md",
   "verifier/",
   "experiments.jsonl",
   "experiments-page.url",
@@ -1348,7 +1349,8 @@ const IGNORE_HEADER =
   "# .postmaster/ holds this instance's settings and every run's full record.\n" +
   "# Run records, drafts and local verifiers stay ignored. settings.toml is ignored\n" +
   "# only on the user's yes, during setup. To share what a run requires of everyone,\n" +
-  "# commit project.toml with: git add -f .postmaster/project.toml\n";
+  "# commit project.toml with: git add -f .postmaster/project.toml\n" +
+  "# The project's notes (notes.md) stay local the same way and are shared the same way.\n";
 
 /** ruleMatches <rule> <path>: whether one ignore rule matches a path under
  * .postmaster/. Enough of gitignore for the rules this file writes and the
