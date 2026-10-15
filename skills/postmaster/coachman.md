@@ -192,7 +192,7 @@ must exit 0 before the marker is touched:
 
 ```
 ## Decisions
-Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
+Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every deviation from a written rule whose label gates, as `deviation <rule id> at <file:line>: <the reason the comment at that line gives>`; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
 ## Deferred findings
 Every finding not applied, with its lens and originating round where known, its disposition and reason (the review leg restates these to its reviewers; the last leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
 ## Verified by execution
@@ -378,7 +378,9 @@ and the setting's value at dispatch). Read it before Stage 0 and act on it here:
   in the review leg still pauses as written.
 
 Everything else is the same in both modes: the same acceptance-test rules below, the same
-reviewers and the same rule for when review stops, the same gate, the same ship card (D10).
+reviewers and the same rule for when review stops, the same gate, the same ship card (D10), and the same project notes: the lane that writes the change
+follows the waybill's `## Project notes`, whose written rules bind, and a deviation from one that gates carries a
+comment at the line saying why.
 The modes differ only in who writes the change, so their review rounds can be compared — and
 **no review brief or any other text a reviewer sees may name the mode** (D11): nothing
 written for a reviewer says `single-thread`, `synthesis mode`, or that one model wrote the
@@ -559,7 +561,7 @@ what it owes them back.
 7. **In synthesis mode, write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the waybill's `## Ticket` part verbatim, followed,
    when `<tool>/scripts/run run-meta ticket-notes <dispatch>` prints held-back, by this line:
    The ticket's technical notes are held back on purpose and are not to be looked up, in the tracker or anywhere else. Then the project profile, the docs
-   to read first named explicitly, the `WORKHORSE-SUMMARY.md` /
+   to read first named explicitly, the waybill's `## Project notes` section verbatim when it has one, the `WORKHORSE-SUMMARY.md` /
    `WORKHORSE-BLOCKED.md` contract, and the line that the ready ticket is the run's contract,
    the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
@@ -923,6 +925,11 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    - **P2:** A defect materially impairs an important capability or protection, with impact limited by its scope or a workable alternative.
    - **P3:** A defect has limited impact and does not materially impair normal use.
 
+   **End every brief with `## Project notes`:** the lens's own part, copied in verbatim from
+   `<tool>/scripts/run project-notes show <dispatch> <lens>` (no section when it prints nothing).
+   Then run `<tool>/scripts/run project-notes verify-brief <dispatch> <lens>` for each lens that has a
+   brief: exit 1 means the part is missing or altered, so fix the brief before the round launches.
+
    **State in every brief that the lane is working in its own disposable copy of the repository
    with dependencies installed, that it checks a finding with a targeted probe rather than running the project's
    gate, lint, build or tests, and that the one thing it must not do is modify the code under
@@ -936,10 +943,15 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
    look for, and how they are launched, which step 2 does for every lane that reviews under it.
    A review turnpike with no entry here cannot run: escalate.
-   - **Style lens** (round 1 only, gates nothing): non-mechanical idiom, naming, the project's
+   - **Style lens** (round 1 only): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
-     conventions. Launch: from its brief.
+     conventions, and against its written rules where the run bundled any
+     (`<dispatch>/rules/rules.json`). A finding on a written rule whose label gates, with no comment
+     at the line saying why, is a gating finding (step 3); every other style finding gates nothing.
+     Launch: from its brief; where rules were bundled, each lane from a prompt file of its own that
+     names its batches of them, which `review-round launch` writes, and the lane answers every rule in
+     its batches with a finding or `<rule id>: clean`.
    - **Bug lens** (gating): correctness, logic, absence-versus-relative checks (does any check
      pass vacuously when a row, file or entry is missing?), and defects in the change. Only
      lanes whose harness has a code-review form review for bugs; no brief is written and no
@@ -1198,21 +1210,30 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    snapshot, before the fix — never a reopen. A finding is gating or
    style by what it is, not by the lens that reported it: a correctness or security defect
    reported under the style lens is a gating finding, fixed as one except in a loop with no
-   gating lens (step 5), a matter of style reported under another lens is a style finding, and
-   each keeps its lens. Its `finding` line opens with its class. A finding whose class changes in
+   gating lens (step 5); a violation of a written rule whose label gates, with no comment at the
+   line saying why, is a gating finding too, whichever lens reported it (look the rule up with
+   `<tool>/scripts/run project-notes rules <dispatch> <rule id>`, and open its `finding` line
+   `gating P2` naming the rule id); a matter of style reported under another lens is a style
+   finding; and each keeps its lens. Its `finding` line opens with its class. A finding whose class changes in
    a later round is logged again with the same target, and its latest line counts, so two
    findings at one place take targets that differ, such as a line and a column. Several reviewers
    produce a bigger, noisier union than one; the verification gate is what keeps the checkpoint
    clean, so do not soften it. Where a lane says it verified a finding by execution, re-run its
    probe rather than re-deriving the claim; where it filed a hypothesis, the verification burden
-   is yours.
+   is yours. **Grade by the criterion a finding breaks.** A defect that makes an acceptance
+   criterion, or a guarantee the ticket states, false is P2 at least, whatever the channel it
+   harms through, and its `finding` line names the criterion (`C<n>`, or the guarantee in the
+   ticket's words). A lane's higher grade is lowered only against a criterion that still holds,
+   written on the line; an exposure called limited does not lower it below P2 while the criterion
+   is false. Before verifying, read `<dispatch>/notes/bug.md` when it exists: the domain facts in
+   it can contradict a bug lane's finding or name a defect no lane could see.
 4. **Fix during the round,** in the synthesis worktree, as each report is verified. Round 1
    fixes every verified gating finding, P1, P2 and P3 alike (in a loop with no gating lens,
    none: step 5). A finding whose
    fix needs a ruling is escalated, and one it cannot fix is carried to the hand-off with its
    reason, as today. From round 2 on, only verified P1 and P2 gating findings are fixed; a P3
    finding is not fixed and goes to the hand-off's deferred findings and the ship card's open
-   findings, with its lens and the round that found it. Never a style finding. Where fixes from
+   findings, with its lens and the round that found it. Never a style finding that gates nothing. Where fixes from
    different lenses touch the same code, reconcile them into one change before applying it.
    Save every fix with the fix step, which commits the named paths and writes the fix's `apply`
    row — target the commit, detail the finding targets — in one call:
@@ -1223,7 +1244,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
 
    If it reports the row unrecorded, it has rolled the commit back: fix the cause and run it
    again. If it reports the commit kept with the ledger unwritten, escalate the ledger gap (Tool
-   faults). Every style finding is deferred in the hand-off, reaches the ship card's Style residue, and
+   faults). Every style finding that gates nothing is deferred in the hand-off, reaches the ship card's Style residue, and
    is sorted at aftercare (stage 4). The next round starts on the gate pass when no fix follows
    it, and runs the project checks once on the new snapshot otherwise.
 5. **Run the review loop by its logged decision.** After closing the round, call `<tool>/scripts/run review-decide
