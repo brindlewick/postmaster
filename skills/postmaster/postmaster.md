@@ -397,8 +397,12 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper b-worktree`, and release it
    when the report lands.
 8. **Write `brief.md` through a helper** from the template in `SKILL.md`. Brief one with the
-   turnpikes line, the ticket, the project profile, the team, and the legs check, and have it
-   verify the legs before it finishes:
+   turnpikes line, the ticket, the project profile, the team, the legs check, and the areas for
+   the project's notes, and have it verify the legs before it finishes. The areas are yours to
+   decide, from the ticket and the tracker's project: one glob for each place the ticket's work
+   is, such as `apps/portal/**`, and none when the work spans the project. A refusal from the
+   project's notes comes back in its report: tell the user what is wrong with them, and brief it
+   again with "no project notes" only on their word:
 
 ```helper
 Helper brief `b-brief` for ticket `<TICKET>` on project `<repo>`: write the waybill.
@@ -424,6 +428,16 @@ shared or local, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHOR
 `ship.merge_authority`, either overridden only where the user said so for this run, the
 dispatch path and the run's pinned tool — `<tool>/scripts/run run-meta path <dispatch>`, the
 checkout step 7 cut, which the template names as `tool:` and the coachman uses as its `<tool>`.
+Then the project notes, before the waybill is written: `<tool>/scripts/run project-notes bundle
+<repo> <dispatch> --area <glob>` once for each glob the postmaster hands you, with no `--area`
+when it hands you none, copies what the project's notes name into the run, and `<tool>/scripts/run
+project-notes show <dispatch> waybill-section` prints the waybill's `## Project notes` section,
+pasted whole after the project profile. Nothing prints when the project has no notes, and the
+waybill then has no such section. A refusal from `bundle` lists what is wrong with the notes:
+write no waybill and report the refusal whole, unless the postmaster hands you "no project
+notes", when you skip the notes and leave the section out. After the waybill is written,
+`<tool>/scripts/run project-notes verify-waybill <dispatch>` must exit 0, the section in the
+waybill word for word: report its output whole and stop on any other exit.
 Then `<tool>/scripts/run turnpikes legs <dispatch> --expect '<that turnpikes: line>'` exits 0
 and prints the legs for the `turnpikes:` line step 1 printed, before anything is launched;
 report its output whole and stop on any other exit. Record `coachman contract fixture: pending`
