@@ -33,7 +33,7 @@ export type Part = (typeof PARTS)[number];
  * a pointer to a file, not a paragraph in the notes. */
 export const BUDGET_WORDS: Readonly<Record<Part, number>> = {
   clerk: 600,
-  waybill: 600,
+  waybill: 1000,
   implement: 500,
   style: 400,
   bug: 300,
