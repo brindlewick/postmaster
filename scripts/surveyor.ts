@@ -72,7 +72,7 @@ export const SURVEYOR_HARNESSES = new Set(["codex", "claude", "pi", "muse", "mim
 export const SURVEYOR_HARNESS_HELP = "claude, codex, pi, muse or mimo";
 
 const REPORT_RE = new RegExp(
-  "^logs/review-r[0-9]+-(?:style|bug|security)-[A-Za-z0-9._-]+-(?:last\\.md|findings\\.json|findings\\.md)$",
+  "^logs/review-r[0-9]+-(?:style|bug|security|design)-[A-Za-z0-9._-]+-(?:last\\.md|findings\\.json|findings\\.md)$",
   "u",
 );
 const NAME_RE = new RegExp("^[A-Za-z0-9._-]+$", "u");

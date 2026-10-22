@@ -1170,7 +1170,7 @@ test("close-run teardown finds reviewer worktrees from rows the launch wrote", (
       join(dispatch, "brief.md"),
       `## Dispatch\nname: T-9\nsynthesis worktree: ${join(repo, ".worktrees", "T-9-synthesis")}\n`,
     );
-    for (const lens of ["style", "security"]) {
+    for (const lens of ["style", "security", "design"]) {
       writeFileSync(join(dispatch, `review-${lens}-brief.md`), `# ${lens} brief\n`);
     }
     const recorded: string[][] = [];
@@ -1178,7 +1178,7 @@ test("close-run teardown finds reviewer worktrees from rows the launch wrote", (
       tool: (name, args): StepChild => {
         if (name === "log-action") recorded.push(args);
         if (name === "turnpikes")
-          return { code: 0, out: "1 synthesis\n2 review style bug security\n", err: "" };
+          return { code: 0, out: "1 synthesis\n2 review style bug security design\n", err: "" };
         if (name === "reviewers" && args[0] === "lanes") return { code: 0, out: "luna\n", err: "" };
         return { code: 0, out: "", err: "" };
       },
@@ -1195,10 +1195,10 @@ test("close-run teardown finds reviewer worktrees from rows the launch wrote", (
     const lines = recorded
       .filter((args) => args[2] === "review-launch")
       .map((args) => JSON.stringify({ action: args[2], target: args[3], detail: args[4] }));
-    expect(lines.length).toBe(3);
+    expect(lines.length).toBe(4);
     writeFileSync(join(dispatch, "actions.jsonl"), `${lines.join("\n")}\n`);
     const paths = runWorktreePaths(dispatch);
-    for (const lens of ["style", "bug", "security"]) {
+    for (const lens of ["style", "bug", "security", "design"]) {
       expect(paths).toContain(join(repo, ".worktrees", `T-9-rev-${lens}-luna`));
     }
   } finally {

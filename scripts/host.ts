@@ -421,7 +421,7 @@ const LEGACY_REVIEW = new RegExp(
 const REVIEW_ROUND_FILE = new RegExp("^review-r([0-9]+)\\.json" + END_OF_STRING, "u");
 const HERDR_TAB_ID = new RegExp("^w[A-Za-z0-9]+:t[0-9A-Za-z]+" + END_OF_STRING, "u");
 const PATH_COMPONENT = new RegExp("^[A-Za-z0-9._-]+$", "u");
-const LENS_WORD = new RegExp(BOUND_L + "(style|bug|security)" + BOUND_R, "u");
+const LENS_WORD = new RegExp(BOUND_L + "(style|bug|security|design)" + BOUND_R, "u");
 
 function isPathComponent(value: unknown): boolean {
   return (
