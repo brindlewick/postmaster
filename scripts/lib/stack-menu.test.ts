@@ -26,7 +26,7 @@ const CONSENT: Library = {
   packages: [pkg("consent-lib", "2.1.0", "Keeps a visitor's consent choice.")],
   entries: [
     entry("ConsentConfig", "interface", "consent-lib/index.d.ts", 1),
-    entry("ConsentConfig.cross_subdomain_cookie", "property", "consent-lib/index.d.ts", 2),
+    entry("ConsentConfig.every_subdomain_cookie", "property", "consent-lib/index.d.ts", 2),
     entry("ConsentConfig.optOut", "method", "consent-lib/index.d.ts", 3),
     entry("init", "function", "consent-lib/index.d.ts", 5),
   ],
@@ -74,7 +74,7 @@ describe("rankAcross", () => {
   test("ranks the names of every library on one scale, best first", () => {
     const { rows } = rankAcross([BIG, STORAGE, CONSENT], VOCAB);
     const symbols = rows.map((c) => c.entry.symbol);
-    expect(symbols).toContain("ConsentConfig.cross_subdomain_cookie");
+    expect(symbols).toContain("ConsentConfig.every_subdomain_cookie");
     expect(symbols).toContain("StorageOptions.persist_key");
     expect(symbols).toContain("useStorageState");
     expect(symbols.some((s) => s.startsWith("Big."))).toBe(false);
@@ -207,7 +207,7 @@ describe("formatStack", () => {
     expect(cells[1]).toBe("2.1.0");
     expect(cells[2]).toBe("4");
     expect(Number(cells[3])).toBeGreaterThan(0);
-    expect(cells[4]).toContain("cross_subdomain_cookie");
+    expect(cells[4]).toContain("every_subdomain_cookie");
     expect(cells[5]).toBe("menu.libs/consent-lib.tsv");
     expect(cells[6]).toBe("Keeps a visitor's consent choice.");
   });
@@ -231,7 +231,7 @@ describe("formatStack", () => {
 
   test("the ranked part has the names nearest the draft across the libraries", () => {
     const part = text.slice(text.indexOf("# 3. THE NAMES NEAREST"));
-    expect(part).toContain("ConsentConfig.cross_subdomain_cookie");
+    expect(part).toContain("ConsentConfig.every_subdomain_cookie");
     expect(part).toContain("StorageOptions.persist_key");
   });
 });

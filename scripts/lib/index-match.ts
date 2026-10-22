@@ -8,7 +8,7 @@
 // words with the draft, one line each with the signature and the doc comment, and then a map of
 // every name in the index, so that it knows all of what is available and not only what it happened
 // to read. The words are stems of the identifiers (split at camel case and underscores) and of the
-// doc comments, so a ticket that says "cookie" meets `cross_subdomain_cookie` and a ticket that says
+// doc comments, so a ticket that says "cookie" meets `every_subdomain_cookie` and a ticket that says
 // "persists" meets `persistence`. Matching on stems is a net, not a proof; the map is what covers
 // the names it misses. The ticket does not list the names: the clerk needs to know them, not repeat
 // them.
@@ -332,7 +332,7 @@ export function draftText(ticket: string): string {
   return lines.filter((_, i) => !drop.has(i)).join("\n");
 }
 
-/** The last name of a symbol: `PostHogConfig.cross_subdomain_cookie` is `cross_subdomain_cookie`. */
+/** The last name of a symbol: `AcmeAnalyticsConfig.every_subdomain_cookie` is `every_subdomain_cookie`. */
 export function leafOf(symbol: string): string {
   const parts = symbol.split(".");
   return parts[parts.length - 1] ?? symbol;

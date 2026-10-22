@@ -55,7 +55,7 @@ function cli(text: string): Out {
 const ENTRY = [
   "- **Analytics SDK, consent storage** Offers: a setting that stores the visitor's choice in a",
   "  cookie shared across subdomains (https://example.test/docs/consent and",
-  `  ${TICK}types.ts:1373${TICK}). Uses: that setting, for the stored choice. Custom: the banner`,
+  `  ${TICK}types.ts:412${TICK}). Uses: that setting, for the stored choice. Custom: the banner`,
   "  and the wording, because the SDK has no interface of its own. (C1, D1)",
 ].join("\n");
 
@@ -229,7 +229,7 @@ describe("an entry", () => {
     expect(bad.findings.some((f) => f.includes("cites no source"))).toBe(true);
     const link = noSource.replace("subdomains.", "subdomains (https://example.test/docs).");
     expect(cli(ticket(`### Existing capabilities\n\n${link}`)).code).toBe(0);
-    const file = noSource.replace("subdomains.", `subdomains (${TICK}src/config.ts:1373${TICK}).`);
+    const file = noSource.replace("subdomains.", `subdomains (${TICK}src/config.ts:412${TICK}).`);
     expect(cli(ticket(`### Existing capabilities\n\n${file}`)).code).toBe(0);
   });
 
@@ -345,17 +345,17 @@ function menuFor(ticketText: string, key?: string | null, names = SYMBOLS): stri
 }
 
 const SYMBOLS = [
-  "Config.cross_subdomain_cookie",
-  "Config.consent_persistence_name",
-  "Config.opt_out_capturing_persistence_type",
+  "Config.every_subdomain_cookie",
+  "Config.consent_persistence_key",
+  "Config.opt_out_tracking_persistence_type",
 ];
 
 const SEARCHED_ENTRY = [
   "- **Analytics SDK, consent storage** Offers: a setting that stores the visitor's choice in a",
   "  cookie shared across subdomains (https://example.test/docs/consent and",
-  `  ${TICK}types.ts:1373${TICK}). Uses: ${TICK}cross_subdomain_cookie${TICK}, for the stored choice.`,
+  `  ${TICK}types.ts:412${TICK}). Uses: ${TICK}every_subdomain_cookie${TICK}, for the stored choice.`,
   "  Custom: the banner and the wording.",
-  `  Searched: ${TICK}consent_persistence_name${TICK}, ${TICK}opt_out_capturing_persistence_type${TICK}`,
+  `  Searched: ${TICK}consent_persistence_key${TICK}, ${TICK}opt_out_tracking_persistence_type${TICK}`,
   "  and the other persistence settings; none keeps the choice per subdomain. (C1, D1)",
 ].join("\n");
 
@@ -434,7 +434,7 @@ describe("the Searched: part", () => {
       [
         "- **Analytics SDK, consent storage** Offers: a setting that stores the visitor's choice in a",
         "  cookie shared across subdomains (https://example.test/docs/consent).",
-        `  Uses: ${TICK}cross_subdomain_cookie${TICK}, for the stored choice. ${custom} (C1, D1)`,
+        `  Uses: ${TICK}every_subdomain_cookie${TICK}, for the stored choice. ${custom} (C1, D1)`,
       ].join("\n"),
     );
   const run = (text: string): Out => cliWith(text, [menuFor(text)]);
@@ -446,7 +446,7 @@ describe("the Searched: part", () => {
 
   test("a Searched: part that names a setting fixes it", () => {
     const text = withCustom(
-      `Custom: the banner. Searched: ${TICK}consent_persistence_name${TICK} and the other persistence settings.`,
+      `Custom: the banner. Searched: ${TICK}consent_persistence_key${TICK} and the other persistence settings.`,
     );
     expect(missing(run(text))).toBe(false);
   });
@@ -456,10 +456,10 @@ describe("the Searched: part", () => {
   });
 
   test("a name with an underscore or a hump counts without a code span", () => {
-    expect(
-      missing(run(withCustom("Custom: the banner. Searched: consent_persistence_name."))),
-    ).toBe(false);
-    expect(missing(run(withCustom("Custom: the banner. Searched: optOutCapturing.")))).toBe(false);
+    expect(missing(run(withCustom("Custom: the banner. Searched: consent_persistence_key.")))).toBe(
+      false,
+    );
+    expect(missing(run(withCustom("Custom: the banner. Searched: optOutTracking.")))).toBe(false);
   });
 
   test("Custom: none needs no Searched: part", () => {
@@ -472,7 +472,7 @@ describe("the Searched: part", () => {
   });
 
   test("Searched: is not a Custom: part: Custom: with only Searched: is empty", () => {
-    const out = run(withCustom(`Custom: Searched: ${TICK}consent_persistence_name${TICK}.`));
+    const out = run(withCustom(`Custom: Searched: ${TICK}consent_persistence_key${TICK}.`));
     expect(out.findings.some((f) => f.includes("empty Custom: part"))).toBe(true);
   });
 
@@ -536,9 +536,9 @@ describe("the menus the index commands make", () => {
       [
         "export interface SdkConfig {",
         "  /** Share the consent cookie across subdomains. */",
-        "  cross_subdomain_cookie?: boolean;",
+        "  every_subdomain_cookie?: boolean;",
         "  /** Where the consent choice is persisted. */",
-        "  consent_persistence_name?: string;",
+        "  consent_persistence_key?: string;",
         "  api_host?: string;",
         "}",
         "",
@@ -584,7 +584,7 @@ describe("the menus the index commands make", () => {
       writeFileSync(draftPath, draft(eol));
       const menuPath = menu(draftPath);
       const text = readFileSync(menuPath, "utf8");
-      expect(text).toContain("SdkConfig.cross_subdomain_cookie");
+      expect(text).toContain("SdkConfig.every_subdomain_cookie");
       const got = check(draftPath, menuPath);
       expect(got.stdout).toContain("1 menus made from this draft");
       expect(got.status).toBe(0);

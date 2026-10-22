@@ -108,7 +108,7 @@ export function packageNameOf(specifier: string): string {
   return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : (parts[0] ?? specifier);
 }
 
-/** What a package belongs to: its scope, or the first word of its name. `posthog-js` and `@posthog/types` share `posthog`. */
+/** What a package belongs to: its scope, or the first word of its name. `acme-analytics` and `@acme/types` share `acme`. */
 export function familyOf(name: string): string {
   if (name.startsWith("@")) return name.slice(1).split("/")[0] ?? name;
   return name.split("-")[0] ?? name;

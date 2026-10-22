@@ -45,8 +45,8 @@ describe("stem", () => {
 
 describe("splitWords", () => {
   test("splits at underscores, camel case and dots", () => {
-    expect(splitWords("cross_subdomain_cookie")).toEqual(["cross", "subdomain", "cookie"]);
-    expect(splitWords("PostHogConfig")).toEqual(["post", "hog", "config"]);
+    expect(splitWords("every_subdomain_cookie")).toEqual(["every", "subdomain", "cookie"]);
+    expect(splitWords("AcmeAnalyticsConfig")).toEqual(["acme", "analytics", "config"]);
     expect(splitWords("XMLHttpRequest")).toEqual(["xml", "http", "request"]);
     expect(splitWords("Config.opt_out.v2")).toEqual(["config", "opt", "out", "v2"]);
   });
@@ -64,9 +64,9 @@ describe("terms and vocabulary", () => {
   });
 
   test("counts how often the draft says a stem", () => {
-    const v = vocabulary("cookie cookies cookie banner");
+    const v = vocabulary("cookie cookies cookie notice");
     expect(v.get("cook")).toBe(3);
-    expect(v.get(stem("banner"))).toBe(1);
+    expect(v.get(stem("notice"))).toBe(1);
     expect(v.size).toBe(2);
   });
 });
@@ -75,16 +75,16 @@ describe("vocabularyKey", () => {
   const key = (text: string): string => vocabularyKey(vocabulary(text));
 
   test("is twelve hex characters", () => {
-    expect(key("cookie banner")).toMatch(/^[0-9a-f]{12}$/u);
+    expect(key("cookie notice")).toMatch(/^[0-9a-f]{12}$/u);
   });
 
   test("does not change when the draft repeats a word or reorders them", () => {
-    expect(key("cookie banner")).toBe(key("banner banner cookie"));
+    expect(key("cookie notice")).toBe(key("notice notice cookie"));
   });
 
   test("changes when the draft gains or loses a word", () => {
-    expect(key("cookie banner")).not.toBe(key("cookie banner consent"));
-    expect(key("cookie banner")).not.toBe(key("cookie"));
+    expect(key("cookie notice")).not.toBe(key("cookie notice consent"));
+    expect(key("cookie notice")).not.toBe(key("cookie"));
   });
 });
 
@@ -92,11 +92,11 @@ describe("rank", () => {
   test("puts the entry that shares the draft's words in its name first", () => {
     const entries = [
       entry("Config.api_host", "The host events are sent to."),
-      entry("Config.cross_subdomain_cookie", "Share the cookie across subdomains."),
+      entry("Config.every_subdomain_cookie", "Share the cookie across subdomains."),
       entry("Config.session_recording", "Record sessions."),
     ];
     const got = rank(entries, vocabulary("share the cookie across subdomains"), 5);
-    expect(got.map((c) => c.entry.symbol)).toEqual(["Config.cross_subdomain_cookie"]);
+    expect(got.map((c) => c.entry.symbol)).toEqual(["Config.every_subdomain_cookie"]);
     expect(got[0]?.matched).toContain("cook");
     expect(got[0]?.matched).toContain("subdomain");
   });
@@ -151,7 +151,7 @@ describe("draftText", () => {
   const DRAFT = [
     "## Problem / feature",
     "",
-    "Visitors want a banner.",
+    "Visitors want a notice.",
     "",
     "## For the agents",
     "",
@@ -171,7 +171,7 @@ describe("draftText", () => {
 
   test("leaves out the capabilities and the verified sections", () => {
     const text = draftText(DRAFT);
-    expect(text).toContain("banner");
+    expect(text).toContain("notice");
     expect(text).toContain("cookie");
     expect(text).not.toContain("persistence");
     expect(text).not.toContain("premise");
@@ -191,7 +191,7 @@ describe("draftText", () => {
   });
 
   test("a text with no agents part is kept whole", () => {
-    expect(draftText("Just a cookie banner.\n")).toContain("Just a cookie banner.");
+    expect(draftText("Just a cookie notice.\n")).toContain("Just a cookie notice.");
   });
 
   test("editing the left-out sections does not change the vocabulary key", () => {
@@ -199,7 +199,7 @@ describe("draftText", () => {
     expect(vocabularyKey(vocabulary(draftText(edited)))).toBe(
       vocabularyKey(vocabulary(draftText(DRAFT))),
     );
-    const grown = DRAFT.replace("Visitors want a banner.", "Visitors want a banner and a toggle.");
+    const grown = DRAFT.replace("Visitors want a notice.", "Visitors want a notice and a toggle.");
     expect(vocabularyKey(vocabulary(draftText(grown)))).not.toBe(
       vocabularyKey(vocabulary(draftText(DRAFT))),
     );
@@ -208,7 +208,7 @@ describe("draftText", () => {
 
 describe("leafOf", () => {
   test("is the last name of a symbol", () => {
-    expect(leafOf("PostHogConfig.cross_subdomain_cookie")).toBe("cross_subdomain_cookie");
+    expect(leafOf("AcmeAnalyticsConfig.every_subdomain_cookie")).toBe("every_subdomain_cookie");
     expect(leafOf("Owner.member.nested")).toBe("nested");
     expect(leafOf("init")).toBe("init");
   });
@@ -305,7 +305,7 @@ describe("overview", () => {
 
 describe("a saved list", () => {
   const rows = [
-    { entry: entry("Config.cross_subdomain_cookie", "Share\tthe cookie."), matched: ["cook"] },
+    { entry: entry("Config.every_subdomain_cookie", "Share\tthe cookie."), matched: ["cook"] },
     { entry: entry("makeThing", "", "lib/x.d.ts", "function") },
   ];
 
@@ -316,7 +316,7 @@ describe("a saved list", () => {
     );
     expect(parseList(text)).toEqual({
       vocabularyKey: "abc123def456",
-      symbols: ["Config.cross_subdomain_cookie", "makeThing"],
+      symbols: ["Config.every_subdomain_cookie", "makeThing"],
     });
   });
 
@@ -343,20 +343,20 @@ describe("a saved list", () => {
 
   test("with names, the map of every name follows as # lines and the list still reads back", () => {
     const names = [
-      entry("Config.cross_subdomain_cookie"),
+      entry("Config.every_subdomain_cookie"),
       entry("Config.api_host"),
       entry("makeThing", "", "lib/x.d.ts", "function"),
     ];
     const text = formatList({ title: "t", vocabularyKey: "abc123def456", total: 3 }, rows, names);
     expect(parseList(text)).toEqual({
       vocabularyKey: "abc123def456",
-      symbols: ["Config.cross_subdomain_cookie", "makeThing"],
+      symbols: ["Config.every_subdomain_cookie", "makeThing"],
     });
     const lines = text.split("\n").filter((l) => l !== "");
     const at = lines.findIndex((l) => l.startsWith("# every name in the index"));
     expect(at).toBeGreaterThan(0);
     expect(lines.slice(at).every((l) => l.startsWith("#"))).toBe(true);
-    expect(lines.slice(at).join("\n")).toContain("Config{cross_subdomain_cookie, api_host}");
+    expect(lines.slice(at).join("\n")).toContain("Config{every_subdomain_cookie, api_host}");
     expect(lines.slice(at).join("\n")).toContain("makeThing()");
   });
 

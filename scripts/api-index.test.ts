@@ -1,5 +1,5 @@
 // Tests beside scripts/api-index.ts. The library here is invented, with a sibling package of the
-// same family (as posthog-js has @posthog/types); nothing contacts a registry.
+// same family (as acme-analytics has @acme/types); nothing contacts a registry.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -76,8 +76,8 @@ beforeAll(() => {
     [
       "export interface ConsentSettings {",
       "  /** Persist the visitor's consent choice in storage. */",
-      "  consent_persistence_name?: string;",
-      "  cross_subdomain_cookie?: boolean;",
+      "  consent_persistence_key?: string;",
+      "  every_subdomain_cookie?: boolean;",
       "}",
       "",
     ].join("\n"),
@@ -352,8 +352,8 @@ describe("the command", () => {
     expect(symbols.sort()).toEqual(
       [
         "ConsentSettings",
-        "ConsentSettings.consent_persistence_name",
-        "ConsentSettings.cross_subdomain_cookie",
+        "ConsentSettings.consent_persistence_key",
+        "ConsentSettings.every_subdomain_cookie",
         "CookieConfig",
         "CookieConfig.api_host",
         "CookieConfig.cookie_domain",
@@ -373,14 +373,14 @@ describe("the command", () => {
     const text = readFileSync(list, "utf8");
     expect(text).toMatch(/^# draft-vocabulary [0-9a-f]{12}$/mu);
     const symbols = rowsOf(text).map((l) => l.split("\t")[0]);
-    expect(symbols).toContain("ConsentSettings.consent_persistence_name");
-    expect(symbols).toContain("ConsentSettings.cross_subdomain_cookie");
+    expect(symbols).toContain("ConsentSettings.consent_persistence_key");
+    expect(symbols).toContain("ConsentSettings.every_subdomain_cookie");
     expect(symbols).toContain("CookieConfig.cookie_domain");
     expect(text).toContain("# every name in the index");
     expect(text).toContain("#   CookieConfig{cookie_domain, api_host}, init()");
-    expect(text).toContain("#   ConsentSettings{consent_persistence_name, cross_subdomain_cookie}");
+    expect(text).toContain("#   ConsentSettings{consent_persistence_key, every_subdomain_cookie}");
     const row =
-      rowsOf(text).find((l) => l.startsWith("ConsentSettings.cross_subdomain_cookie")) ?? "";
+      rowsOf(text).find((l) => l.startsWith("ConsentSettings.every_subdomain_cookie")) ?? "";
     expect(row.split("\t")[5]).toContain("subdomain");
   });
 
@@ -402,7 +402,7 @@ describe("the command", () => {
     expect(rowsOf(out.stdout).length).toBeLessThanOrEqual(1 + 80);
     expect(rowsOf(out.stdout).length).toBeGreaterThanOrEqual(1);
     // the map still holds every name, whatever the ranking kept
-    for (const name of ["api_host", "cross_subdomain_cookie", "init()", "cookie_domain"]) {
+    for (const name of ["api_host", "every_subdomain_cookie", "init()", "cookie_domain"]) {
       expect(out.stdout).toContain(name);
     }
   });
@@ -484,8 +484,8 @@ describe("--all", () => {
         "index.d.ts": [
           "export interface ConsentSettings {",
           "  /** Persist the visitor's consent choice in storage. */",
-          "  consent_persistence_name?: string;",
-          "  cross_subdomain_cookie?: boolean;",
+          "  consent_persistence_key?: string;",
+          "  every_subdomain_cookie?: boolean;",
           "}",
           "",
         ].join("\n"),
@@ -567,7 +567,7 @@ describe("--all", () => {
     expect(plain[6]).toBe("A plain library.");
     const types = rows.find((r) => r[0] === "@lib/types") ?? [];
     expect(types[5]).toBe("menu.libs/@lib__types.tsv");
-    expect(types[4]).toContain("cross_subdomain_cookie");
+    expect(types[4]).toContain("every_subdomain_cookie");
   });
 
   test("a library with no declaration files says so and where to read it", () => {
@@ -602,9 +602,9 @@ describe("--all", () => {
     const cookie = readFileSync(own("lib-cookie.tsv"), "utf8");
     const types = readFileSync(own("@lib__types.tsv"), "utf8");
     expect(cookie).toContain("CookieConfig.cookie_domain");
-    expect(cookie).not.toContain("ConsentSettings.cross_subdomain_cookie");
+    expect(cookie).not.toContain("ConsentSettings.every_subdomain_cookie");
     expect(cookie).not.toMatch(/^ConsentSettings\t/mu);
-    expect(types).toContain("ConsentSettings.cross_subdomain_cookie");
+    expect(types).toContain("ConsentSettings.every_subdomain_cookie");
     expect(types).toMatch(/^# every name in the index/mu);
     expect(existsSync(own("lib-untyped.tsv"))).toBe(false);
     const keys = [menu(), own("lib-cookie.tsv"), own("@lib__types.tsv")].map(
