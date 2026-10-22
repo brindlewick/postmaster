@@ -8,6 +8,11 @@ updated: 2026-10-23
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-23] update | the story pages page names no project
+
+The sentence on [the page](concepts/story-pages.md) that said which projects the first two change
+stories told now says they told changes in two real projects. No standing changed.
+
 ## [2026-10-23] update | the review round's own fallback limit is 3600 seconds
 
 At the user's request: `scripts/review-round.ts`, a coachman contract file, now falls back to
