@@ -716,7 +716,7 @@ esac
       check(
         `a limit of ${v} is not used: the default, and the warning says why`,
         rc === 0 &&
-          has("time limit 2400s (the default)") &&
+          has("time limit 3600s (the default)") &&
           has("not a whole number of seconds from 1 to 86400"),
       );
     }
@@ -724,7 +724,7 @@ esac
     runSelf("start", d, "9");
     check(
       "no run.json gets the default, and says so",
-      rc === 0 && has("no run.json") && has("time limit 2400s"),
+      rc === 0 && has("no run.json") && has("time limit 3600s"),
     );
     limit("1");
     cutScratch("bug", "six");

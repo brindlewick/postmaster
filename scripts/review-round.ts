@@ -71,7 +71,7 @@ import { countdown, sleepMs } from "./wait-for-markers.ts";
 import { lostWallFor, wallFor } from "./walls.ts";
 
 const HERE = scriptsDir(import.meta);
-const DEFAULT_LIMIT = 2400;
+const DEFAULT_LIMIT = 3600;
 const MAX_LIMIT = 86400;
 const USAGE =
   "usage: run review-round start <dispatch> <round> [<lens>:<lane>...] | cut|launch <dispatch> <round> <repo> <synthesis-wt>" +
@@ -158,7 +158,7 @@ function stateCmd(
   const err: string[] = [];
   if (what === "start") {
     const runJson = args[0] ?? "";
-    const def = parseInt(args[1] ?? "2400", 10);
+    const def = parseInt(args[1] ?? String(DEFAULT_LIMIT), 10);
     const most = parseInt(args[2] ?? "86400", 10);
     let limit: number;
     let source: string;
