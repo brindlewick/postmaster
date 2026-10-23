@@ -194,6 +194,15 @@ describe("references and budgets", () => {
     ]);
     expect(overBudget(parseNotes(NOTES))).toEqual([]);
   });
+
+  test("the waybill may carry exactly 1000 words, and 1001 is over", () => {
+    const routed = (n: number) => {
+      const text = Array(n).fill("word").join(" ");
+      return overBudget(parseNotes(`<!-- route: waybill -->\n${text}`));
+    };
+    expect(routed(1000)).toEqual([]);
+    expect(routed(1001)).toEqual([{ part: "waybill", words: 1001, budget: 1000 }]);
+  });
 });
 
 describe("a part as one document", () => {
