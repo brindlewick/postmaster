@@ -52,6 +52,7 @@ describe("gateMaterial", () => {
     expect(gateMaterial(D, "/d/logs/review-r12-security-opus-findings.json")).toBe("report");
     expect(gateMaterial(D, "/d/logs/review-r3-style-haiku-last.md")).toBe("report");
     expect(gateMaterial(D, "/d/logs/review-r2-bug-mimo-findings.md")).toBe("report");
+    expect(gateMaterial(D, "/d/logs/review-r1-design-luna-last.md")).toBe("report");
   });
 
   test("anything else inside is refused", () => {

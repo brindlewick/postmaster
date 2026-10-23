@@ -33,6 +33,10 @@ the brief created by your own `/clerk` entry use the same command and instructio
 
 ## Prepare the ticket
 
+The brief's `## Project notes`, when it has the section, are this project's own instructions for
+the clerk: follow them, and open the pages they name when they apply to the ticket's area. Where
+the section says its notes file has a problem, tell the user in your first message.
+
 The ticket is one document with two parts. The user signs off everything above `## For the agents`.
 Write that plain part for someone who does not know the code: the problem, acceptance criteria,
 decisions, out of scope, direction, and turnpikes. Do not put a file, function, command, flag, line
@@ -110,9 +114,12 @@ shapes, say so to the user in plain words and propose the bounded form.
 Verify every premise in the notes at the stated base, and name that base under **Verified at** in
 the agents' part: each file, function, flag, line range and count exists and says what the notes
 say. Write one check for each criterion in the agents' part, labelled `- **C1**` to `- **CN**` in
-order, run it at the base, and put what it showed after **At the base**. If the base does not have
-the stated behavior, or a check cannot tell the fix from a workaround, change the ticket and tell
-the user what changed and why. The user reviews the plain part once; do not ask them to review the
+order, run it at the base, and put what it showed after **At the base**. Then name what keeps it
+after **Kept by**: the command or CI job that runs the check from now on (read the project's package
+scripts and CI workflows to find it), `a new job, <name>, added in this change` where nothing runs
+it, or `manual` with the reason. A check nothing keeps proves the criterion once. If the base does
+not have the stated behavior, or a check cannot tell the fix from a workaround, change the ticket
+and tell the user what changed and why. The user reviews the plain part once; do not ask them to review the
 code details separately.
 
 Where a criterion drives a surface that has a verifier, write its check through that verifier:
@@ -156,7 +163,8 @@ project folders the change touches and the packages it shares.
    draft, and once more before sign-off: the check refuses a menu made from an older draft.
 2. Read the vendor's own documentation for the feature, opened in a browser, and the installed
    version's declaration of the names on the menu that are near what the ticket needs. A search
-   result is not a source.
+   result is not a source. Where the project notes name a wiki or standards page for the area,
+   read it too: the project may already have decided how it uses the library.
 3. For each thing the ticket needs (keeping a setting or a choice, remembering state, sending or
    blocking a request, clearing data, and the like), name the setting, method or helper that does
    it. Where none does, say which names you looked at.

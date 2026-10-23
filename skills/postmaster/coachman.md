@@ -184,7 +184,8 @@ turnpike's step in this runbook; a listed turnpike with no step here cannot run:
 **A leg starts by accepting the hand-off.** Read `brief.md`, this runbook, and the previous
 leg's hand-off, which the leg prompt names; log `handoff-accept`; then act. A decision the
 hand-off marks `do-not-reopen` is reopened only by logging a `note` that says why, before
-anything else.
+anything else. Only a detail is marked so, such as a name, a wording or a value; an architecture is
+never marked, and the design lens may challenge one.
 
 **A leg ends by writing its hand-off, and nothing else counts as ending.** `handoff-<n>.md`
 is current state only, in exactly these sections, none empty; `<tool>/scripts/run handoff-check`
@@ -192,7 +193,7 @@ must exit 0 before the marker is touched:
 
 ```
 ## Decisions
-Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is settled; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
+Every decision this leg took, one per line, with its reason, marked do-not-reopen where it is a settled detail (a name, a wording, a value), never an architecture; every deviation from a written rule whose label gates, as `deviation <rule id> at <file:line>: <the reason the comment at that line gives>`; every do-not-reopen decision from earlier hand-offs carried forward verbatim; and always the oracle decision, blind acceptance tests written as the first commit or not written and why.
 ## Deferred findings
 Every finding not applied, with its lens and originating round where known, its disposition and reason (the review leg restates these to its reviewers; the last leg carries them to the ship card, the style ones to its Style residue and the rest to its open findings).
 ## Verified by execution
@@ -378,7 +379,9 @@ and the setting's value at dispatch). Read it before Stage 0 and act on it here:
   in the review leg still pauses as written.
 
 Everything else is the same in both modes: the same acceptance-test rules below, the same
-reviewers and the same rule for when review stops, the same gate, the same ship card (D10).
+reviewers and the same rule for when review stops, the same gate, the same ship card (D10), and the same project notes: the lane that writes the change
+follows the waybill's `## Project notes`, whose written rules bind, and a deviation from one that gates carries a
+comment at the line saying why.
 The modes differ only in who writes the change, so their review rounds can be compared — and
 **no review brief or any other text a reviewer sees may name the mode** (D11): nothing
 written for a reviewer says `single-thread`, `synthesis mode`, or that one model wrote the
@@ -559,7 +562,7 @@ what it owes them back.
 7. **In synthesis mode, write each workhorse's brief** to `<dispatch>/<lane>-prompt.txt`: the waybill's `## Ticket` part verbatim, followed,
    when `<tool>/scripts/run run-meta ticket-notes <dispatch>` prints held-back, by this line:
    The ticket's technical notes are held back on purpose and are not to be looked up, in the tracker or anywhere else. Then the project profile, the docs
-   to read first named explicitly, the `WORKHORSE-SUMMARY.md` /
+   to read first named explicitly, the waybill's `## Project notes` section verbatim when it has one, the `WORKHORSE-SUMMARY.md` /
    `WORKHORSE-BLOCKED.md` contract, and the line that the ready ticket is the run's contract,
    the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
@@ -901,14 +904,14 @@ for the review leg, exactly those: a turnpike the waybill does not name never ru
 names is never skipped. If the script exits 2, or lists no review leg, escalate with its
 output. Each round runs every lens still open, on one snapshot, every lane the waybill names for
 that lens as its own process in its own scratch: every lens in round 1, then the gating lenses
-alone from round 2. A lens's lanes are its own `<lens> reviewers:` line in the waybill where it
+alone from round 2 (the style and design lenses run in round 1 only). A lens's lanes are its own `<lens> reviewers:` line in the waybill where it
 has one, and the `reviewers:` line otherwise; `<tool>/scripts/run reviewers lanes <dispatch>/brief.md
 <lens>` prints them.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
 
-1. **Prepare each open lens from its entry below.** The style brief and security brief,
+1. **Prepare each open lens from its entry below.** The style, security and design briefs,
    `review-<lens>-brief.md` in the dispatch dir, carry their diff scope (synthesis worktree,
    `git diff <BASE>...HEAD`); the project profile plus the lens's specific pointers from it;
    findings already known (the hand-off's deferred findings and implementation divergences) so
@@ -923,6 +926,11 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    - **P2:** A defect materially impairs an important capability or protection, with impact limited by its scope or a workable alternative.
    - **P3:** A defect has limited impact and does not materially impair normal use.
 
+   **End every brief with `## Project notes`:** the lens's own part, copied in verbatim from
+   `<tool>/scripts/run project-notes show <dispatch> <lens>` (no section when it prints nothing).
+   Then run `<tool>/scripts/run project-notes verify-brief <dispatch> <lens>` for each lens that has a
+   brief: exit 1 means the part is missing or altered, so fix the brief before the round launches.
+
    **State in every brief that the lane is working in its own disposable copy of the repository
    with dependencies installed, that it checks a finding with a targeted probe rather than running the project's
    gate, lint, build or tests, and that the one thing it must not do is modify the code under
@@ -936,10 +944,15 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    Each entry is the one place for its lens, the turnpike of the same name: what its reviewers
    look for, and how they are launched, which step 2 does for every lane that reviews under it.
    A review turnpike with no entry here cannot run: escalate.
-   - **Style lens** (round 1 only, gates nothing): non-mechanical idiom, naming, the project's
+   - **Style lens** (round 1 only): non-mechanical idiom, naming, the project's
      stated paradigm (functional core, immutability, whatever its docs say), abstraction,
      consistency, judged against the project's own style pages and the surrounding code's
-     conventions. Launch: from its brief.
+     conventions, and against its written rules where the run bundled any
+     (`<dispatch>/rules/rules.json`). A finding on a written rule whose label gates, with no comment
+     at the line saying why, is a gating finding (step 3); every other style finding gates nothing.
+     Launch: from its brief; where rules were bundled, each lane from a prompt file of its own that
+     names its batches of them, which `review-round launch` writes, and the lane answers every rule in
+     its batches with a finding or `<rule id>: clean`.
    - **Bug lens** (gating): correctness, logic, absence-versus-relative checks (does any check
      pass vacuously when a row, file or entry is missing?), and defects in the change. Only
      lanes whose harness has a code-review form review for bugs; no brief is written and no
@@ -948,6 +961,21 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
      report with `<tool>/scripts/run review-findings`; missing fields such as severity stay
      `not provided`.
      [Why a lane may review through its harness's own skill](../../wiki/concepts/own-review-skills.md)
+   - **Design lens** (round 1 only; its findings need a ruling): whether the change builds what a
+     library, SDK or service the project already uses, or the repository itself, already offers. Its
+     brief carries the ticket's `### Existing capabilities` section and decisions, the change's
+     footprint as `<tool>/scripts/run footprint <repo> <BASE> HEAD` prints it (context for the
+     reviewer, never a gate), and the least-code ladder: for each requirement, take the first
+     rung that meets it, (1) a setting of a library the project already uses, (2) a function
+     already in the repository, (3) a thin wrapper over one of those, (4) new code. A finding names
+     a mechanism, which is a file, module, hook, store or dependency with callers, and never an
+     identifier, a line or a comment; names the higher rung and the code it would delete; shows by a
+     documentation link, the installed version's types or a probe that the rung meets every criterion
+     of the ticket; and never drops a requirement, a test, a type or an error path. Naming and
+     readability rules outrank it. Launch: from its brief. A finding that swaps a mechanism for a
+     library's setting, or changes stored state, an interface or a dependency, needs the user's
+     ruling: escalate it with the card (step 4). One that swaps for a function already in the
+     repository with the same behavior is applied like any gating finding.
    - **Security lens** (gating): general exploit hunting plus the project's specific surfaces
      as the waybill names them: how it binds and authenticates, what it allowlists, how it
      handles secrets, what it spawns and with what arguments, what it serves from disk.
@@ -1198,21 +1226,30 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    snapshot, before the fix — never a reopen. A finding is gating or
    style by what it is, not by the lens that reported it: a correctness or security defect
    reported under the style lens is a gating finding, fixed as one except in a loop with no
-   gating lens (step 5), a matter of style reported under another lens is a style finding, and
-   each keeps its lens. Its `finding` line opens with its class. A finding whose class changes in
+   gating lens (step 5); a violation of a written rule whose label gates, with no comment at the
+   line saying why, is a gating finding too, whichever lens reported it (look the rule up with
+   `<tool>/scripts/run project-notes rules <dispatch> <rule id>`, and open its `finding` line
+   `gating P2` naming the rule id); a matter of style reported under another lens is a style
+   finding; and each keeps its lens. Its `finding` line opens with its class. A finding whose class changes in
    a later round is logged again with the same target, and its latest line counts, so two
    findings at one place take targets that differ, such as a line and a column. Several reviewers
    produce a bigger, noisier union than one; the verification gate is what keeps the checkpoint
    clean, so do not soften it. Where a lane says it verified a finding by execution, re-run its
    probe rather than re-deriving the claim; where it filed a hypothesis, the verification burden
-   is yours.
+   is yours. **Grade by the criterion a finding breaks.** A defect that makes an acceptance
+   criterion, or a guarantee the ticket states, false is P2 at least, whatever the channel it
+   harms through, and its `finding` line names the criterion (`C<n>`, or the guarantee in the
+   ticket's words). A lane's higher grade is lowered only against a criterion that still holds,
+   written on the line; an exposure called limited does not lower it below P2 while the criterion
+   is false. Before verifying, read `<dispatch>/notes/bug.md` when it exists: the domain facts in
+   it can contradict a bug lane's finding or name a defect no lane could see.
 4. **Fix during the round,** in the synthesis worktree, as each report is verified. Round 1
    fixes every verified gating finding, P1, P2 and P3 alike (in a loop with no gating lens,
    none: step 5). A finding whose
    fix needs a ruling is escalated, and one it cannot fix is carried to the hand-off with its
    reason, as today. From round 2 on, only verified P1 and P2 gating findings are fixed; a P3
    finding is not fixed and goes to the hand-off's deferred findings and the ship card's open
-   findings, with its lens and the round that found it. Never a style finding. Where fixes from
+   findings, with its lens and the round that found it. Never a style finding that gates nothing. Where fixes from
    different lenses touch the same code, reconcile them into one change before applying it.
    Save every fix with the fix step, which commits the named paths and writes the fix's `apply`
    row — target the commit, detail the finding targets — in one call:
@@ -1223,7 +1260,7 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
 
    If it reports the row unrecorded, it has rolled the commit back: fix the cause and run it
    again. If it reports the commit kept with the ledger unwritten, escalate the ledger gap (Tool
-   faults). Every style finding is deferred in the hand-off, reaches the ship card's Style residue, and
+   faults). Every style finding that gates nothing is deferred in the hand-off, reaches the ship card's Style residue, and
    is sorted at aftercare (stage 4). The next round starts on the gate pass when no fix follows
    it, and runs the project checks once on the new snapshot otherwise.
 5. **Run the review loop by its logged decision.** After closing the round, call `<tool>/scripts/run review-decide
@@ -1347,6 +1384,17 @@ held that main; call the step again. Exit 1 is an input fault: fix the inputs an
 past it. After each merge the step makes, run the switch-offs call above again. No review
 round runs after a merge: main's code was reviewed in its own run, the gate checks the two
 together, and the card names the files the merge needed by hand.
+
+**A merge that brought in commits gets a drift review.** A merge that applies cleanly can leave
+the branch wrong in a way the gate cannot see: a class main stopped rendering, a helper whose
+meaning changed. Before the final gate pass, run
+`<tool>/scripts/run main-drift <repo> <since> <default-ref> HEAD --name drift-<k>`, where `<since>` is
+the default-branch commit the branch last held when it was checked (BASE for the first merge, the
+main of the previous merge after that); it writes the question and the three files and prints the
+surveyor call to run. Run that call and read `<dispatch>/surveys/drift-<k>.md`. A drift it names is a
+gating finding: fix it in the synthesis worktree and pass the gate again, then say so in the card's
+Merge section. `no drift found` goes on the card with its one line. A surveyor that cannot run is a
+degrade, never a pass: the card says so.
 
 1. **Verify the final HEAD.** Run `<tool>/scripts/run verify run <synthesis-wt> <dispatch>` after
    the last code change; the gate must

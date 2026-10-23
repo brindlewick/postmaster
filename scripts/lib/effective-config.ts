@@ -34,6 +34,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { parseTomlText } from "./data.ts";
 import { scriptsDir } from "./paths.ts";
 import { mkstempSync, run } from "./proc.ts";
+import { readSources } from "./sources.ts";
 import {
   BOUND_L,
   BOUND_R,
@@ -564,6 +565,7 @@ export const GLOBAL_KEYS = new Set([
   "planning",
   "ship",
   "notify",
+  "sources",
 ]);
 
 const CONFIG_TABLE_KEYS = new Set([
@@ -576,6 +578,7 @@ const CONFIG_TABLE_KEYS = new Set([
   "planning",
   "ship",
   "notify",
+  "sources",
 ]);
 
 export const validateCommon = (data: Rec, label: string, local: boolean): Rec => {
@@ -675,7 +678,7 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
     }
     if (Object.hasOwn(roles, "lens_reviewers")) {
       const lenses = asTable(roles.lens_reviewers, `${label}.roles.lens_reviewers`);
-      const allowedLenses = new Set(["style", "bug", "security"]);
+      const allowedLenses = new Set(["style", "bug", "security", "design"]);
       for (const [lens, lensNames] of Object.entries(lenses)) {
         if (!allowedLenses.has(lens)) {
           fail(`${label}.roles.lens_reviewers names an unknown lens: ${lens}`);
@@ -693,6 +696,10 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
     if (Object.hasOwn(data, "projects_roots")) {
       const roots = data.projects_roots;
       if (!Array.isArray(roots)) fail(`${label}.projects_roots must be a list of roots`);
+    }
+    if (Object.hasOwn(data, "sources")) {
+      const read = readSources(data.sources, expandUser);
+      if (read.problems.length > 0) fail(`${label}.${read.problems[0]}`);
     }
     if (Object.hasOwn(data, "confine")) {
       if (data.confine !== "on" && data.confine !== "off")
@@ -1323,14 +1330,15 @@ export const generatedFilesOf = (repo: string, opts?: { storePath?: string }): s
 };
 
 // --- writes ----------------------------------------------------------------------------------------
-// The folder's own ignore rules: run records, drafts, local verifiers and the
-// experiments record stay ignored whatever the user answers. The person's
-// settings file is never ignored here: setup offers to have git ignore it,
-// and only the user's yes adds that rule (ignoreSettings).
+// The folder's own ignore rules: run records, drafts, local verifiers, the
+// experiments record and the project's notes stay ignored whatever the user
+// answers. The person's settings file is never ignored here: setup offers to
+// have git ignore it, and only the user's yes adds that rule (ignoreSettings).
 const IGNORE_RECORDS = [
   "runs/",
   "clerk/",
   "project.toml",
+  "notes.md",
   "verifier/",
   "experiments.jsonl",
   "experiments-page.url",
@@ -1341,7 +1349,8 @@ const IGNORE_HEADER =
   "# .postmaster/ holds this instance's settings and every run's full record.\n" +
   "# Run records, drafts and local verifiers stay ignored. settings.toml is ignored\n" +
   "# only on the user's yes, during setup. To share what a run requires of everyone,\n" +
-  "# commit project.toml with: git add -f .postmaster/project.toml\n";
+  "# commit project.toml with: git add -f .postmaster/project.toml\n" +
+  "# The project's notes (notes.md) stay local the same way and are shared the same way.\n";
 
 /** ruleMatches <rule> <path>: whether one ignore rule matches a path under
  * .postmaster/. Enough of gitignore for the rules this file writes and the

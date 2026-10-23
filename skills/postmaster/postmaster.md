@@ -397,8 +397,12 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper b-worktree`, and release it
    when the report lands.
 8. **Write `brief.md` through a helper** from the template in `SKILL.md`. Brief one with the
-   turnpikes line, the ticket, the project profile, the team, and the legs check, and have it
-   verify the legs before it finishes:
+   turnpikes line, the ticket, the project profile, the team, the legs check, and the areas for
+   the project's notes, and have it verify the legs before it finishes. The areas are yours to
+   decide, from the ticket and the tracker's project: one glob for each place the ticket's work
+   is, such as `apps/portal/**`, and none when the work spans the project. A refusal from the
+   project's notes comes back in its report: tell the user what is wrong with them, and brief it
+   again with "no project notes" only on their word:
 
 ```helper
 Helper brief `b-brief` for ticket `<TICKET>` on project `<repo>`: write the waybill.
@@ -424,6 +428,16 @@ shared or local, `CHECKPOINT_MODE` from `ship.checkpoint_mode` and `MERGE_AUTHOR
 `ship.merge_authority`, either overridden only where the user said so for this run, the
 dispatch path and the run's pinned tool — `<tool>/scripts/run run-meta path <dispatch>`, the
 checkout step 7 cut, which the template names as `tool:` and the coachman uses as its `<tool>`.
+Then the project notes, before the waybill is written: `<tool>/scripts/run project-notes bundle
+<repo> <dispatch> --area <glob>` once for each glob the postmaster hands you, with no `--area`
+when it hands you none, copies what the project's notes name into the run, and `<tool>/scripts/run
+project-notes show <dispatch> waybill-section` prints the waybill's `## Project notes` section,
+pasted whole after the project profile. Nothing prints when the project has no notes, and the
+waybill then has no such section. A refusal from `bundle` lists what is wrong with the notes:
+write no waybill and report the refusal whole, unless the postmaster hands you "no project
+notes", when you skip the notes and leave the section out. After the waybill is written,
+`<tool>/scripts/run project-notes verify-waybill <dispatch>` must exit 0, the section in the
+waybill word for word: report its output whole and stop on any other exit.
 Then `<tool>/scripts/run turnpikes legs <dispatch> --expect '<that turnpikes: line>'` exits 0
 and prints the legs for the `turnpikes:` line step 1 printed, before anything is launched;
 report its output whole and stop on any other exit. Record `coachman contract fixture: pending`
@@ -937,7 +951,13 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
   state through a helper (finish the remaining part, or restore `manifest.json`'s leg)
   rather than taking the step fresh.
 - **TAKEOVER:** the attempt record says `walled` on the primary coachman. Log `degrade`
-  yourself, then brief a helper to write the takeover prompt and take the leg over:
+  yourself. Starting the fallback launches a new session, so the agent is the user's to
+  confirm first: ask in a plain sentence that names the run's recorded fallback
+  (`config.team.coachman_fallback` in `run.json`, which a `u-read` helper reads for you) and
+  recommends one, and start only on their answer. Then brief a helper to write the takeover
+  prompt and take the leg over, handing it `--recorded` for the recorded fallback, or
+  `--model <m> --effort <e>` (and `--harness`, `--env-file` where they differ) for another
+  agent the user named:
 
 ```helper
 Helper brief `d-takeover` for run `<TICKET>` at `<dispatch>`: take the leg over on the fallback.
@@ -949,9 +969,11 @@ you: "You take over leg <n> of <TICKET> mid-way. Read `<dispatch>/brief.md`,
 worktree's `git log` and `git status`. Treat every uncommitted change as unverified. Log
 `handoff-accept` and finish the leg." with `<rt>` the run's tool checkout expanded to its
 absolute path. Then run `<tool>/scripts/run run-meta run-pinned <dispatch> host leg takeover
-<dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n> <dispatch>/leg-<n>-takeover.txt`. The
-script preserves the old stream, starts a fresh fallback stream and records its outcome and
-thread id. Report the takeover and the thread id.
+<dispatch> <repo>/.worktrees/<TICKET> <leg-name> <n> <dispatch>/leg-<n>-takeover.txt` with the
+flags the postmaster hands you, `--recorded` or `--model <m> --effort <e>` (and `--harness`,
+`--env-file` where they differ): the command refuses to start with neither, and then you start
+nothing and report the refusal. The script preserves the old stream, starts a fresh fallback
+stream and records its outcome and thread id. Report the takeover and the thread id.
 Write your report to `<dispatch>/helper-d-takeover-<subject>-<rand>.md`, subject the run's
 ticket and rand six hex digits you pick fresh, before you end, and end as the brief contract says.
 ```
@@ -965,7 +987,8 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
   failed, which the wake names. Brief the `c-resume` brief with "Continue leg <n>; your last
   written state is in the dispatch directory and the worktree". A fourth transient end is
   judgment: resume again, take the leg over on the fallback, or wait out the provider — say
-  which and why, then brief `c-resume` or `d-takeover`, or nothing.
+  which and why, then brief `c-resume`, or `d-takeover` once the user has confirmed the agent as
+  TAKEOVER says, or nothing.
 - **READ:** a checkpoint card is waiting. Brief a helper to read it and clear its marker:
 
 ```helper
@@ -1428,6 +1451,27 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    This brief changes run `<TICKET>`: hold it first with
    `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper f-sendback`, and release it
    when the report lands.
+
+   After the pull request is open, main keeps moving, and the user's Update branch merges it into
+   the branch without the flow. When a review arrives, the user says main moved, or the branch's
+   tip is a merge of main since the card, brief a helper to review what main changed before you
+   answer the review, handing it the default-branch commit the card verified as `<since>`:
+
+```helper
+Helper brief `f-drift` for run `<TICKET>` at `<dispatch>`: review what main changed.
+Read the brief contract under `Helpers` in `<tool>/skills/postmaster/postmaster.md` first.
+Run `<tool>/scripts/run main-drift <repo> <since> <default-ref> <branch-tip> --name drift-<k>`
+with the repo, the default-branch commit the card verified, the default ref, the branch's tip
+and the number the postmaster hands you, then the surveyor call it prints, and read the survey
+in `<dispatch>/surveys/drift-<k>.md`. Report it whole: `no drift found`, or each drift it
+names. A surveyor that cannot run is a degrade, never a pass: report that. Decide nothing.
+Write your report to `<dispatch>/helper-f-drift-<subject>-<rand>.md`, subject the run's
+ticket and rand six hex digits you pick fresh, before you end, and end as the brief contract says.
+```
+
+   This brief changes run `<TICKET>`: hold it first with
+   `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper f-drift`, and release it when
+   the report lands. A drift it names goes to the user with the review's comments.
 
    Check switch-offs after the claims and before step 2's landing route, on both routes,
    through a helper:

@@ -1,12 +1,21 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-16
+updated: 2026-10-23
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-23] update | the review round's own fallback limit is 3600 seconds
+
+At the user's request: `scripts/review-round.ts`, a coachman contract file, now falls back to
+3600 seconds, 60 minutes, where a run's record holds no `review.round_timeout_seconds`, as the
+entry of 2026-10-16 said it would with the next contract change. Its constant and the copy inside
+the step that starts a round both read 2400; they now read one constant. A value recorded in a run
+or set in a config is unchanged, and every other place that states the default already said 3600.
+No standing changed.
 
 ## [2026-10-16] update | a review round may run 3600 seconds by default
 
@@ -41,6 +50,21 @@ every function available while it plans, and the ticket lists none of them. The 
 the step. The menu of the libraries is made for every library the project declares (`api-index --all`): a directory
 with the names near the draft, every function and method, and a file for each library's own menu. Standing unchanged:
 `claimed`, with no record behind it.
+
+## [2026-10-15] lint | the notes file is ignored by git, and a link that leaves the project is refused
+
+Found while drafting a project's first notes: the folder's ignore rules did not list `notes.md`, so a checkout would
+have shown it as untracked, and a link inside the project that pointed outside it was followed. Added `notes.md` to the
+records the folder ignores and made a named file count only when every link in its path stays inside the project or the
+source. No standing changed.
+
+## [2026-10-15] ingest | a project's notes are routed and copied into the flow
+
+At the user's request, after a run's reviewers never opened the wiki that held the stricter form of the rules a
+review bot then enforced. Wrote [the page](concepts/project-notes.md) at standing `claimed`, with no record behind
+it, and added `scripts/run project-notes`, the knowledge-sources step of setup, a gate on written rules, style batches,
+grading by the criterion a finding breaks, a design lens, a drift review after a clean merge, and a takeover that names
+its agent. No standing changed.
 
 ## [2026-10-15] ingest | capabilities are checked before a ticket picks a design
 

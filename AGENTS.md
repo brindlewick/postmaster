@@ -155,6 +155,21 @@ global config:
   the project step refuses it, since it always comes from the global config.
 - **Who says the merge word.** A person, or the postmaster itself (`ship.merge_authority`).
   A run never merges on its own authority; the config says whose authority that is.
+- **Knowledge sources, and the project's notes.** Ask on the global step and again for each
+  project: does the person keep any LLM wikis, knowledge bases or standards pages this work should
+  draw on; where is each on this machine; what is in it; and how should the flow use it, as rules
+  the code follows and the reviewers judge against, as knowledge the clerk and reviewers read first,
+  as review instructions, or as a process to follow; and is anything off limits? Probe first:
+  `scripts/run discover-project <chosen>` prints `rule_sources`, `instruction_files_above` and
+  `sources`; offer what it found, and never read any of it into a run unasked. A source is
+  registered once in the machine config by name and path, `[sources.<name>]` with `path`, `about`
+  and an `applies_to` pattern for the repos it is proposed for, and the project's
+  `.postmaster/notes.md` names it as `source:<name>/<path>`, so the notes carry no machine path. Write
+  the notes with the user in plain language, route each block to the part of the flow it is for with
+  the comments that `scripts/lib/notes.ts` describes, run `scripts/run project-notes preview
+  <chosen>` and show the user what each part would receive for a real ticket, and write the file only
+  on their yes. Git ignores it like `project.toml`; sharing it is `git add -f .postmaster/notes.md`.
+  `scripts/run project-notes check <chosen>` must exit 0.
 
 Then put the answers in a file, one `key=value` per line, and let the script write and check
 the settings; it refuses a harness that is not on PATH, a coachman on a lane's model and
@@ -243,7 +258,8 @@ metaphor expresses them.
 **blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
 as against a reviewer · **lead horse / wheeler** the ranked lanes ·
 **turnpike** a check a run must pass through before it ships, named by its ticket: `default` is
-the style, bug and security reviews, and the project's gate always runs besides them ·
+the style, bug and security reviews unless the project's settings add the design review, and the
+project's gate always runs besides them ·
 **surveyor** one question put to a lane that took no part in the work, for an independent judgement ·
 **remount** resuming a stalled run ·
 **spent** a run whose process is gone with no marker · **lame** a lane that is present but not pulling · **fleet** the

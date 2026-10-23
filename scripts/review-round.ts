@@ -9,6 +9,9 @@
 // already recorded. The round's reach check is collected when the whole round is in,
 // completing an unfinished collection and never repeating a finished one. A cut at a
 // commit with a recorded pass reuses it instead of running verify again.
+// When the run bundled written rules for the style lens (<dispatch>/rules/rules.json, from
+// run project-notes bundle), launch cuts them into batches, writes each style lane its own
+// prompt file naming its batches, and starts the lane with it.
 //
 //   run review-round start    <dispatch> <round> [<lens>:<lane>...]
 //   run review-round cut      <dispatch> <round> <repo> <synthesis-wt>
@@ -60,6 +63,7 @@ import { basename, dirname, join } from "node:path";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
 import { bootId, sameBoot } from "./lib/processes.ts";
+import { writeStyleBatches } from "./lib/style-batches.ts";
 import { PY_S_CLASS } from "./lib/text.ts";
 import { reachActions } from "./reach.ts";
 import { uncommittedFiles } from "./verify.ts";
@@ -67,7 +71,7 @@ import { countdown, sleepMs } from "./wait-for-markers.ts";
 import { lostWallFor, wallFor } from "./walls.ts";
 
 const HERE = scriptsDir(import.meta);
-const DEFAULT_LIMIT = 2400;
+const DEFAULT_LIMIT = 3600;
 const MAX_LIMIT = 86400;
 const USAGE =
   "usage: run review-round start <dispatch> <round> [<lens>:<lane>...] | cut|launch <dispatch> <round> <repo> <synthesis-wt>" +
@@ -154,7 +158,7 @@ function stateCmd(
   const err: string[] = [];
   if (what === "start") {
     const runJson = args[0] ?? "";
-    const def = parseInt(args[1] ?? "2400", 10);
+    const def = parseInt(args[1] ?? String(DEFAULT_LIMIT), 10);
     const most = parseInt(args[2] ?? "86400", 10);
     let limit: number;
     let source: string;
@@ -485,7 +489,7 @@ function resolveLenses(
     res.code = 1;
     return null;
   }
-  const names = review.slice(2).filter((n) => a.round === "1" || n !== "style");
+  const names = review.slice(2).filter((n) => a.round === "1" || (n !== "style" && n !== "design"));
   const pairs: Array<[string, string[]]> = [];
   for (const lens of names) {
     const r = deps.tool("reviewers", ["lanes", join(a.dispatch, "brief.md"), lens]);
@@ -766,6 +770,7 @@ export function launchRound(a: StepArgs, deps: StepDeps): StepResult {
   // lens's brief, except a security lane whose harness has its own skill.
   const briefOf = (lens: string): string => join(a.dispatch, `review-${lens}-brief.md`);
   const securityPrompts = new Map<string, string>();
+  const stylePrompts = new Map<string, string>();
   for (const [lens, lanes] of lenses) {
     if (lens === "bug") continue;
     let needBrief = [...lanes];
@@ -804,6 +809,19 @@ export function launchRound(a: StepArgs, deps: StepDeps): StepResult {
       } catch (e) {
         res.err.push(
           `review-round: ${lensPrompt(lens)} cannot be written (${e instanceof Error ? e.message : String(e)})`,
+        );
+        res.code = 1;
+        return res;
+      }
+    }
+    if (lens === "style") {
+      try {
+        for (const [lane, path] of writeStyleBatches(a.dispatch, a.round, lanes)) {
+          stylePrompts.set(lane, path);
+        }
+      } catch (e) {
+        res.err.push(
+          `review-round: the style rules cannot be cut into batches (${e instanceof Error ? e.message : String(e)})`,
         );
         res.code = 1;
         return res;
@@ -885,7 +903,9 @@ export function launchRound(a: StepArgs, deps: StepDeps): StepResult {
       const prompt =
         lens === "security"
           ? join(a.dispatch, `review-r${a.round}-security-${lane}-prompt.txt`)
-          : lensPrompt(lens);
+          : lens === "style"
+            ? (stylePrompts.get(lane) ?? lensPrompt(lens))
+            : lensPrompt(lens);
       const launch =
         lens === "bug"
           ? [
