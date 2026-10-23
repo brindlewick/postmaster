@@ -8,6 +8,13 @@ updated: 2026-10-23
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
 
+## [2026-10-23] update | the examples in comments and tests use invented names
+
+The comments and tests that show a project's folders and components now use invented ones:
+`apps/web`, `apps/admin`, `packages/core` and a `Widget` component. The postmaster runbook's own
+example glob is not changed; that file is a coachman contract file, so the change waits for the next
+edit to the contract. No standing changed.
+
 ## [2026-10-23] update | the story pages page names no project
 
 The sentence on [the page](concepts/story-pages.md) that said which projects the first two change

@@ -163,7 +163,7 @@ export function lockedVersions(lockText: string, name: string): string[] {
 }
 
 export interface LockedDependency {
-  /** The workspace folder, such as `apps/manager`, or `.` for the root. */
+  /** The workspace folder, such as `apps/web`, or `.` for the root. */
   readonly importer: string;
   readonly kind: string;
   readonly name: string;

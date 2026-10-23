@@ -228,30 +228,30 @@ describe("a markdown rule file", () => {
 describe("scope", () => {
   test("the static prefix is the path before the first wildcard", () => {
     expect(staticPrefix("apps/**/*.tsx")).toEqual(["apps"]);
-    expect(staticPrefix("apps/portal/**")).toEqual(["apps", "portal"]);
+    expect(staticPrefix("apps/web/**")).toEqual(["apps", "web"]);
     expect(staticPrefix("**/*.ts")).toEqual([]);
-    expect(staticPrefix("./packages/ensjs/**")).toEqual(["packages", "ensjs"]);
+    expect(staticPrefix("./packages/core/**")).toEqual(["packages", "core"]);
     expect(staticPrefix("src/main.ts")).toEqual(["src", "main.ts"]);
   });
 
   test("a rule with no scope, or a ticket with no area, applies everywhere", () => {
-    expect(scopeApplies([], ["apps/portal/**"])).toBe(true);
+    expect(scopeApplies([], ["apps/web/**"])).toBe(true);
     expect(scopeApplies(["apps/**/*.tsx"], [])).toBe(true);
   });
 
   test("a scope applies when its prefix and the area's share a path", () => {
-    expect(scopeApplies(["apps/**/*.tsx"], ["apps/portal/**"])).toBe(true);
-    expect(scopeApplies(["apps/portal/**"], ["apps/**"])).toBe(true);
+    expect(scopeApplies(["apps/**/*.tsx"], ["apps/web/**"])).toBe(true);
+    expect(scopeApplies(["apps/web/**"], ["apps/**"])).toBe(true);
     expect(scopeApplies(["**/*.ts"], ["packages/x/**"])).toBe(true);
   });
 
   test("a scope in another folder does not apply", () => {
-    expect(scopeApplies(["packages/ensjs/**"], ["apps/portal/**"])).toBe(false);
-    expect(scopeApplies(["apps/manager/**"], ["apps/portal/**"])).toBe(false);
+    expect(scopeApplies(["packages/core/**"], ["apps/web/**"])).toBe(false);
+    expect(scopeApplies(["apps/admin/**"], ["apps/web/**"])).toBe(false);
   });
 
   test("any scope glob or any area glob may match", () => {
-    expect(scopeApplies(["packages/a/**", "apps/**"], ["apps/portal/**"])).toBe(true);
+    expect(scopeApplies(["packages/a/**", "apps/**"], ["apps/web/**"])).toBe(true);
     expect(scopeApplies(["packages/a/**"], ["docs/**", "packages/a/src/**"])).toBe(true);
   });
 });
