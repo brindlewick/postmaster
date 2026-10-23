@@ -1,7 +1,7 @@
 // The project notes file, read: plain language the user and the postmaster write about one
 // project, with comments that route each block to the part of the flow it is for.
 //
-//   <!-- route: waybill, implement; scope: apps/portal/** -->
+//   <!-- route: waybill, implement; scope: apps/web/** -->
 //   Text for those parts. It runs to the next annotation.
 //
 //   <!-- rules: .review/config.json; format: json-rules; gate: high, medium -->

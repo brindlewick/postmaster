@@ -26,8 +26,8 @@ import { run } from "./lib/proc.ts";
 
 const DEFAULT_MAX_BYTES = 400_000;
 
-/** The folders a set of changed files sit in, two levels deep where there are two, so `apps/portal/a.ts`
- * is `apps/portal` and `README.md` is the top. */
+/** The folders a set of changed files sit in, two levels deep where there are two, so `apps/web/a.ts`
+ * is `apps/web` and `README.md` is the top. */
 export function areasOf(files: readonly string[]): string[] {
   const out = new Set<string>();
   for (const f of files) {

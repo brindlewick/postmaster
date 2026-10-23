@@ -13,14 +13,14 @@ describe("areas", () => {
   test("two levels deep where there are two, the folder where there is one, the top otherwise", () => {
     expect(
       areasOf([
-        "apps/portal/src/a.ts",
-        "apps/portal/b.ts",
-        "apps/manager/c.ts",
+        "apps/web/src/a.ts",
+        "apps/web/b.ts",
+        "apps/admin/c.ts",
         "packages/x/y.ts",
         "docs/z.md",
         "README.md",
       ]),
-    ).toEqual([".", "apps/manager", "apps/portal", "docs", "packages/x"]);
+    ).toEqual([".", "apps/admin", "apps/web", "docs", "packages/x"]);
   });
 
   test("no files, no areas", () => {
@@ -45,11 +45,11 @@ describe("cap", () => {
 
 describe("the question", () => {
   test("names the three revisions, the areas and the three files", () => {
-    const q = question("aaa", "bbb", "ccc", ["apps/portal", "docs"]);
+    const q = question("aaa", "bbb", "ccc", ["apps/web", "docs"]);
     expect(q).toContain("checked against main at aaa");
     expect(q).toContain("moved to bbb");
     expect(q).toContain("tip is ccc");
-    expect(q).toContain("under apps/portal, docs");
+    expect(q).toContain("under apps/web, docs");
     for (const f of ["main-files.txt", "main-side.diff", "branch.diff"]) expect(q).toContain(f);
     expect(q).toContain("no drift found");
     expect(q).toContain("Do not modify any file.");
@@ -79,21 +79,21 @@ beforeAll(() => {
   repo = join(tmp, "shop");
   mkdirSync(repo);
   sh(["init", "-q", "-b", "main"]);
-  put("apps/portal/styles.css", ".text-sm { font-size: 14px; }\n.text-base { font-size: 15px; }\n");
-  put("apps/manager/y.ts", "export const y = 1;\n");
+  put("apps/web/styles.css", ".pad-sm { padding: 4px; }\n.pad-base { padding: 8px; }\n");
+  put("apps/admin/y.ts", "export const y = 1;\n");
   sh(["add", "."]);
   sh(["commit", "-qm", "base"]);
   since = sh(["rev-parse", "HEAD"]);
   sh(["checkout", "-qb", "feature"]);
-  put("apps/portal/Banner.tsx", 'export const Banner = () => <p className="text-sm">Hello</p>;\n');
+  put("apps/web/Widget.tsx", 'export const Widget = () => <p className="pad-sm">Hello</p>;\n');
   sh(["add", "."]);
-  sh(["commit", "-qm", "banner"]);
+  sh(["commit", "-qm", "widget"]);
   head = sh(["rev-parse", "HEAD"]);
   sh(["checkout", "-q", "main"]);
-  put("apps/portal/styles.css", ".text-base { font-size: 15px; }\n");
-  put("apps/manager/y.ts", "export const y = 2;\n");
+  put("apps/web/styles.css", ".pad-base { padding: 8px; }\n");
+  put("apps/admin/y.ts", "export const y = 2;\n");
   sh(["add", "."]);
-  sh(["commit", "-qm", "typography: only the design styles"]);
+  sh(["commit", "-qm", "spacing: only the design tokens"]);
   mainTip = sh(["rev-parse", "HEAD"]);
 });
 
@@ -112,7 +112,7 @@ describe("the command", () => {
     const r = drift(repo, since, mainTip, head, "--name", "drift-1", "--out", out);
     expect(r.code).toBe(0);
     expect(r.out).toContain("main moved by 1 commits since");
-    expect(r.out).toContain("areas: apps/portal");
+    expect(r.out).toContain("areas: apps/web");
     for (const f of ["question.md", "main-files.txt", "main-side.diff", "branch.diff"]) {
       expect(existsSync(join(out, f))).toBe(true);
     }
@@ -125,10 +125,10 @@ describe("the command", () => {
     const out = join(tmp, "out-2");
     drift(repo, since, mainTip, head, "--name", "drift-2", "--out", out);
     const files = readFileSync(join(out, "main-files.txt"), "utf8");
-    expect(files).toContain("apps/portal/styles.css");
-    expect(files).toContain("apps/manager/y.ts");
+    expect(files).toContain("apps/web/styles.css");
+    expect(files).toContain("apps/admin/y.ts");
     const side = readFileSync(join(out, "main-side.diff"), "utf8");
-    expect(side).toContain("-.text-sm { font-size: 14px; }");
+    expect(side).toContain("-.pad-sm { padding: 4px; }");
     expect(side).not.toContain("y.ts");
   });
 
@@ -136,7 +136,7 @@ describe("the command", () => {
     const out = join(tmp, "out-3");
     drift(repo, since, mainTip, head, "--name", "drift-3", "--out", out);
     expect(readFileSync(join(out, "branch.diff"), "utf8")).toContain(
-      '+export const Banner = () => <p className="text-sm">Hello</p>;',
+      '+export const Widget = () => <p className="pad-sm">Hello</p>;',
     );
   });
 
@@ -161,14 +161,14 @@ describe("the command", () => {
   });
 
   test("a diff over the byte budget is cut", () => {
-    put("apps/portal/big.css", `${".x { color: red; }\n".repeat(400)}`);
+    put("apps/web/big.css", `${".x { color: red; }\n".repeat(400)}`);
     sh(["checkout", "-q", "feature"]);
-    put("apps/portal/big.css", `${".y { color: blue; }\n".repeat(400)}`);
+    put("apps/web/big.css", `${".y { color: blue; }\n".repeat(400)}`);
     sh(["add", "."]);
     sh(["commit", "-qm", "big"]);
     const bigHead = sh(["rev-parse", "HEAD"]);
     sh(["checkout", "-q", "main"]);
-    rmSync(join(repo, "apps/portal/big.css"), { force: true });
+    rmSync(join(repo, "apps/web/big.css"), { force: true });
     const out = join(tmp, "out-7");
     expect(
       drift(repo, since, mainTip, bigHead, "--name", "d7", "--out", out, "--max-bytes", "1500")

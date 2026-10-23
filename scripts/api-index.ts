@@ -12,8 +12,8 @@
 // `npm pack` into <repo>/.postmaster/clerk/packages (a folder git ignores) and unpacked there; a
 // lockfile that pins two versions, or none, needs `--version`. `--dir` names an unpacked package.
 //
-// Packages of the same family that the declaration files import (`posthog-js` imports
-// `@posthog/types`, which holds its settings) are indexed with it, because the API is in both. A
+// Packages of the same family that the declaration files import (`acme-analytics` imports
+// `@acme/types`, which holds its settings) are indexed with it, because the API is in both. A
 // family package takes the version its dependent's range allows, when the lockfile pins several.
 // A package's own folders of test helpers (testing, tests, mocks, fixtures) are left out.
 //

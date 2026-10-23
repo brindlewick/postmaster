@@ -51,7 +51,7 @@ describe("page text", () => {
 
   test("languages come from the extension", () => {
     expect(langOf("scripts/x.ts")).toBe("typescript");
-    expect(langOf("apps/x/Banner.tsx")).toBe("typescript");
+    expect(langOf("apps/x/Widget.tsx")).toBe("typescript");
     expect(langOf("apps/x/view.jsx")).toBe("javascript");
     expect(langOf("a/b.sh")).toBe("bash");
     expect(langOf("README.md")).toBe("markdown");

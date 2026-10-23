@@ -3,7 +3,7 @@ title: A ticket or a change reads better as a story that scrolls, drawn before i
 type: concept
 standing: claimed
 sources: [trials/2026-10-09-story-pages]
-updated: 2026-10-13
+updated: 2026-10-23
 ---
 
 # A ticket or a change reads better as a story that scrolls, drawn before it shows code
@@ -52,8 +52,8 @@ two minutes [@trials/2026-10-09-story-pages].
 by default, with a setting to turn it off. Until then a session makes one when asked. Stories for changes
 have their own command, `story-change`, since 2026-10-13: it reads a story file and the change between two
 commits, names every problem the story has at once, and refuses a story that leaves a changed line neither shown
-nor listed. The first two told the analytics banner and the website box of the ENS apps. A step for each decision
-and the refusal of a ticket story that points at what is not there are drafted as follow-ups.
+nor listed. The first two told changes in two real projects. A step for each decision and the refusal of a
+ticket story that points at what is not there are drafted as follow-ups.
 
 ## Open
 

@@ -166,8 +166,8 @@ describe("package names", () => {
   });
 
   test("familyOf is the scope, or the first word of the name", () => {
-    expect(familyOf("posthog-js")).toBe("posthog");
-    expect(familyOf("@posthog/types")).toBe("posthog");
+    expect(familyOf("acme-analytics")).toBe("acme");
+    expect(familyOf("@acme/types")).toBe("acme");
     expect(familyOf("react")).toBe("react");
   });
 });
@@ -176,35 +176,35 @@ describe("lockedVersions", () => {
   const LOCK = [
     "packages:",
     "",
-    "  posthog-js@1.200.0:",
+    "  acme-analytics@1.200.0:",
     "    resolution: {integrity: sha512-aaa}",
     "",
-    "  '@posthog/types@1.200.0':",
+    "  '@acme/types@1.200.0':",
     "    resolution: {integrity: sha512-bbb}",
     "",
-    "  posthog-js@1.100.0(react@18.3.1):",
+    "  acme-analytics@1.100.0(react@18.3.1):",
     "    resolution: {integrity: sha512-ccc}",
-    "  posthog-js@1.200.0(react@18.3.1):",
+    "  acme-analytics@1.200.0(react@18.3.1):",
     "    resolution: {integrity: sha512-ddd}",
-    "  posthog-js-lite@3.0.0:",
+    "  acme-analytics-lite@3.0.0:",
     "    resolution: {integrity: sha512-eee}",
   ].join("\n");
 
   test("lists each version once, in the order the lockfile has them", () => {
-    expect(lockedVersions(LOCK, "posthog-js")).toEqual(["1.200.0", "1.100.0"]);
+    expect(lockedVersions(LOCK, "acme-analytics")).toEqual(["1.200.0", "1.100.0"]);
   });
 
   test("reads a scoped, quoted name", () => {
-    expect(lockedVersions(LOCK, "@posthog/types")).toEqual(["1.200.0"]);
+    expect(lockedVersions(LOCK, "@acme/types")).toEqual(["1.200.0"]);
   });
 
   test("a longer name that starts the same is another package", () => {
-    expect(lockedVersions(LOCK, "posthog-js-lite")).toEqual(["3.0.0"]);
+    expect(lockedVersions(LOCK, "acme-analytics-lite")).toEqual(["3.0.0"]);
   });
 
   test("a package the lockfile does not hold has no versions", () => {
     expect(lockedVersions(LOCK, "absent")).toEqual([]);
-    expect(lockedVersions("", "posthog-js")).toEqual([]);
+    expect(lockedVersions("", "acme-analytics")).toEqual([]);
   });
 });
 

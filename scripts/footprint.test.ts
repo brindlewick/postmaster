@@ -69,12 +69,12 @@ describe("the numstat sum", () => {
 describe("new packages and dependencies", () => {
   test("an added manifest below the top is a new package; the top one is not", () => {
     const status = [
-      "A\tpackages/consent/package.json",
+      "A\tpackages/prefs/package.json",
       "A\tpackage.json",
       "M\tapps/a/package.json",
       "A\tcrates/x/Cargo.toml",
     ].join("\n");
-    expect(newPackages(status)).toEqual(["packages/consent", "crates/x"]);
+    expect(newPackages(status)).toEqual(["packages/prefs", "crates/x"]);
   });
 
   test("a dependency in the after-manifest and not in the before is new", () => {
@@ -95,15 +95,15 @@ describe("new packages and dependencies", () => {
 describe("storage and cookie writes", () => {
   test("the names the added lines write", () => {
     const added = [
-      "localStorage.setItem('acme.consent', value)",
+      "localStorage.setItem('acme.prefs', value)",
       'sessionStorage.setItem("tab", "1")',
-      "document.cookie = `acme-consent=${v}; path=/`",
+      "document.cookie = `acme-prefs=${v}; path=/`",
       "res.headers.append('Set-Cookie', 'session=abc')",
     ].join("\n");
     expect(storageWrites(added)).toEqual([
-      "cookie acme-consent",
+      "cookie acme-prefs",
       "cookie session",
-      "localStorage acme.consent",
+      "localStorage acme.prefs",
       "sessionStorage tab",
     ]);
   });
@@ -143,11 +143,11 @@ beforeAll(() => {
   put("package.json", JSON.stringify({ dependencies: { a: "1", b: "1" } }));
   put(
     "src/store.ts",
-    "localStorage.setItem('acme.consent', 'yes');\ndocument.cookie = 'acme-consent=1';\n",
+    "localStorage.setItem('acme.prefs', 'yes');\ndocument.cookie = 'acme-prefs=1';\n",
   );
   put("src/store.test.ts", "test('x', () => {});\n".repeat(5));
-  put("packages/consent/package.json", JSON.stringify({ dependencies: { "posthog-js": "1" } }));
-  put("packages/consent/src/index.ts", "export {};\n");
+  put("packages/prefs/package.json", JSON.stringify({ dependencies: { "acme-analytics": "1" } }));
+  put("packages/prefs/src/index.ts", "export {};\n");
   put("pnpm-lock.yaml", "lock\n");
   sh(["add", "."]);
   sh(["commit", "-qm", "head"]);
@@ -177,9 +177,9 @@ describe("the command", () => {
       "source: 4 files, +5 -1",
       "tests: 1 files, +5 -0",
       "generated: 1 files, +1 -0",
-      "new packages: packages/consent",
-      "new dependencies: b, posthog-js",
-      "storage and cookies written (a guess from the added lines): cookie acme-consent, localStorage acme.consent",
+      "new packages: packages/prefs",
+      "new dependencies: acme-analytics, b",
+      "storage and cookies written (a guess from the added lines): cookie acme-prefs, localStorage acme.prefs",
     ]);
   });
 
