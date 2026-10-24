@@ -2,7 +2,7 @@
 // non-zero, and a negative control, the same call on a change that reads zero. The project is
 // invented: a small shop with a web app and a core package.
 import { describe, expect, test } from "bun:test";
-import { parseNumstat, sizeOf } from "./pr-size.ts";
+import { budgetOf, parseNumstat, sizeOf } from "./pr-size.ts";
 
 const report = (...cells: string[]): string => cells.map((cell) => `${cell}\0`).join("");
 const keep = (): boolean => false;
@@ -54,5 +54,69 @@ describe("the size of a change", () => {
   test("a change with no files, or with every file skipped, reads zero", () => {
     expect(sizeOf([], new Set(), keep)).toEqual({ lines: 0, files: 0 });
     expect(sizeOf(changes, new Set(), () => true)).toEqual({ lines: 0, files: 0 });
+  });
+});
+
+describe("the budget a project's settings give", () => {
+  const drafts = { draft_pull_requests: "on" };
+  // Every way a project's runs can fail to open draft pull requests: no table, no key, or off.
+  const noDrafts = [undefined, null, {}, { draft_pull_requests: "off" }, "on"];
+
+  test("aims at 200 lines and stops at 400 where the project's runs open draft pull requests", () => {
+    expect(budgetOf(drafts, {})).toEqual({ aim: 200, cap: 400 });
+  });
+
+  test("is none where they do not and the project names no cap, an aim alone turning nothing on", () => {
+    for (const ship of noDrafts) {
+      expect(budgetOf(ship, {})).toBeNull();
+      expect(budgetOf(ship, { pr_size_aim: 100 })).toBeNull();
+    }
+    expect(budgetOf(drafts, { pr_size_aim: 100 })).toEqual({ aim: 100, cap: 400 });
+  });
+
+  test("is the project's own cap where it names one: only a cap, a cap with drafts off, a cap with drafts on", () => {
+    for (const ship of [...noDrafts, drafts]) {
+      expect(budgetOf(ship, { pr_size_cap: 300 })).toEqual({ aim: 200, cap: 300 });
+      expect(budgetOf(ship, { pr_size_aim: 150, pr_size_cap: 300 })).toEqual({
+        aim: 150,
+        cap: 300,
+      });
+    }
+  });
+
+  test("takes the project's own aim and cap, and a cap below the default aim brings the aim down", () => {
+    const own = { pr_size_aim: 150, pr_size_cap: 300 };
+    expect(budgetOf(drafts, own)).toEqual({ aim: 150, cap: 300 });
+    expect(budgetOf(drafts, { pr_size_cap: 100 })).toEqual({ aim: 100, cap: 100 });
+    expect(budgetOf({}, { pr_size_cap: 100 })).toEqual({ aim: 100, cap: 100 });
+  });
+
+  test("is none where the project turns the cap off, with drafts on or without", () => {
+    for (const ship of [drafts, ...noDrafts]) {
+      expect(budgetOf(ship, { pr_size_cap: "off" })).toBeNull();
+    }
+  });
+
+  test("refuses an aim above the cap, set or defaulted, however the budget came on", () => {
+    expect(() => budgetOf(drafts, { pr_size_aim: 300, pr_size_cap: 200 })).toThrow(
+      "pr_size_aim (300) is above pr_size_cap (200)",
+    );
+    expect(() => budgetOf({}, { pr_size_aim: 300, pr_size_cap: 200 })).toThrow(
+      "pr_size_aim (300) is above pr_size_cap (200)",
+    );
+    expect(() => budgetOf(drafts, { pr_size_aim: 500 })).toThrow(
+      "pr_size_aim (500) is above pr_size_cap (400)",
+    );
+  });
+
+  test("refuses a draft_pull_requests value that is neither on nor off, with a cap or without, and reads on, off and none as before", () => {
+    for (const value of [true, false, "yes", "On", 1]) {
+      const message = `ship.draft_pull_requests must be "on" or "off", not ${JSON.stringify(value)}`;
+      expect(() => budgetOf({ draft_pull_requests: value }, {})).toThrow(message);
+      expect(() => budgetOf({ draft_pull_requests: value }, { pr_size_cap: 300 })).toThrow(message);
+    }
+    expect(budgetOf({ draft_pull_requests: "on" }, {})).toEqual({ aim: 200, cap: 400 });
+    expect(budgetOf({ draft_pull_requests: "off" }, {})).toBeNull();
+    expect(budgetOf({}, {})).toBeNull();
   });
 });

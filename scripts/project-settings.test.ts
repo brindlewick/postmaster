@@ -24,6 +24,7 @@ import {
   globalConfigPath,
   ignoreSettings,
   isTracked,
+  prSizeBudgetOf,
   recordAcceptance,
 } from "./lib/effective-config";
 import {
@@ -416,6 +417,11 @@ describe("refusals", () => {
     ],
     ["a negated generated_files pattern", '[project]\ngenerated_files = ["!x.gen.ts"]\n'],
     ["a generated_files pattern of wildcards only", '[project]\ngenerated_files = ["**/*"]\n'],
+    ["a pr_size_aim of zero", "[project]\npr_size_aim = 0\n"],
+    ["a pr_size_aim that is text", '[project]\npr_size_aim = "200"\n'],
+    ["a pr_size_cap that is not whole", "[project]\npr_size_cap = 2.5\n"],
+    ["a pr_size_cap that is neither a number nor off", '[project]\npr_size_cap = "on"\n'],
+    ["a pr_size_aim above the pr_size_cap", "[project]\npr_size_aim = 500\npr_size_cap = 400\n"],
   ];
   for (const [label, contents] of rejects) {
     test(`rejects ${label}`, () => {
@@ -527,6 +533,12 @@ describe("acceptances", () => {
       '[project]\ngenerated_files = ["**/*.{gen,generated}.ts"]\n',
       false,
     ],
+    [
+      "pr_size_aim and pr_size_cap in the shared file",
+      "[project]\npr_size_aim = 150\npr_size_cap = 300\n",
+      false,
+    ],
+    ["a pr_size_cap of off", '[project]\npr_size_cap = "off"\n', true],
   ];
   for (const [label, contents, localSettings] of accepts) {
     test(`accepts ${label}`, () => {
@@ -955,5 +967,92 @@ describe("the generated_files project setting", () => {
     const dir = at("generated-no-files");
     mkdirSync(dir, { recursive: true });
     expect(generatedFilesOf(dir)).toEqual([]);
+  });
+});
+
+describe("the pull request size settings", () => {
+  const drafts = '[ship]\ndraft_pull_requests = "on"\n';
+
+  function projectWith(name: string, shared: string | null, local: string | null): string {
+    const dir = at(name);
+    mkdirSync(dir, { recursive: true });
+    if (shared !== null) write(join(dir, ".postmaster", "project.toml"), shared);
+    if (local !== null) write(join(dir, ".postmaster", "settings.toml"), local);
+    return dir;
+  }
+
+  function refusal(fn: () => unknown): string {
+    try {
+      fn();
+    } catch (e) {
+      if (isDie(e)) return e.message;
+      throw e;
+    }
+    return "";
+  }
+
+  test("a project that names none gains no key and no source; drafts give it the defaults", () => {
+    const dir = projectWith("size-none", null, drafts);
+    const got = inspect(dir);
+    expect(Object.keys(got.project as Rec).filter((k) => k.startsWith("pr_size"))).toEqual([]);
+    expect(Object.keys(got.sources as Rec).filter((k) => k.includes("pr_size"))).toEqual([]);
+    expect(prSizeBudgetOf(dir)).toEqual({ aim: 200, cap: 400 });
+  });
+
+  test("a cap turns the budget on by itself; an aim alone turns nothing on", () => {
+    const capped = projectWith("size-cap-only", "[project]\npr_size_cap = 300\n", null);
+    expect(prSizeBudgetOf(capped)).toEqual({ aim: 200, cap: 300 });
+    const off = '[ship]\ndraft_pull_requests = "off"\n[project]\npr_size_cap = 300\n';
+    expect(prSizeBudgetOf(projectWith("size-cap-drafts-off", null, off))).toEqual({
+      aim: 200,
+      cap: 300,
+    });
+    expect(
+      prSizeBudgetOf(projectWith("size-aim-only", "[project]\npr_size_aim = 100\n", null)),
+    ).toBeNull();
+  });
+
+  test("the shared file sets the budget, the person's file replaces one key", () => {
+    const shared = "[project]\npr_size_aim = 150\npr_size_cap = 300\n";
+    expect(prSizeBudgetOf(projectWith("size-shared", shared, null))).toEqual({
+      aim: 150,
+      cap: 300,
+    });
+    const dir = projectWith("size-layers", shared, `${drafts}[project]\npr_size_cap = 250\n`);
+    const sources = inspect(dir).sources as Rec;
+    expect([sources["project.pr_size_aim"], sources["project.pr_size_cap"]]).toEqual([
+      "shared",
+      "local",
+    ]);
+    expect(prSizeBudgetOf(dir)).toEqual({ aim: 150, cap: 250 });
+  });
+
+  test("a cap of off turns the budget off for a project whose runs open drafts", () => {
+    const dir = projectWith("size-off", null, `${drafts}[project]\npr_size_cap = "off"\n`);
+    expect(prSizeBudgetOf(dir)).toBeNull();
+  });
+
+  test("an aim above the cap is refused once the two files are merged", () => {
+    const dir = projectWith(
+      "size-merged",
+      "[project]\npr_size_aim = 300\n",
+      `${drafts}[project]\npr_size_cap = 200\n`,
+    );
+    expect(refusal(() => prSizeBudgetOf(dir))).toBe("pr_size_aim (300) is above pr_size_cap (200)");
+  });
+
+  test("a project with no config at all has no budget unless its own files name a cap, and a settings file that does not parse is refused", () => {
+    const saved = process.env.POSTMASTER_CONFIG;
+    process.env.POSTMASTER_CONFIG = at("size-no-config.toml");
+    try {
+      expect(prSizeBudgetOf(projectWith("size-bare", null, null))).toBeNull();
+      const bare = projectWith("size-bare-cap", null, "[project]\npr_size_cap = 300\n");
+      expect(prSizeBudgetOf(bare)).toEqual({ aim: 200, cap: 300 });
+      const broken = projectWith("size-broken", null, "[ship\n");
+      expect(refusal(() => prSizeBudgetOf(broken))).toContain("does not parse");
+    } finally {
+      if (saved === undefined) delete process.env.POSTMASTER_CONFIG;
+      else process.env.POSTMASTER_CONFIG = saved;
+    }
   });
 });

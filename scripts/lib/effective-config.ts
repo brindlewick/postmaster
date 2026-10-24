@@ -33,6 +33,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { parseTomlText } from "./data.ts";
 import { scriptsDir } from "./paths.ts";
+import { type Budget, budgetOf } from "./pr-size.ts";
 import { mkstempSync, run } from "./proc.ts";
 import { readSources } from "./sources.ts";
 import {
@@ -581,6 +582,17 @@ const CONFIG_TABLE_KEYS = new Set([
   "sources",
 ]);
 
+const PROJECT_KEYS = [
+  "default_turnpikes",
+  "risk_surfaces",
+  "generated_files",
+  "pr_size_aim",
+  "pr_size_cap",
+];
+
+const positiveInteger = (v: unknown): v is number =>
+  typeof v === "number" && Number.isInteger(v) && v > 0;
+
 export const validateCommon = (data: Rec, label: string, local: boolean): Rec => {
   const allowed = local
     ? new Set(["project", "tracker", "roles", ...GLOBAL_KEYS])
@@ -591,7 +603,7 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
   if (unknown.length > 0) fail(`${label} has unsupported table or key: ${unknown[0]}`);
   const project = asTable(Object.hasOwn(data, "project") ? data.project : {}, `${label}.project`);
   const unknownProject = Object.keys(project)
-    .filter((k) => k !== "default_turnpikes" && k !== "risk_surfaces" && k !== "generated_files")
+    .filter((k) => !PROJECT_KEYS.includes(k))
     .sort(cmpPoints);
   if (unknownProject.length > 0) fail(`${label}.project has unsupported key: ${unknownProject[0]}`);
   if (Object.hasOwn(project, "default_turnpikes")) {
@@ -619,6 +631,16 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
   }
   if (Object.hasOwn(project, "generated_files")) {
     project.generated_files = globList(project.generated_files, `${label}.project.generated_files`);
+  }
+  const { pr_size_aim: aim, pr_size_cap: cap } = project;
+  if (aim !== undefined && !positiveInteger(aim)) {
+    fail(`${label}.project.pr_size_aim must be a whole number above zero`);
+  }
+  if (cap !== undefined && cap !== "off" && !positiveInteger(cap)) {
+    fail(`${label}.project.pr_size_cap must be a whole number above zero, or "off"`);
+  }
+  if (positiveInteger(aim) && positiveInteger(cap) && aim > cap) {
+    fail(`${label}.project.pr_size_aim must not be above pr_size_cap`);
   }
   const tracker = asTable(Object.hasOwn(data, "tracker") ? data.tracker : {}, `${label}.tracker`);
   if (!local) {
@@ -1019,6 +1041,17 @@ const mergedProfile = (shared: Rec, local: Rec, hasShared: boolean, hasLocal: bo
     project.generated_files = localProject.generated_files;
     sources["project.generated_files"] = "local";
   }
+  // The size budget has no discovered default either: each key appears only where a file names it.
+  for (const field of ["pr_size_aim", "pr_size_cap"]) {
+    if (Object.hasOwn(sharedProject, field)) {
+      project[field] = sharedProject[field];
+      sources[`project.${field}`] = "shared";
+    }
+    if (Object.hasOwn(localProject, field)) {
+      project[field] = localProject[field];
+      sources[`project.${field}`] = "local";
+    }
+  }
   const sharedTracker = asTable(Object.hasOwn(shared, "tracker") ? shared.tracker : {}, "tracker");
   const localTracker = asTable(Object.hasOwn(local, "tracker") ? local.tracker : {}, "tracker");
   for (const field of ["binding", "board"]) {
@@ -1327,6 +1360,23 @@ export const inspect = (repo: string, opts?: { storePath?: string }): Rec => {
 export const generatedFilesOf = (repo: string, opts?: { storePath?: string }): string[] => {
   const list = asTable(inspect(repo, opts).project, "project").generated_files;
   return Array.isArray(list) ? list.filter((glob): glob is string => typeof glob === "string") : [];
+};
+
+/**
+ * The size budget of the pull requests a project's runs open, or null where it has none (see
+ * budgetOf). A project with no config at all opens no draft pull requests, so only a cap its own
+ * files name gives it one; any other settings fault, and an aim above the cap once the two files
+ * are merged, is refused.
+ */
+export const prSizeBudgetOf = (repo: string): Budget | null => {
+  const resolved = effectiveConfigForProject(repo);
+  if (resolved.error !== null && !resolved.error.startsWith("no config at ")) fail(resolved.error);
+  const project = asTable(inspect(repo).project, "project");
+  try {
+    return budgetOf(resolved.config?.ship, project);
+  } catch (e) {
+    return fail(errText(e));
+  }
 };
 
 // --- writes ----------------------------------------------------------------------------------------

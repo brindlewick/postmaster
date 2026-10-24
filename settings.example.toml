@@ -37,6 +37,8 @@
 # [project]
 # default_turnpikes = ["style", "bug"]
 # generated_files = ["**/*.gen.ts"] # files this project's tools generate; project.toml says what it means
+# pr_size_aim = 200 # changed lines a pull request for review aims at; project.toml says what it means
+# pr_size_cap = 400 # changed lines it never passes, or "off"; a number turns the budget on, as do drafts
 #
 # [tracker]
 # binding = "the board, workspace or team name for this checkout"

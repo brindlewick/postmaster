@@ -180,6 +180,7 @@ review_link = ""
 # "off" when absent. A draft is marked ready for review only on the user's
 # word, and only then do its checks decide the merge. A project's own settings
 # may turn drafts on for that project alone (scripts/run setup --project).
+# Drafts on also put each pull request under a size budget (project.example.toml).
 draft_pull_requests = "off"
 
 # Knowledge sources: wikis, knowledge bases and standards pages kept on this machine, registered once by
