@@ -1,9 +1,11 @@
-// Cut a ticket's technical notes for a run that works without them: print the
-// ticket without its `### Technical notes` and `### Verified at` sections.
+// Cut a ticket for the lanes and the coachman of a run: print the ticket without its `### Size`
+// section, the expected changed lines, which are for the ready check and the user and go to no
+// lane; and, for a run that works without its technical notes, without its `### Technical notes`
+// and `### Verified at` sections too. With --keep-notes only the Size section is cut.
 //
-//   run ticket-cut <ticket-file>
+//   run ticket-cut <ticket-file> [--keep-notes]
 //
-// Reads the two sections as the readiness check does (scripts/lib/ticket-sections.ts):
+// Reads the sections as the readiness check does (scripts/lib/ticket-sections.ts):
 // the level-3 sections below `## For the agents`, case-insensitively, skipping
 // fenced blocks, each running to the next heading of level 3 or above, over text
 // normalized as the check normalizes it. Every other line prints in order. A ticket
@@ -13,6 +15,7 @@
 //   exit 1  usage or an unreadable file
 import { readFileSync } from "node:fs";
 import {
+  SIZE_RE,
   TECH_NOTES_RE,
   VERIFIED_RE,
   agentsIndex,
@@ -20,14 +23,15 @@ import {
   normalizeTicket,
 } from "./lib/ticket-sections.ts";
 
-export function cutTicketNotes(text: string): string {
+export function cutTicket(text: string, keepNotes = false): string {
   const clean = normalizeTicket(text);
   const lines = clean.split("\n");
   const ai = agentsIndex(lines);
   if (ai < 0) return clean;
   const drop = new Set<number>();
   for (const s of level3Sections(lines, ai + 1)) {
-    if (TECH_NOTES_RE.test(s.title) || VERIFIED_RE.test(s.title)) {
+    const notes = TECH_NOTES_RE.test(s.title) || VERIFIED_RE.test(s.title);
+    if (SIZE_RE.test(s.title) || (notes && !keepNotes)) {
       for (let i = s.at; i < s.end; i++) drop.add(i);
     }
   }
@@ -36,18 +40,20 @@ export function cutTicketNotes(text: string): string {
 }
 
 function main(argv: string[]): number {
-  if (argv.length !== 1) {
-    console.error("usage: run ticket-cut <ticket-file>");
+  const keepNotes = argv.includes("--keep-notes");
+  const files = argv.filter((a) => a !== "--keep-notes");
+  if (files.length !== 1) {
+    console.error("usage: run ticket-cut <ticket-file> [--keep-notes]");
     return 1;
   }
   let text: string;
   try {
-    text = readFileSync(argv[0]!, "utf8");
+    text = readFileSync(files[0]!, "utf8");
   } catch {
-    console.error(`ticket-cut: cannot read ${argv[0]}`);
+    console.error(`ticket-cut: cannot read ${files[0]}`);
     return 1;
   }
-  process.stdout.write(cutTicketNotes(text));
+  process.stdout.write(cutTicket(text, keepNotes));
   return 0;
 }
 
