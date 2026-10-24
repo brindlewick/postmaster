@@ -30,14 +30,15 @@
 # wildcards. The person's settings.toml may name it too and replaces the shared list whole.
 #
 # `pr_size_aim` and `pr_size_cap` are the changed lines a pull request meant for a person to review
-# aims at and never passes: lines added plus lines removed, tests included, without the files
-# `generated_files` names, lock files, translation catalogs and vector images. They apply where
-# the project's runs open draft pull requests (`draft_pull_requests` in the `[ship]` table of the
-# person's settings.toml or the machine config) and where the project names a number for
-# `pr_size_cap`, which turns them on by itself; an aim alone turns nothing on. They default to 200
-# and 400. Each is a whole number above zero, the aim at most the cap, and `pr_size_cap = "off"`
-# leaves a project with no limit, drafts or not. The person's settings.toml may name either and
-# replaces the shared value. `scripts/run pr-size` counts.
+# aims at and never passes: lines added plus lines removed, tests included. Generated files (the ones
+# `generated_files` names, lock files, `.gen.` files, `dist/` and `build/` folders), translation
+# catalogs, vector images and binary files do not count. The two apply where the project's runs open
+# draft pull requests (`draft_pull_requests` in the `[ship]` table of the person's settings.toml or
+# the machine config) and where the project names a number for `pr_size_cap`, which turns them on by
+# itself; an aim alone turns nothing on. They default to 200 and 400. Each is a whole number above
+# zero, the aim at most the cap, and `pr_size_cap = "off"` leaves a project with no limit, drafts or
+# not. The person's settings.toml may name either and replaces the shared value.
+# `scripts/run pr-size` counts a change.
 #
 # The checks say how a change to the project is shown to work. A project that declares none gets
 # defaults (scripts/run verify): the gate, always, and by what discovery finds, a command-line

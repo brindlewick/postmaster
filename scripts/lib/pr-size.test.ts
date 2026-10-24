@@ -2,7 +2,15 @@
 // non-zero, and a negative control, the same call on a change that reads zero. The project is
 // invented: a small shop with a web app and a core package.
 import { describe, expect, test } from "bun:test";
-import { budgetOf, parseNumstat, sizeOf } from "./pr-size.ts";
+import {
+  budgetOf,
+  limitsLine,
+  overCap,
+  parseNumstat,
+  sizeLine,
+  sizeOf,
+  standing,
+} from "./pr-size.ts";
 
 const report = (...cells: string[]): string => cells.map((cell) => `${cell}\0`).join("");
 const keep = (): boolean => false;
@@ -118,5 +126,27 @@ describe("the budget a project's settings give", () => {
     expect(budgetOf({ draft_pull_requests: "on" }, {})).toEqual({ aim: 200, cap: 400 });
     expect(budgetOf({ draft_pull_requests: "off" }, {})).toBeNull();
     expect(budgetOf({}, {})).toBeNull();
+  });
+});
+
+describe("the words about a size", () => {
+  const budget = { aim: 200, cap: 400 };
+  const at = (lines: number) => ({ lines, files: 3 });
+
+  test("the card line and the waybill line carry the count and the budget", () => {
+    expect(sizeLine(at(312), budget)).toBe("Size: 312 changed lines (aim 200, cap 400)");
+    expect(limitsLine(budget)).toBe(
+      "size: aim 200, cap 400 changed lines per pull request; the cap is a hard limit",
+    );
+  });
+
+  test("a change stands within the aim, over the aim, or over the cap, and the cap itself is allowed", () => {
+    expect([200, 201, 400, 401].map((lines) => standing(at(lines), budget))).toEqual([
+      "within the aim",
+      "over the aim, within the cap",
+      "over the aim, within the cap",
+      "over the cap by 1",
+    ]);
+    expect([400, 401].map((lines) => overCap(at(lines), budget))).toEqual([false, true]);
   });
 });

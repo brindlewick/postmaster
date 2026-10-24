@@ -81,3 +81,22 @@ export function sizeOf(
     ),
   };
 }
+
+/** The line the ship card carries, and the first line `run pr-size` prints. */
+export const sizeLine = (size: Size, budget: Budget): string =>
+  `Size: ${size.lines} changed lines (aim ${budget.aim}, cap ${budget.cap})`;
+
+/** The line the waybill carries, so the lanes and the coachman know the budget and that its cap is
+ * a hard limit. */
+export const limitsLine = (budget: Budget): string =>
+  `size: aim ${budget.aim}, cap ${budget.cap} changed lines per pull request; the cap is a hard limit`;
+
+export const overCap = (size: Size, budget: Budget): boolean => size.lines > budget.cap;
+
+/** Where a change stands against its budget, in words. */
+export const standing = (size: Size, budget: Budget): string =>
+  size.lines <= budget.aim
+    ? "within the aim"
+    : overCap(size, budget)
+      ? `over the cap by ${size.lines - budget.cap}`
+      : "over the aim, within the cap";
