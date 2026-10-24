@@ -205,6 +205,7 @@ beforeAll(() => {
     "data.ts",
     "text.ts",
     "effective-config.ts",
+    "pr-size.ts",
     "sources.ts",
   ]) {
     copyFileSync(join(HERE, "lib", f), join(tmp, "bin", "lib", f));

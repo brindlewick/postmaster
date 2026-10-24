@@ -1,7 +1,7 @@
 ---
 title: postmaster wiki
 type: schema
-updated: 2026-10-15
+updated: 2026-10-24
 ---
 
 # postmaster wiki
@@ -190,6 +190,11 @@ Why the design is shaped as it is.
 - [A project's .postmaster/ holds its settings and every run's record](concepts/project-settings.md):
   **claimed**. Optional, records ignored, shared through one narrow file; run artifacts live
   with the project so two checkouts with the same basename no longer share a ledger.
+- [A pull request meant for a person to review aims at 200 changed lines and never passes 400](concepts/pull-request-size.md):
+  **claimed**. A project whose runs open draft pull requests, or that names a cap, keeps each to a budget of changed
+  lines; the clerk plans tickets to it and writes only its number, and work over the hard cap is split or lands
+  behind a feature flag, never opened for review, the user choosing how. The numbers are published guidance, not a
+  measurement here.
 - [A gate on the default branch after a merge runs from a clean checkout](concepts/clean-checkout-gates.md):
   **claimed**. The run's working copies stay under `.worktrees/`; the flow's post-merge gate
   runs from a clean checkout of the branch outside the project folder, so it never reads them.

@@ -83,6 +83,7 @@ export function level3Sections(lines: string[], from: number): Level3Section[] {
 
 export const TECH_NOTES_RE = /^technical notes$/iu;
 export const VERIFIED_RE = /^verified at(?:[ \t]|$)/iu;
+export const SIZE_RE = /^size$/iu;
 
 /**
  * The `### Verified at` section below the agents heading at `from`, or

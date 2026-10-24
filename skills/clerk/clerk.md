@@ -106,6 +106,28 @@ When the user keeps more than five criteria in one ticket, record it as their wo
 marked `(given by the user)` that says how many criteria it keeps and why, cited by a technical
 note. The parts check still warns.
 
+When `<tool>/scripts/run pr-size --limits --repo <repo>` prints a `size:` line, the project's pull
+requests are meant for a person to review, and the cap it names is a hard limit. Each ticket then
+plans one pull request that merges on its own, with its tests, leaving the product working. Work
+out how many lines it would change by thinking through how you would build it, aiming for the aim,
+and write only that number under `### Size` in the agents' part, as the template shows: one line,
+with no file, no approach, no steps and no reasoning. The thinking stays off the ticket, in your own
+working notes if you keep any. Never write a ticket whose number is above the cap. A plan above the
+cap is split, as above, into slices that each merge alone: the refactors the rest needs first, then
+the thinnest slice that works from end to end, then one behaviour for each slice after it, with the
+slices that depend on one another ordered so the lowest merges first. A change that is one thing
+but large, such as a rename or a dependency bump, is no exception: split it by folder or package.
+Where the pieces cannot stand alone as working slices, plan the increments behind a feature flag
+instead, the project's own flag system: one ticket per increment, each within the cap, the flag off
+until the last ticket, which turns it on or removes it. Each ticket states the flag in its ordinary
+text as part of its behaviour, for example "ships behind the flag X, off until the last ticket" (in
+plain words in the plain part, with the flag's exact name in a technical note), and never under
+`### Size`. If the work can be neither split nor put behind a flag, tell the user in plain words
+and write no ticket. `<tool>/scripts/run ticket-ready` refuses a ticket with no number, one whose
+`### Size` holds anything but the number, and one whose number is above the cap.
+When the command prints nothing and exits 0, none of this applies. Any other exit is a settings
+fault: tell the user what it printed and go no further until it is fixed.
+
 Check each criterion against the four shapes that cannot be finished, which
 [the template](ticket-template.md) lists under "A criterion must be finishable", and rewrite it in
 its bounded form before the user sees the draft. If the whole point of a ticket is one of those

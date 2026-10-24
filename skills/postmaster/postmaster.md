@@ -397,28 +397,32 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    `<tool>/scripts/run runs-hold hold <runs> <TICKET> --helper b-worktree`, and release it
    when the report lands.
 8. **Write `brief.md` through a helper** from the template in `SKILL.md`. Brief one with the
-   turnpikes line, the ticket, the project profile, the team, the legs check, and the areas for
-   the project's notes, and have it verify the legs before it finishes. The areas are yours to
-   decide, from the ticket and the tracker's project: one glob for each place the ticket's work
-   is, such as `apps/portal/**`, and none when the work spans the project. A refusal from the
-   project's notes comes back in its report: tell the user what is wrong with them, and brief it
-   again with "no project notes" only on their word:
+   turnpikes line, the ticket's whole body in a temporary file outside the run directory, the
+   project profile, the team, the legs check, and the areas for the project's notes, and have it
+   verify the legs before it finishes. The areas are yours to decide, from the ticket and the
+   tracker's project: one glob for each place the ticket's work is, such as `apps/portal/**`, and
+   none when the work spans the project. A refusal from the project's notes comes back in its
+   report: tell the user what is wrong with them, and brief it again with "no project notes" only
+   on their word:
 
 ```helper
 Helper brief `b-brief` for ticket `<TICKET>` on project `<repo>`: write the waybill.
 Read the brief contract under `Helpers` in `<tool>/skills/postmaster/postmaster.md` first.
 Write `<dispatch>/brief.md` from the template in `<tool>/skills/postmaster/SKILL.md` under
 `The waybill`: the `turnpikes:` line the postmaster hands you, whole, under the waybill's
-title, then the ticket: whole when the run's ticket notes are given, and without its
-technical notes and verified facts when they are held back, as `<tool>/scripts/run run-meta
-ticket-notes <dispatch>` prints them from the record. When the notes are held back, the
-postmaster hands you the whole ticket body in a temporary file outside the run directory:
-run `<tool>/scripts/run ticket-cut` on it, paste the cut output as the waybill's ticket, then
+title, then the ticket, never with its `### Size` section, the expected changed lines, which are
+for the ready check and the user and go to no lane, and without its technical notes and verified
+facts too when the run's ticket notes are held back, as `<tool>/scripts/run run-meta
+ticket-notes <dispatch>` prints them from the record. The postmaster hands you the whole ticket
+body in a temporary file outside the run directory: run `<tool>/scripts/run ticket-cut` on it,
+with `--keep-notes` when the notes are given, paste the cut output as the waybill's ticket, then
 remove the file; the whole ticket stays in the tracker and no copy of it sits where the run
 reads. Then the project profile (gate, build, browser suite, landing (`pull-request` or
 `local`), the checks as `<tool>/scripts/run verify record` printed them, docs to read first,
-tracker, risk surfaces), the team from `run.json` — the resolved machine config step 6
-recorded — with its reviewer lines as `<tool>/scripts/run reviewers lines --project <repo>`
+tracker, risk surfaces), the `size:` line pasted whole from `<tool>/scripts/run pr-size --limits
+--repo <repo>` and left out when it prints nothing and exits 0 (any other exit is a settings
+fault: write no waybill and report its output whole), the team from `run.json` — the resolved machine
+config step 6 recorded — with its reviewer lines as `<tool>/scripts/run reviewers lines --project <repo>`
 prints them, the `mode:` line pasted whole from the `mode:` line `<tool>/scripts/run run-meta
 mode <dispatch>` printed (the Team section's first line), and the `workhorses:` line **only
 when that mode is `synthesis`**: a single-thread waybill names no workhorse lane, so nothing
@@ -1258,6 +1262,24 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    `<tool>/scripts/run log-action <dispatch> postmaster library <identity> <approved|refused> <entry> <words>`.
    On a yes, deliver the resume through the `e-deliver` brief so the leg records the approval
    and goes on, and on a no the run does without. Never say yes yourself.
+8. **A split request goes to the user, who chooses how the work is split.** The coachman stops
+   with one when its branch is over the project's cap (`coachman.md`, Stage 1 and Stage 3). The
+   cap is hard: no pull request over it is opened for review, so the user's answer chooses how the
+   work is split or put behind a feature flag, never whether. There is no accepting it once and no
+   raising the cap; a new cap is the user editing the project's setting, and you never offer one.
+   Brief `f-size` (Stage F) for a fresh count, with the refs the request names. Within the cap,
+   deliver `go on` with the count through the `e-deliver` brief. Over it, put the request to the
+   user through step 3's wait, which the watcher also messages to the user where messages are on,
+   in plain words: the count and the cap, what is built, and the split the coachman proposes, as
+   pieces that each fit the cap and each merge on their own, the ones that depend on another
+   merging lowest first, or, where the pieces cannot stand alone as working slices, the increments
+   behind a feature flag, each within the cap, with the flag's name. A request that says the
+   coachman can do neither goes up the same way, and says so. On the user's answer, clear the wait
+   through the `d-unwait` brief, record what was decided with `<tool>/scripts/run log-action
+   <dispatch> postmaster rule <TICKET> "size <the count> changed lines, cap <the cap>:
+   <split|flag>"`, and brief `e-sendback` as step 4 does for `send it back`, so the clerk plans
+   the pieces, or the increments with the flag named, and the user signs the tickets off as for
+   any ticket.
 
 ## Stage F (contract 2): verify and land the ship card
 
@@ -1539,6 +1561,28 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    it is the postmaster itself, it still asks and records the word before it opens a
    pull request or merges. Any other exit is an input fault: stop the stage, fix the
    inputs and re-run.
+
+   Check the size after the libraries and before step 2's landing route, through a helper:
+
+```helper
+Helper brief `f-size` for run `<TICKET>` at `<dispatch>`: count the changed lines.
+Read the brief contract under `Helpers` in `<tool>/skills/postmaster/postmaster.md` first.
+Run `<tool>/scripts/run pr-size <the default ref> <the ticket ref> --repo <repo>` with the refs
+the postmaster hands you, the two the switch-offs call takes, and report its output and exit
+whole: no output and exit 0 means the project has no size budget, exit 0 with output means the
+branch is within the cap, and exit 2 means it is over. Any other exit is an input fault: report
+it whole and stop. Decide nothing: the postmaster acts on the count.
+Write your report to `<dispatch>/helper-f-size-<subject>-<rand>.md`, subject the run's
+ticket and rand six hex digits you pick fresh, before you end, and end as the brief contract says.
+```
+
+   This brief reads only: no hold. Compare the card's `Size:` line with the first line of the
+   report and withhold on any difference, with the mismatch as the exact discrepancy; a card from
+   a run pinned before this check has no such line. The cap is hard, so on exit 2 land nothing and
+   open no pull request: withhold the same way, with the count and the cap as the exact
+   discrepancy. The coachman, sent back, stops with a split request, which Stage E step 8 puts to the user.
+   This is the final guard for a branch that grew after the synthesis leg's count, by a review fix
+   or by the merge of main.
 
 ```helper
 Helper brief `f-write-wait` for run `<TICKET>` at `<dispatch>`: write the wait marker.

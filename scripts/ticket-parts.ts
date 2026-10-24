@@ -1,7 +1,7 @@
 // Check a ticket in the two-part shape (skills/clerk/ticket-template.md): the plain part, which the
 // user signs off, is plain, and the part for the agents follows from it.
 //
-//   scripts/run ticket-parts <body-file> [--final]
+//   scripts/run ticket-parts <body-file> [--final] [--size-cap <n>]
 //
 // The plain part is everything above the first `## For the agents` heading. The agents' part is
 // everything below it. A first non-empty line that starts `DRAFT:` is ignored, unless --final.
@@ -37,6 +37,11 @@
 //     decision    a decision that no tag group in the agents' part cites; or one declared twice
 //   with --final
 //     draft       the first non-empty line starts DRAFT:
+//   with --size-cap <n>, for a project that keeps its pull requests to a budget of n changed lines
+//     size        no ### Size section holding the one line "Expected changed lines: <number>"; a
+//                 section that holds anything else (a file, an approach, a flag, other text); or a
+//                 number above n. The number is the clerk's estimate and nothing more: how it got
+//                 there stays off the ticket.
 //
 // Notes, printed after the findings and never failing: the words in the plain part; the numbers of
 // criteria, decisions and technical notes; each criterion or decision long enough to be more
@@ -55,6 +60,7 @@
 import { readFileSync } from "node:fs";
 import { HEADING2_RE, LIBRARIES_RE } from "./lib/library-approvals.ts";
 import {
+  SIZE_RE,
   TECH_NOTES_RE,
   agentsIndex,
   fenceMap,
@@ -245,6 +251,7 @@ const TAG_ONE_RE = /\(((?:[CD][0-9]+)(?:[ \t]*,[ \t]*[CD][0-9]+)*)\)/u;
 const BULLET_RE = /^[-*][ \t]+/u;
 const CHECK_LABEL_RE = /^(?:[-*]|[0-9]+\.)[ \t]+\**C([0-9]+)(?![\p{L}\p{N}])/u;
 const KEPT_BY_RE = /Kept by:/iu;
+const SIZE_LINE_RE = /^Expected changed lines:[ \t]+([0-9]+)$/u;
 
 // The items that start at column 0 with startRe, from line index `from` up to `to`: each runs until
 // the next list marker or heading at column 0.
@@ -290,7 +297,7 @@ function isFixtureLine(criterion: Item | undefined): boolean {
 
 // --- the check --------------------------------------------------------------------------------
 // null when the ticket has no `## For the agents` heading.
-export function analyze(text: string, final: boolean): Report | null {
+export function analyze(text: string, final: boolean, sizeCap?: number): Report | null {
   const lines = text.split("\n");
   const ai = agentsIndex(lines);
   if (ai < 0) return null;
@@ -393,6 +400,26 @@ export function analyze(text: string, final: boolean): Report | null {
   if (!verified) add(where, "part", 'no "### Verified at <sha>" section under "## For the agents"');
   else if (verifiedAtSha(verified.title) === "")
     add(verified.at + 1, "part", '"### Verified at" needs a commit of 7 to 40 hex characters');
+
+  // The size, where the project keeps its pull requests to a budget: the expected changed lines,
+  // within the cap, as the one line of the section. Anything more would steer the coachman's plan.
+  if (sizeCap !== undefined) {
+    const size = sub(SIZE_RE);
+    const at = size ? size.at + 1 : where;
+    const held = size ? lines.slice(size.at + 1, size.end).filter((l) => l.trim() !== "") : [];
+    const estimate = held.length === 1 ? SIZE_LINE_RE.exec(held[0].trim()) : null;
+    if (held.length === 0) {
+      add(at, "size", 'no "Expected changed lines: <n>" under "### Size": write that one line');
+    } else if (!estimate) {
+      add(
+        at,
+        "size",
+        '"### Size" must hold only the line "Expected changed lines: <n>": write only the number, with no files, no approach and no other text',
+      );
+    } else if (Number(estimate[1]) > sizeCap) {
+      add(at, "size", `${estimate[1]} changed lines is above the cap of ${sizeCap}: split`);
+    }
+  }
 
   // The checks: one for each criterion, labelled C1 to CN, in order.
   const unkept: number[] = [];
@@ -535,13 +562,17 @@ export function analyze(text: string, final: boolean): Report | null {
 }
 
 // --- entry ------------------------------------------------------------------------------------
-const USAGE = "usage: run ticket-parts <body-file> [--final]";
+const USAGE = "usage: run ticket-parts <body-file> [--final] [--size-cap <n>]";
 
 function main(argv: string[]): number {
   let final = false;
+  let sizeCap: number | undefined;
   const files: string[] = [];
-  for (const a of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (a === "--final") final = true;
+    else if (a === "--size-cap" && /^[1-9][0-9]*$/u.test(argv[i + 1] ?? ""))
+      sizeCap = Number(argv[++i]);
     else if (a.startsWith("-")) {
       console.error(USAGE);
       return 2;
@@ -560,7 +591,7 @@ function main(argv: string[]): number {
     );
     return 2;
   }
-  const report = analyze(normalizeTicket(text), final);
+  const report = analyze(normalizeTicket(text), final, sizeCap);
   if (!report) {
     console.error('ticket-parts: no "## For the agents" section');
     return 2;

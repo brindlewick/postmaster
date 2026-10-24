@@ -48,6 +48,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { clerkSessionPath } from "./clerk.ts";
+import { isDie, prSizeBudgetOf } from "./lib/effective-config.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
 
@@ -130,7 +131,16 @@ function runChecks(input: CheckInput): { reasons: string[]; turnpikes: string } 
         if (line.startsWith("turnpikes:")) turnpikes = line.trim();
       }
     }
-    const partsR = runScript("ticket-parts", [bodyFile, "--final"]);
+    // Where the project keeps its pull requests to a size budget, the estimate must fit the cap.
+    const sizeArgs: string[] = [];
+    try {
+      const budget = input.project ? prSizeBudgetOf(input.project) : null;
+      if (budget !== null) sizeArgs.push("--size-cap", String(budget.cap));
+    } catch (e) {
+      if (!isDie(e)) throw e;
+      reasons.push(`pr-size: ${e.message}`);
+    }
+    const partsR = runScript("ticket-parts", [bodyFile, "--final", ...sizeArgs]);
     const partsText = partsR.out + partsR.err;
     if (partsR.code !== 0) {
       for (const line of partsText.split("\n")) {

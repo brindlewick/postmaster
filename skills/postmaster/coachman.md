@@ -877,6 +877,20 @@ from it.
   failed workhorse leaves its branch at BASE and has contributed nothing to read. Record that lane
   DEGRADED rather than absent, say so on the card, and compose from the lanes that produced
   work.
+- **Count the synthesis's size before the checkpoint 1 card, in both modes, where the waybill has a
+  `size:` line.** The cap is hard: a branch over it goes to no review round and opens no pull
+  request. With the full gate green, run `<tool>/scripts/run pr-size <BASE> <ticket-branch> --repo
+  <repo>`, BASE being the waybill's. Within the cap, go on. Exit 2 stops the leg with a split
+  request, in place of the checkpoint card and the hand-off: write `ESCALATION.md` with the count and
+  the command that printed it; what is built; why it will not fit; the split you propose, as pieces
+  that each fit the cap and each merge on their own, the ones that depend on another ordered so the
+  lowest merges first; and, where the pieces cannot stand alone as working slices, that the plan is
+  increments behind a feature flag, the project's own flag system, each within the cap, the flag off
+  until a last small increment turns it on, with the flag's name. Say plainly when you can do
+  neither. Then log `escalate`, touch `.escalation-ready` and exit, with no `checkpoint-1.md` and the
+  stage unchanged. The postmaster puts it to the user, who chooses how the work is split or put
+  behind a flag, and resumes this thread only when its own count is within the cap. Exit 1 is an
+  input fault: fix the inputs and run it again.
 - **Checkpoint 1 card, then the hand-off** (synthesis mode: in single-thread mode the card is
   The run's mode's — the SYNTHESIS line, convention gaps, dropped work, gate and checks, and
   no per-workhorse outcome, ranking or shares): per-workhorse outcome (or stall), each walled lane
@@ -1434,10 +1448,19 @@ verdict, answer it as the merge step says — a merge here is followed by the ga
 then the step again — and write the card once the step answers `CARD` or `CARD-ANYWAY`,
 whatever main has done since.
 
+Count the pull request's size where the waybill has a `size:` line. Run `<tool>/scripts/run pr-size
+<default-ref> <ticket-branch> --repo <repo>`, with the default ref the switch-offs call above takes,
+once the last change and merge are in. The first line it prints, `Size: <n> changed lines (aim <a>,
+cap <c>)`, goes on the card in step 5. Exit 2 means the branch is over the cap, which is hard, and a
+review fix or the merge of main can bring a branch there after the Stage 1 count: write no card,
+and stop with a split request as Stage 1 says. Exit 1 is an input fault: fix the inputs and run it
+again.
+
 5. **Write `card.md`.** First write the coachman's own sections: the run's mode as a line
    `Mode: <synthesis | single-thread>` from `run.json` (in both modes; the waybill's `mode:` line
-   says the same — a single-thread run's card carries `Mode: single-thread`), then the branch,
-   final HEAD, diff stat and commit list; then the `## Merge` section from the merge step's card
+   says the same — a single-thread run's card carries `Mode: single-thread`), then the `Size:` line
+   from the size count above, where it printed one, then the branch, final HEAD, diff stat and
+   commit list; then the `## Merge` section from the merge step's card
    verdict, pasted after it as its own section, never retyped; then the `## Verifier changes`
    section from `<tool>/scripts/run verifier changes <synthesis-wt> <dispatch> --freeze`,
    pasted after it as its own section, never retyped — the freeze snapshots the synthesis
@@ -1450,7 +1473,8 @@ whatever main has done since.
    run and its state; lane outcomes — none in single-thread mode, which has no lanes; in synthesis
    mode, every walled lane carrying its `<tool>/scripts/run walls show <dispatch>` line —
    `lane: DEGRADED, provider wall: "<the provider's message>"` — and the review link; and the
-   coachman's own words about the printed parts in `## Notes`.
+   coachman's own words about the printed parts in `## Notes`, which name the feature flag where the
+   ticket lands behind one and say whether this branch leaves it off, turns it on or removes it.
    **Each of those is its own `##` section** — the card-block's four, `## Switch-offs`,
    `## Private data findings`, `## Notes`,
    then `## Merge`, `## Verifier changes`, `## Turnpikes`, `## Style residue`, `## Branches`,

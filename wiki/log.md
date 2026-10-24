@@ -1,12 +1,27 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-24] update | a pull request for review keeps to a size budget
+
+At the user's request: a project whose runs open draft pull requests, or that names a cap, keeps each to
+a budget of changed lines, aiming at 200 and never passing 400, and
+[the page](concepts/pull-request-size.md) records the claim at standing claimed, since the numbers are
+published guidance and no run of this fleet bears on them. The user ruled the same day that the cap is a
+hard limit: work that will not fit is split, or lands behind a feature flag, and no pull request over the
+cap is opened for review. They ruled too that a cap named in the settings turns the budget on by itself,
+that the user answers a split request, choosing how the work is split and never whether, and that a ticket
+carries only the clerk's number for the changed lines it expects, with no files and no approach, so that
+the estimate does not steer the coachman. The settings are `pr_size_aim` and `pr_size_cap`;
+`scripts/run pr-size` counts. The change touches four coachman contract files, `scripts/ticket-ready.ts`
+and `skills/postmaster/SKILL.md`, `coachman.md` and `postmaster.md`, so it merges only after a fixture
+run scores clean. No standing changed.
 
 ## [2026-10-23] update | the examples in comments and tests use invented names
 

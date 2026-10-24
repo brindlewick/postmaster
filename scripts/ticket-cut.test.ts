@@ -1,4 +1,4 @@
-// Tests beside scripts/ticket-cut.ts: the usage contract and the pass-through.
+// Tests beside scripts/ticket-cut.ts: the usage contract, the pass-through and the Size section.
 // The cut shapes are pinned by the #407 oracle through the same command.
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -87,5 +87,59 @@ describe("large and odd inputs", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the Size section, which goes to no lane", () => {
+  const ticket = (size: string, title = "### Size"): string =>
+    "# T\n\n## For the agents\n\n### Checks\n\n- **C1** One.\n\n" +
+    "### Technical notes\n\n- A note. (C1)\n\n" +
+    `${title}\n\n${size}\n\n` +
+    "### Existing capabilities\n\nNone: nothing outside the repository is involved.\n\n" +
+    "### Verified at abc1234\n\n- V.\n";
+
+  function cut(text: string, ...flags: string[]) {
+    const dir = mkdtempSync(join(tmpdir(), "ticket-cut-"));
+    try {
+      const path = join(dir, "ticket.md");
+      writeFileSync(path, text, "utf8");
+      return run(SELF, ["ticket-cut", path, ...flags]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("a run that holds its notes back gets neither them nor the number; one that is given them gets them but not the number", () => {
+    for (const [flags, kept] of [
+      [[], false],
+      [["--keep-notes"], true],
+    ] as const) {
+      const r = cut(ticket("Expected changed lines: 180"), ...flags);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("### Existing capabilities");
+      expect(r.out.includes("### Technical notes")).toBe(kept);
+      expect(r.out.includes("### Verified at")).toBe(kept);
+      for (const gone of ["### Size", "Expected changed lines", "180"]) {
+        expect(r.out).not.toContain(gone);
+      }
+    }
+  });
+
+  test("whatever the section holds goes with it, files and approach included, under any case of its title", () => {
+    const wide = "Expected changed lines: 180\n\n- list.ts 120\n\nSplit the sort out first.";
+    for (const title of ["### Size", "### SIZE"]) {
+      const out = cut(ticket(wide, title), "--keep-notes").out;
+      for (const gone of ["list.ts", "Split the sort", "180"]) expect(out).not.toContain(gone);
+    }
+  });
+
+  test("a ticket with no Size section is cut as before, and the flag alone is a usage fault", () => {
+    const plain =
+      "# T\n\n## For the agents\n\n### Checks\n\n- **C1** One.\n\n### Existing capabilities\n\nNone.\n";
+    expect(cut(plain, "--keep-notes").out).toBe(plain);
+    expect(cut(plain).out).toBe(plain);
+    const bare = run(SELF, ["ticket-cut", "--keep-notes"]);
+    expect(bare.code).toBe(1);
+    expect(bare.err).toContain("usage: run ticket-cut <ticket-file>");
   });
 });

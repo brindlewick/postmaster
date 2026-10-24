@@ -45,7 +45,8 @@ scripts/run plane create|edit|read|state|comment|list …             # Plane wo
 scripts/run local <repo> store|create|edit|read|title|state|comment|list # tickets in the repo's git directory
 scripts/run tracker-kind <repo>                                    # the tracker kind a repo uses: local when its store exists
 scripts/run ticket-check <repo> <id> | --body <file> | --splice …   # a ticket's shape; --splice writes approved parts in
-scripts/run ticket-parts <body-file> [--final]                   # a two-part ticket is fit to be signed off
+scripts/run ticket-parts <body-file> [--final] [--size-cap <n>]  # a two-part ticket is fit to be signed off
+scripts/run pr-size <base> <head> [--repo <repo>] | --limits         # a pull request's changed lines against the project's budget
 scripts/run turnpikes --list | resolve <text> | legs <dispatch>     # the turnpikes, and a run's legs
 scripts/run style-findings list|count|gate|check <dispatch>         # a run's style findings, what its gate runs, the sort
 scripts/run launch form|launch|review|resume|skill <lane-or-role> … # any lane or role, one command

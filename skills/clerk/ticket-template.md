@@ -83,6 +83,10 @@ default
   commit, and any hint on where to start. Evidence and links the plain part has no room for.>
   (C1, D1, D2)
 
+### Size
+
+Expected changed lines: <N, a whole number; this one line is all the section holds: no file, no approach, no steps, no reasoning>
+
 ### Existing capabilities
 
 <What the libraries, SDKs and services this change touches already do, and what the project's own
@@ -160,6 +164,14 @@ repository is involved.">
   conditions, test inputs) goes under `## For the agents`, in the checks or the technical notes.
   Never drop a choice that changes what a person sees or what the flow does. Simplify the words and
   move the detail down.
+- **Size** is written where the project keeps its pull requests to a size budget; the clerk
+  runbook says how to tell. It is one line, `Expected changed lines: <N>`: the changed lines of the
+  one pull request the ticket plans, lines added plus lines removed, tests included, generated files
+  left out, and never above the cap. Nothing else belongs under it: no file, no approach, no steps
+  and no reasoning. The clerk gets the number by thinking through how it would build the ticket, and
+  that thinking stays off the ticket, so it does not steer the coachman's own. The number is for the
+  ready check and the user, and no lane is given it. A ticket that is one increment behind a feature
+  flag says so in its ordinary text, as part of its behaviour, and never under `### Size`.
 - **Existing capabilities** name, for each library, SDK or service the change touches or a decision
   would wrap, replace or work around, and for the project code it touches, what it already offers,
   each with its source, what the ticket takes from it, and what stays custom and why, with the

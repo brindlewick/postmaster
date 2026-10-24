@@ -365,13 +365,14 @@ everything the coachman needs and nothing it must go and find:
 <the turnpikes: line <tool>/scripts/run ticket-check printed for the ticket, whole: turnpikes: <names> or turnpikes: none>
 
 ## Ticket
-<the ticket whole when the run's ticket notes are given, and without its technical notes and verified facts when they are held back, as <tool>/scripts/run ticket-cut prints it: problem, acceptance criteria, direction, turnpikes, notes where kept, User journey if it has one>
+<the ticket as <tool>/scripts/run ticket-cut prints it: never with its Size section, the expected changed lines, which are for the ready check and the user and go to no lane, and without its technical notes and verified facts too when the run's ticket notes are held back: problem, acceptance criteria, direction, turnpikes, notes where kept, User journey if it has one>
 <when the run's ticket notes are held back, this line follows the cut ticket: The ticket's technical notes are held back on purpose and are not to be looked up, in the tracker or anywhere else.>
 
 ## Project profile
 repo: <abs path>          default branch: <name>       BASE: <sha>
 gate: <the real command>  build: <the real command>    browser suite: <command or none>
 landing: pull-request | local   (whether the postmaster opens a pull request or merges on the word)
+size: aim <A>, cap <C> changed lines per pull request; the cap is a hard limit   (pasted whole from `<tool>/scripts/run pr-size --limits --repo <repo>`; left out when it prints nothing and exits 0)
 docs to read first: <files, in order>
 tracker: <kind, and how a ticket is read and written>
 risk surfaces: <what the project binds, allowlists, spawns, serves; from its docs or the user>
