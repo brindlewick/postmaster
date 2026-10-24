@@ -846,6 +846,20 @@ describe("the template's example", () => {
     expect(out.code).toBe(0);
   });
 
+  test("with the number filled in it is fit under a cap, and with the placeholder left in it is not", () => {
+    const filled = block().replace("<base sha>", "0123abc");
+    const line = /^Expected changed lines: <.*>$/mu;
+    expect(line.test(filled)).toBe(true);
+    const sized = cli(
+      filled.replace(line, "Expected changed lines: 180"),
+      "--final",
+      "--size-cap",
+      "400",
+    );
+    expect(sized.findings).toEqual([]);
+    expect(kind(cli(filled, "--final", "--size-cap", "400"), "size").length).toBe(1);
+  });
+
   test("with the sha left as the placeholder, or a model's name in a mark, it is not", () => {
     const placeholder = cli(block());
     expect(kind(placeholder, "part")[0]).toContain("needs a commit");
@@ -991,5 +1005,69 @@ describe("isNpmPackageName", () => {
     ]) {
       expect(isNpmPackageName(name)).toBe(false);
     }
+  });
+});
+
+describe("the size estimate, where the project keeps its pull requests to a budget", () => {
+  const sized = (section: string): string =>
+    edit(FIT, "### Verified at 0123abc", `### Size\n\n${section}\n\n### Verified at 0123abc`);
+  const SIZED = sized("Expected changed lines: 380");
+  const capped = (text: string, cap = "400"): Out => cli(text, "--size-cap", cap);
+
+  test("a section holding only the number, within the cap or at it, is fit", () => {
+    expect(capped(SIZED).findings).toEqual([]);
+    expect(capped(SIZED, "380").findings).toEqual([]);
+    expect(capped(SIZED).code).toBe(0);
+  });
+
+  test("a number above the cap is a finding on the Size heading", () => {
+    expect(kind(capped(SIZED, "379"), "size")).toEqual([
+      `line ${lineOf(SIZED, "### Size")}: size: 380 changed lines is above the cap of 379: split`,
+    ]);
+    expect(capped(SIZED, "379").code).toBe(1);
+  });
+
+  test("no section, or an empty one, is a finding that asks for the number", () => {
+    for (const text of [FIT, sized("")]) {
+      const got = kind(capped(text), "size");
+      expect(got.length).toBe(1);
+      expect(got[0]).toContain('no "Expected changed lines: <n>" under "### Size"');
+      expect(capped(text).code).toBe(1);
+    }
+  });
+
+  test("a section that holds anything besides the number is refused, and says to write only the number", () => {
+    const refused = [
+      "Expected changed lines: 380\n- list.ts 380",
+      "Expected changed lines: 380. Files: list.ts 380.",
+      "Expected changed lines: 380\nFlag: new_list, off until the last ticket",
+      "Expected changed lines: 380\n\nSplit the list first, then sort it.",
+      "Expected changed lines: 380\n```\nlist.ts\n```",
+      "Expected changed lines: 380 (list.ts)",
+      "Expected changed lines: many",
+      "- Expected changed lines: 380",
+      "Size: 380 changed lines. Files: list.ts 380.",
+      "About 380 lines.",
+    ];
+    for (const section of refused) {
+      const text = sized(section);
+      const got = kind(capped(text), "size");
+      expect(got.length).toBe(1);
+      expect(got[0]).toContain(`line ${lineOf(text, "### Size")}: size: `);
+      expect(got[0]).toContain("write only the number");
+      expect(capped(text).code).toBe(1);
+    }
+  });
+
+  test("the line may be indented or trailed by spaces, and blank lines around it are free", () => {
+    expect(capped(sized("  Expected changed lines: 380  ")).findings).toEqual([]);
+    expect(capped(sized("\n\nExpected changed lines: 380\n\n")).findings).toEqual([]);
+  });
+
+  test("without the flag the section is not asked for, and the flag needs a number", () => {
+    expect(cli(FIT).findings).toEqual([]);
+    expect(cli(sized("Files: list.ts 380.")).findings).toEqual([]);
+    expect(cli(FIT, "--size-cap", "many").code).toBe(2);
+    expect(cli(FIT, "--size-cap").code).toBe(2);
   });
 });

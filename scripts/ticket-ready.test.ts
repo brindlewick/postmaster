@@ -80,6 +80,7 @@ const DRAFT = "DRAFT: still being written\n\n";
 
 let tmp = "";
 let repo = "";
+let savedConfig: string | undefined;
 
 function ready(args: string[], env?: Record<string, string | undefined>) {
   const r = run(self, ["ticket-ready", ...args], env ? { env } : {});
@@ -94,6 +95,8 @@ function local(args: string[]) {
 
 beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), "ticket-ready-"));
+  savedConfig = process.env.POSTMASTER_CONFIG;
+  process.env.POSTMASTER_CONFIG = join(tmp, "no-config.toml");
   repo = join(tmp, "repo");
   mkdirSync(repo, { recursive: true });
   if (run("git", ["init", "-q", repo]).code !== 0) throw new Error("git init failed");
@@ -115,6 +118,8 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  if (savedConfig === undefined) delete process.env.POSTMASTER_CONFIG;
+  else process.env.POSTMASTER_CONFIG = savedConfig;
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -574,6 +579,88 @@ describe("a tracker of kind other", () => {
       "run ticket-ready mark --body <file>",
     );
     expect(ready(["unmark", otherRepo, "EXT-1"], env).out).toContain("run ticket-ready consume ");
+  });
+});
+
+describe("a project that keeps its pull requests to a size budget", () => {
+  const DRAFTS = '[ship]\ndraft_pull_requests = "on"\n';
+  let seq = 0;
+
+  function check(body: string, settings = DRAFTS) {
+    const project = join(tmp, `sized-${seq}`);
+    mkdirSync(join(project, ".postmaster"), { recursive: true });
+    if (run("git", ["init", "-q", project]).code !== 0) throw new Error("git init failed");
+    writeFileSync(join(project, ".postmaster", "settings.toml"), settings);
+    const file = join(tmp, `sized-${seq++}.md`);
+    writeFileSync(file, body);
+    const args = ["--body", file, "--labels", "ready", "--title", "Sorted list"];
+    return ready([...args, "--project", project, "--id", "EXT-S"]);
+  }
+
+  const withSection = (section: string): string =>
+    TWO_PART.replace(
+      "### Verified at ede70e2",
+      `### Size\n\n${section}\n\n### Verified at ede70e2`,
+    );
+  const withSize = (n: number): string => withSection(`Expected changed lines: ${n}`);
+
+  test("a ticket whose Size holds only the number is ready, within the cap or at it", () => {
+    const got = check(withSize(150));
+    expect(got.code).toBe(0);
+    expect(got.out).toMatch(/^ready: /u);
+    expect(check(withSize(400)).code).toBe(0);
+  });
+
+  test("a ticket with no Size section is refused, and the reason asks for the number", () => {
+    const none = check(TWO_PART);
+    expect(none.code).toBe(2);
+    expect(none.out).toMatch(
+      /ticket-parts: line [0-9]+: size: no "Expected changed lines: <n>" under "### Size"/u,
+    );
+  });
+
+  test("a Size section that also lists files or says how is refused, and says to write only the number", () => {
+    for (const section of [
+      "Expected changed lines: 150\n\n- list.ts 150",
+      "Expected changed lines: 150. Files: list.ts 150.",
+      "Expected changed lines: 150\nFlag: new_list, off until the last ticket",
+    ]) {
+      const got = check(withSection(section));
+      expect(got.code).toBe(2);
+      expect(got.out).toMatch(/ticket-parts: line [0-9]+: size: .*write only the number/u);
+    }
+  });
+
+  test("an estimate above the cap is refused, whether the cap is the default or the project's", () => {
+    expect(check(withSize(401)).out).toContain("401 changed lines is above the cap of 400");
+    const own = check(withSize(150), `${DRAFTS}[project]\npr_size_cap = 100\n`);
+    expect(own.out).toContain("150 changed lines is above the cap of 100");
+  });
+
+  test("a budget the settings cannot give is a reason, not a crash", () => {
+    const got = check(withSize(150), `${DRAFTS}[project]\npr_size_aim = 500\n`);
+    expect(got.code).toBe(2);
+    expect(got.out).toContain("pr-size: pr_size_aim (500) is above pr_size_cap (400)");
+  });
+
+  test("a draft_pull_requests value that is neither on nor off is a reason, never a quiet pass", () => {
+    const got = check(withSize(150), "[ship]\ndraft_pull_requests = true\n");
+    expect(got.code).toBe(2);
+    expect(got.out).toContain('pr-size: ship.draft_pull_requests must be "on" or "off", not true');
+  });
+
+  test("a project that neither opens drafts nor names a cap is asked for no number, and one that names a cap is", () => {
+    expect(check(TWO_PART, "[project]\npr_size_aim = 100\n").code).toBe(0);
+    const capped = "[project]\npr_size_cap = 100\n";
+    expect(check(TWO_PART, capped).code).toBe(2);
+    expect(check(withSize(100), capped).code).toBe(0);
+    expect(check(withSize(101), capped).out).toContain("101 changed lines is above the cap of 100");
+  });
+
+  test("the check reads the whole ticket, so a run that holds its technical notes back changes nothing", () => {
+    const held = `${DRAFTS}[team]\nticket_notes = "held-back"\n`;
+    expect(check(withSize(150), held).code).toBe(0);
+    expect(check(TWO_PART, held).code).toBe(2);
   });
 });
 
