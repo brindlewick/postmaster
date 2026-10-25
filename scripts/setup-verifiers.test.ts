@@ -308,6 +308,7 @@ describe("logVerdict", () => {
   test("a writable dispatch logs the note", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "setup-verdict-")));
     try {
+      writeFileSync(join(dir, "manifest.json"), "{}\n");
       expect(logVerdict(dir, "landed verify-cli")).toBe(true);
       expect(readFileSync(join(dir, "actions.jsonl"), "utf8")).toContain("landed verify-cli");
     } finally {

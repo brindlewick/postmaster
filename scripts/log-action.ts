@@ -70,6 +70,11 @@
 // the list gives, whatever --control says; --control gives the kind of a step the list names.
 // A fault in a control is recorded as one, and the message says to stop.
 //
+// The dispatch folder must be a run's: directly in a runs folder, where every run's folder and the
+// postmaster's own, <runs>/postmaster, are, or holding one of manifest.json, run.json and brief.md.
+// Any other folder, <repo>/.postmaster for one, would take actions.jsonl and the ledger beside it
+// outside the project's ignore rules and dirty its tree, so it is refused, naming the forms that work.
+//
 // Every field is written as JSON that any reader can split on newlines: a control character is
 // dropped, bytes that are not UTF-8 are dropped, and a line or paragraph separator is escaped.
 //
@@ -79,7 +84,8 @@
 // to learn from it; it reads these lines.
 //
 //   exit 0  written to both files
-//   exit 1  usage, an action outside the set, a finding or finding-also with no class,
+//   exit 1  usage, a dispatch folder that is not a run's, an action outside the set, a finding or
+//           finding-also with no class,
 //           a premises result with no verified commit or base, a switch-off, library
 //           or notify with a target or detail out of shape, an approval verb (library-yes,
 //           age-waiver, script-allow, pm-word) from any actor but the postmaster or
@@ -127,6 +133,19 @@ function jsonStr(s: string): string {
     .replace(/\u2029/gu, "\\u2029")
     .replace(/\u0085/gu, "\\u0085");
   return result;
+}
+
+/** The records a run keeps in its own folder; any one of them marks a folder as a run's. */
+const RUN_RECORDS = ["manifest.json", "run.json", "brief.md"];
+
+/** Whether a folder is a run's, the postmaster's own included: it sits directly in a runs folder,
+ * where every run's folder is, or it holds one of a run's records, as a folder outside the usual
+ * layout does. The command writes actions.jsonl in the folder and the ledger beside it, so any
+ * other folder gets files outside the project's ignore rules. */
+function isRunFolder(dir: string): boolean {
+  return (
+    basename(dirname(dir)) === "runs" || RUN_RECORDS.some((record) => existsSync(join(dir, record)))
+  );
 }
 
 interface Fault {
@@ -424,6 +443,15 @@ function logAction(
     if (!statSync(dispatchReal).isDirectory()) throw new Error("not dir");
   } catch {
     console.error(`log-action: no such dir: ${dispatch}`);
+    return 1;
+  }
+  if (!isRunFolder(dispatchReal)) {
+    console.error(
+      `log-action: ${dispatchReal} is not a run's folder (it holds no manifest.json, run.json or brief.md and is not directly in a runs folder), so nothing was written`,
+    );
+    console.error(
+      "log-action: log an action on a run through that run's folder, <repo>/.postmaster/runs/<TICKET>, and one on no run through the postmaster's own, <repo>/.postmaster/runs/postmaster; run log-action --project <repo> ... writes only into the project's ignored folders (see its usage)",
+    );
     return 1;
   }
   const runName = basename(dispatchReal);

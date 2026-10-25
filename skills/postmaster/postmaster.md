@@ -102,8 +102,10 @@ same helper steps run there as in a real session.
 
 Every brief ends the same way, and every brief points here for it:
 
-1. Log every action through `<tool>/scripts/run log-action` in the postmaster's name,
-   saying a helper took it, as the watcher does.
+1. Log every action through `<tool>/scripts/run log-action <dispatch> postmaster <action> <target> <detail>`
+   in the postmaster's name, saying a helper took it, as the watcher does. `<dispatch>` is the
+   folder your report goes in: the run's directory, or `<runs>/postmaster` for work on no run.
+   Name no other folder: the command refuses a folder that is not a run's.
 2. Decide nothing: rulings, merges and scope calls are the postmaster's. Report what you
    did and found, with each check's command and output, so the decision rests on the
    checks rather than on your word.

@@ -371,6 +371,7 @@ export function makeDispatch(): string {
   const runs = mkdtempSync(join(tmpdir(), "postmaster-424-runs-"));
   const dispatch = join(runs, "424");
   mkdirSync(dispatch, { recursive: true });
+  writeFileSync(join(dispatch, "manifest.json"), "{}\n");
   return dispatch;
 }
 
