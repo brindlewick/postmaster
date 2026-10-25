@@ -261,9 +261,17 @@ own disposable scratch. **The one prohibition for a reviewer is modifying the co
 review.** When `confine = "on"`, lanes also run in a process space of their own and cannot
 signal processes they did not start (`harnesses.md`, Confinement).
 
+**A lane keeps its scratch files inside its own folder.** A temporary folder or file a lane needs
+is made inside its own copy, a workhorse's under `.postmaster/verify/`, which git ignores, and
+never in the system temp folder: the tool removes the copy, while the user's safety hook refuses a
+recursive delete of a temp folder and the folder stays behind. A lane never deletes recursively,
+and never looks for another way round a command a hook refused; it says so in its report. It names
+any temp folder it left behind in its report.
+
 **Say so in every workhorse brief.** A workhorse that does not know it may run the suite reasons
 about the code instead of executing it. A reviewer checks a finding with a targeted probe and
-leaves the project-wide checks to the coachman.
+leaves the project-wide checks to the coachman. Every brief carries the scratch-file rule above, a
+workhorse's and a reviewer's alike.
 
 ## The workhorse contract
 
@@ -568,8 +576,9 @@ what it owes them back.
    `WORKHORSE-BLOCKED.md` contract, and the line that the ready ticket is the run's contract,
    the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
-   instruction to commit incrementally, and the line that the workhorse must not read other branches
-   or `.worktrees/`. It names the run's checks as the waybill lists them and the loop: build,
+   scratch-file rule above, the instruction to commit incrementally, and the line that the
+   workhorse must not read other branches or `.worktrees/`. It names the run's checks as the
+   waybill lists them and the loop: build,
    run each criterion's check from the ticket's `### Checks`,
    fix what fails, and run it again, until every criterion's check shows it working and the
    run's checks pass; the lane may add checks of its own, never drop or weaken one the ticket
@@ -952,7 +961,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    **State in every brief that the lane is working in its own disposable copy of the repository
    with dependencies installed, that it checks a finding with a targeted probe rather than running the project's
    gate, lint, build or tests, and that the one thing it must not do is modify the code under
-   review.** It is expected to RUN things to check its own claims, and to say for each finding
+   review.** A lane's scratch files stay inside that copy (Lane capability, above). It is
+   expected to RUN things to check its own claims, and to say for each finding
    whether it was verified by execution or by reading. A finding verified by execution outranks
    the same finding filed as a hypothesis, and a test that passes is not evidence until someone
    has seen it fail for the right reason. The coachman runs the recorded project checks once

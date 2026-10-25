@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -54,6 +55,14 @@ function commit(repoDir: string, file: string, content: string): Run {
   const a = git("-C", repoDir, "add", file);
   if (a.code !== 0) return a;
   return git("-C", repoDir, "commit", "-qm", content);
+}
+
+/** A temp folder a lane left in its scratch, as one made there with `mktemp -d` is left. */
+function leaveTempFolder(scratch: string): string {
+  const folder = join(scratch, ".postmaster", "tmp", "lane-scratch");
+  mkdirSync(join(folder, "deep"), { recursive: true });
+  writeFileSync(join(folder, "deep", "note.txt"), "left behind\n");
+  return folder;
 }
 
 function headOf(dir: string): string {
@@ -192,18 +201,24 @@ describe("positive controls", () => {
     expect(movedDiff.out.trim()).toBe("b.txt");
   });
 
-  test("--remove takes a worktree scratch away through git", () => {
+  test("--remove takes a worktree scratch away through git, and a temp folder a lane left in it", () => {
+    const left = leaveTempFolder(join(tmp, "wt"));
+    expect(existsSync(left)).toBe(true);
     const r = sh("--remove", repo, join(tmp, "wt"));
     const wtList = git("-C", repo, "worktree", "list", "--porcelain");
     expect(r.code).toBe(0);
     expect(existsSync(join(tmp, "wt"))).toBe(false);
+    expect(existsSync(left)).toBe(false);
     expect(wtList.out.includes(`worktree ${join(tmp, "wt")}`)).toBe(false);
   });
 
-  test("--remove takes a clone scratch away", () => {
+  test("--remove takes a clone scratch away, and a temp folder a lane left in it", () => {
+    const left = leaveTempFolder(join(tmp, "clone"));
+    expect(existsSync(left)).toBe(true);
     const r = sh("--remove", repo, join(tmp, "clone"));
     expect(r.code).toBe(0);
     expect(existsSync(join(tmp, "clone"))).toBe(false);
+    expect(existsSync(left)).toBe(false);
   });
 });
 
@@ -333,5 +348,62 @@ describe("workhorse copies", () => {
     expect(r.code).toBe(1);
     expect(both(r)).toContain("already holds wb/wh-stale");
     expect(existsSync(dest)).toBe(false);
+  });
+});
+
+describe("the lane scratch rule in the coachman's runbook", () => {
+  // ASCII: the runbook is ASCII text, so \s matches the whitespace it holds.
+  const flat = (text: string): string => text.replace(/\s+/gu, " ");
+  const between = (text: string, from: string, to: string): string => {
+    const start = text.indexOf(from);
+    const end = text.indexOf(to, start + from.length);
+    return start === -1 || end === -1 ? "" : text.slice(start, end);
+  };
+  const doc = flat(
+    readFileSync(join(import.meta.dir, "..", "skills", "postmaster", "coachman.md"), "utf8"),
+  );
+
+  /** Whether the rule is stated: temp files inside the lane's own copy, no recursive delete, a
+   * report of what is left, and carried into the workhorse brief and the reviewers' statement. */
+  const statesScratchRule = (text: string): boolean => {
+    const rule = between(
+      text,
+      "**A lane keeps its scratch files inside its own folder.**",
+      "**Say so in every workhorse brief.**",
+    );
+    const workhorse = between(
+      text,
+      "7. **In synthesis mode, write each workhorse's brief**",
+      "## Stage 1",
+    );
+    const reviewers = between(
+      text,
+      "**State in every brief that the lane is working",
+      "Each entry is the one place for its lens",
+    );
+    return (
+      [
+        "inside its own copy",
+        "never in the system temp folder",
+        "never deletes recursively",
+        "names any temp folder it left behind in its report",
+      ].every((phrase) => rule.includes(phrase)) &&
+      workhorse.includes("the scratch-file rule") &&
+      reviewers.includes("scratch files stay inside that copy")
+    );
+  };
+
+  test("a lane makes its temp files inside its own folder, which the tool removes, deletes nothing recursively and names what it left behind, in every brief", () => {
+    expect(statesScratchRule(doc)).toBe(true);
+    // Negative control: the runbook before this change had a capability statement and the two
+    // brief lists, and none of this.
+    const old = flat(
+      "**Say so in every workhorse brief.** A workhorse that does not know it may run the suite. " +
+        "7. **In synthesis mode, write each workhorse's brief** the capability statement above, the " +
+        "instruction to commit incrementally, ## Stage 1 " +
+        "**State in every brief that the lane is working in its own disposable copy** It is expected " +
+        "to RUN things. Each entry is the one place for its lens",
+    );
+    expect(statesScratchRule(old)).toBe(false);
   });
 });
