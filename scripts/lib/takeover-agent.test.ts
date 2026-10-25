@@ -1,7 +1,7 @@
 // Tests beside scripts/lib/takeover-agent.ts.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -156,9 +156,16 @@ const SELF = join(import.meta.dir, "..", "run");
 
 let tmp = "";
 let dispatch = "";
+let stubBin = "";
 
 beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), "launch-override-"));
+  // `launch form` refuses a harness that is not on PATH, and a machine may have no claude CLI, so
+  // the recorded claude fallback finds a stub that is never run.
+  stubBin = join(tmp, "bin");
+  mkdirSync(stubBin);
+  writeFileSync(join(stubBin, "claude"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(stubBin, "claude"), 0o755);
   dispatch = join(tmp, "run");
   mkdirSync(dispatch);
   const env = join(tmp, "fallback.env");
@@ -185,6 +192,7 @@ function form(name: string, ...flags: string[]): { code: number; out: string; er
   const r = spawnSync(SELF, ["launch", "form", name, "--leg", "review", ...flags], {
     encoding: "utf8",
     timeout: 60000,
+    env: { ...process.env, PATH: `${stubBin}:${process.env.PATH ?? ""}` },
   });
   return { code: r.status ?? 1, out: String(r.stdout ?? ""), err: String(r.stderr ?? "") };
 }
