@@ -71,10 +71,14 @@ const firstFigure = (...candidates: unknown[]): number | undefined => {
   return undefined;
 };
 
+// A launch that did any work used tokens, so a report of none in and none out is a harness
+// reporting nothing, as Codex's review mode and a Claude review that waits on its helpers do, and
+// it is read as no report. One side alone at zero is a figure.
 const tokenFigures = (source: unknown): UsageFigures => {
   if (!isObject(source)) return {};
   const input = firstFigure(source.input_tokens, source.input, source.prompt_tokens);
   const output = firstFigure(source.output_tokens, source.output, source.completion_tokens);
+  if (input === 0 && output === 0) return {};
   return {
     ...(input === undefined ? {} : { input_tokens: input }),
     ...(output === undefined ? {} : { output_tokens: output }),
@@ -86,12 +90,18 @@ const costFigures = (...candidates: unknown[]): UsageFigures => {
   return cost === undefined ? {} : { cost_usd: cost };
 };
 
-const mergeFigures = (all: UsageFigures[]): UsageFigures => {
+const add = (a: number, b: number): number => a + b;
+const larger = (a: number, b: number): number => Math.max(a, b);
+
+const mergeFigures = (
+  all: UsageFigures[],
+  fold: (a: number, b: number) => number = add,
+): UsageFigures => {
   const total = (key: UsageKey): number | undefined => {
     const values = all.flatMap((figures) =>
       figures[key] === undefined ? [] : [figures[key] as number],
     );
-    return values.length === 0 ? undefined : values.reduce((sum, value) => sum + value, 0);
+    return values.length === 0 ? undefined : values.reduce((sum, value) => fold(sum, value));
   };
   return {
     ...(total("input_tokens") === undefined ? {} : { input_tokens: total("input_tokens") }),
@@ -155,12 +165,32 @@ const readCodex = (rows: Row[]): UsageFigures => {
 // last one; summing cost would count every invocation twice. Verified against a live resumed
 // thread whose three results read out 5, 4, 5 with costs 0.1048, 0.1940, 0.1995. A stream that
 // ends without a result (killed mid-run) is summed from its assistant messages instead.
+//
+// usage is the invocation's own thread: it leaves out the helpers a session starts, and a review
+// that waits on its helpers has no turns of its own and reads zero. modelUsage is the whole
+// session by model, helpers included, and the last result's is taken as the cost is. Each token
+// figure is the larger of the two readings, so a stream with no modelUsage reads as it always
+// did and neither report can lower the other.
+const sessionTokens = (result: Row): UsageFigures => {
+  const models = at(result, "modelUsage");
+  if (!isObject(models)) return {};
+  return mergeFigures(
+    Object.values(models).map((model) =>
+      tokenFigures({
+        input_tokens: at(model, "inputTokens"),
+        output_tokens: at(model, "outputTokens"),
+      }),
+    ),
+  );
+};
+
 const readClaude = (rows: Row[]): UsageFigures => {
   const results = rows.filter((row) => row.type === "result");
   if (results.length > 0) {
     const last = results[results.length - 1] as Row;
+    const turns = mergeFigures(results.map((row) => tokenFigures((row as Row).usage)));
     return {
-      ...mergeFigures(results.map((row) => tokenFigures((row as Row).usage))),
+      ...mergeFigures([turns, sessionTokens(last)], larger),
       ...costFigures(last.total_cost_usd),
     };
   }
@@ -398,6 +428,11 @@ const validateRecord = (value: unknown): UsageRecord | undefined => {
     if (figure === undefined) return undefined;
     figures[key] = figure;
   }
+  // Records written before a zero pair meant no report hold one: read them the way a new one is.
+  const kept: UsageFigures = {
+    ...tokenFigures(figures),
+    ...(figures.cost_usd === undefined ? {} : { cost_usd: figures.cost_usd }),
+  };
   return {
     schema_version: 1,
     name: value.name,
@@ -405,7 +440,7 @@ const validateRecord = (value: unknown): UsageRecord | undefined => {
     role: value.role as UsageRole,
     lane: value.lane,
     stream: value.stream,
-    ...figures,
+    ...kept,
     ...(value.read_error === "session-record-unavailable" ? { read_error: value.read_error } : {}),
   };
 };
@@ -460,6 +495,15 @@ export const sumUsageRecords = (records: UsageRecord[]): string => {
         `${formatCoverage(group, "cost_usd")}${suffix}`
       );
     });
+  // A total over launches that reported nothing is a floor; each such launch is named so it is
+  // never read as the whole. One that could not be read has its own line above.
+  const emptyLines = records
+    .filter((record) => !record.read_error && !USAGE_KEYS.some((key) => record[key] !== undefined))
+    .map(
+      (record) =>
+        `cost: ${record.role} ${record.lane} (${record.harness}): no usage recorded for ${record.stream}`,
+    )
+    .sort();
   const harnessLines = [...new Set(records.map((record) => record.harness))]
     .sort()
     .flatMap((harness) => {
@@ -472,7 +516,7 @@ export const sumUsageRecords = (records: UsageRecord[]): string => {
         ];
       return [`cost: harness ${harness} reports nothing`];
     });
-  return [...lines, ...harnessLines].join("\n");
+  return [...lines, ...emptyLines, ...harnessLines].join("\n");
 };
 
 export const sumDispatch = (dispatch: string): string => {
