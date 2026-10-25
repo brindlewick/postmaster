@@ -1,4 +1,4 @@
-// Helpers for the #167 oracle: made-up Claude Code session records in the
+// Helpers for the #592 oracle: made-up Claude Code session records in the
 // record's exact shape, driven through scripts/run responsiveness as a
 // subprocess; nothing here imports the change.
 import { mkdirSync, utimesSync, writeFileSync } from "node:fs";

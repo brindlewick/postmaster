@@ -1,4 +1,4 @@
-// Oracle for #168, committed before the change: the watcher waits for a
+// Oracle for #593, committed before the change: the watcher waits for a
 // fixture run and for a pull request's checks, so the postmaster does not.
 // C1: a run whose wait.json names a fixture copy stays WAITING (watcher
 // exit 3, naming nothing) while the copy's postmaster launch runs, and is
