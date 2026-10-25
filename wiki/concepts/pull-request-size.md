@@ -3,7 +3,7 @@ title: A pull request meant for a person to review aims at 200 changed lines and
 type: concept
 standing: claimed
 sources: []
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # A pull request meant for a person to review aims at 200 changed lines and never passes 400
@@ -67,6 +67,9 @@ pull requests get better reviews or fewer defects.
   postmaster puts it to the user, who chooses how the work is split or put behind a feature flag,
   never whether, and the work goes back to the clerk. Slices that depend on one another land in
   order, which can lengthen the time to the whole.
+- A split cannot keep the rule that the acceptance tests come first, in a commit that touches
+  nothing else: that commit would hold tests for code that lands in later pieces. Each piece
+  carries its own tests, and the full acceptance set lands with the last piece.
 - Nobody accepts a size once or raises the cap in the flow. A new cap is the user editing the
   project's setting.
 - A feature flag leaves code on the default branch switched off until the last increment turns

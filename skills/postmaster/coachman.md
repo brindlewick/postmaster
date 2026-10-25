@@ -459,7 +459,9 @@ second implementer wrote (single-thread).
   any synthesis code (Stage 1 below); a ticket that leaves the interface to the lanes still
   gets none there (#280 takes that up). In single-thread mode, the first commit on the branch
   adds them and touches nothing else (D6). Where the ticket's design question is the
-  interface, the interface is settled first, then the tests, then the code.
+  interface, the interface is settled first, then the tests, then the code. Under a split
+  request (Stage 1) that first commit cannot hold: each piece carries its own tests, and the full
+  acceptance set lands with the last piece.
 - **A code commit never touches them.** A whole-tree formatter (`npm run format`, `biome
   check --write`) will reflow an acceptance-test file that is already committed and fold it
   into a code commit, which the next rule forbids: before staging a code commit,
@@ -886,11 +888,13 @@ from it.
   that each fit the cap and each merge on their own, the ones that depend on another ordered so the
   lowest merges first; and, where the pieces cannot stand alone as working slices, that the plan is
   increments behind a feature flag, the project's own flag system, each within the cap, the flag off
-  until a last small increment turns it on, with the flag's name. Say plainly when you can do
-  neither. Then log `escalate`, touch `.escalation-ready` and exit, with no `checkpoint-1.md` and the
-  stage unchanged. The postmaster puts it to the user, who chooses how the work is split or put
-  behind a flag, and resumes this thread only when its own count is within the cap. Exit 1 is an
-  input fault: fix the inputs and run it again.
+  until a last small increment turns it on, with the flag's name. Under a split each piece carries
+  its own tests, and the full acceptance set lands with the last piece. Say plainly when you can do
+  neither. End the request with the next step, as the postmaster's Stage E has it: the postmaster
+  counts afresh; within the cap it resumes this thread, and over it the user chooses how the work
+  is split or put behind a flag, the clerk plans the pieces as tickets, and this run ends. Then
+  log `escalate`, touch `.escalation-ready` and exit, with no `checkpoint-1.md` and the stage
+  unchanged. Exit 1 is an input fault: fix the inputs and run it again.
 - **Checkpoint 1 card, then the hand-off** (synthesis mode: in single-thread mode the card is
   The run's mode's — the SYNTHESIS line, convention gaps, dropped work, gate and checks, and
   no per-workhorse outcome, ranking or shares): per-workhorse outcome (or stall), each walled lane

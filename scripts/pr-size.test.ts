@@ -3,7 +3,7 @@
 // the same command on a change that reads zero or on a project with no budget.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -228,5 +228,69 @@ describe("the arguments", () => {
       ["a", "b", "--repo"],
     ];
     for (const args of wrong) refuses(cli(...args), "usage: run pr-size");
+  });
+});
+
+describe("the size rule in the runbooks", () => {
+  const RUNBOOKS = join(import.meta.dir, "..", "skills", "postmaster");
+  const coachman = readFileSync(join(RUNBOOKS, "coachman.md"), "utf8");
+  const postmaster = readFileSync(join(RUNBOOKS, "postmaster.md"), "utf8");
+  // ASCII: the runbooks are ASCII text, so \s matches the whitespace they hold.
+  const flat = (text: string): string => text.replace(/\s+/gu, " ");
+  /** The text from one opening to the next, or nothing where either is missing. */
+  const between = (text: string, from: string, to: string): string => {
+    const start = text.indexOf(from);
+    const end = text.indexOf(to, start + from.length);
+    return start === -1 || end === -1 ? "" : text.slice(start, end);
+  };
+  /** The helper briefs of a runbook by name, each with its whole fenced block. */
+  const briefs = (text: string): Map<string, string> =>
+    new Map(
+      // ASCII: the runbook is ASCII text, so \s matches the whitespace it holds.
+      [...text.matchAll(/```helper\nHelper brief `([^`]+)`[\s\S]*?\n```/gu)].map(
+        (brief) => [brief[1] ?? "", brief[0]] as const,
+      ),
+    );
+  const splitRequest = flat(
+    between(
+      coachman,
+      "- **Count the synthesis's size before the checkpoint 1 card",
+      "- **Checkpoint 1 card, then the hand-off**",
+    ),
+  );
+  const stepEight = flat(
+    between(postmaster, "8. **A split request goes to the user", "## Stage F"),
+  );
+
+  test("the coachman's split request and Stage E step 8 name the same next step: the clerk plans the pieces", () => {
+    expect(splitRequest).not.toBe("");
+    expect(stepEight).not.toBe("");
+    for (const text of [splitRequest, stepEight]) {
+      expect(text).toContain("the clerk plans the pieces");
+    }
+    // Negative control: the closing line before this change sent the thread on once a piece fit.
+    expect(splitRequest).not.toContain("resumes this thread only when its own count is within");
+  });
+
+  test("Stage F names one helper that counts at landing, f-size, and f-verify leaves the size to it", () => {
+    const named = briefs(postmaster);
+    // A count is a pr-size call on two refs; the waybill's own `--limits` line counts nothing.
+    const counters = [...named]
+      .filter(([, text]) => /scripts\/run pr-size(?! --limits)/u.test(text))
+      .map(([name]) => name);
+    expect(counters).toEqual(["f-size"]);
+    expect(named.get("f-verify")).toContain("Leave the size to the `f-size` brief");
+    // The fresh count at a split request asks the same brief.
+    expect(stepEight).toContain("Brief `f-size`");
+  });
+
+  test("under a split each piece carries its own tests and the full acceptance set lands with the last piece", () => {
+    expect(splitRequest).toContain(
+      "Under a split each piece carries its own tests, and the full acceptance set lands with the last piece.",
+    );
+    const rule = flat(
+      between(coachman, "## Acceptance tests, in every run", "## The run's verifier copy"),
+    );
+    expect(rule).toContain("each piece carries its own tests");
   });
 });
