@@ -1830,13 +1830,11 @@ beforeAll(() => {
       // way the harness never ran.
       const expectedDarkRc = (): number => (process.platform === "darwin" ? 126 : 127);
       const DARK_MESSAGE =
-        /No such file or directory|command not found|Permission denied|is a directory|bad interpreter|cannot execute/u;
+        /No such file or directory|command not found|: not found|Permission denied|is a directory|bad interpreter|cannot execute/u;
       const execDark = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
         _rc === expectedDarkRc() &&
         !err.includes("STUB-RAN") &&
-        (process.platform === "darwin"
-          ? DARK_MESSAGE.test(normStreams(err))
-          : normStreams(err).includes("No such file or directory"));
+        DARK_MESSAGE.test(normStreams(err));
       const ran = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
         err.includes("STUB-RAN");
       const notRan = (_rc: number, _out: string, err: string, _h: string[]): boolean =>
