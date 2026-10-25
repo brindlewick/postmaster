@@ -374,5 +374,7 @@ export function projectSetup(repo: string, answersText: string, config: string):
 export function recordRun(dispatch: string, repo: string, config: string): Sh {
   return sh(["run-meta", dispatch, repo], {
     POSTMASTER_CONFIG: config,
+    // The pin of the tool is cut under a staged folder, not under the home folder's tool-pins.
+    POSTMASTER_TOOL_PINS: stage("accept-504-pins-"),
   });
 }

@@ -16,6 +16,7 @@
 // run from the final head, is the landing check and no test here.
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   PASS_CHECKS,
@@ -101,8 +102,13 @@ describe("C2: with the setting on the pull request opens as a draft", () => {
     expectOk(recordRun(s.dispatch, s.repo, cfg), "run-meta");
     const recorded = JSON.parse(readFileSync(join(s.dispatch, "run.json"), "utf8")) as {
       config: { ship: { draft_pull_requests: unknown } };
+      postmaster: { checkout: string };
     };
     expect(recorded.config.ship.draft_pull_requests).toBe("on");
+    // The run's pin is cut under a temporary folder, never under the home folder's tool-pins,
+    // where it would outlive the test with a claim on a dispatch that is gone.
+    const staged = join(tmpdir(), "accept-504-pins-");
+    expect(recorded.postmaster.checkout.slice(0, staged.length)).toBe(staged);
     pushTicket(s);
     const r = expectOk(openPr(s), "open-pr");
     expect(r.out.trim()).toBe(`opened ${s.url} draft`);
