@@ -145,6 +145,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
 import { physical, scriptsDir } from "./lib/paths.ts";
 import { inspectLibraries } from "./lib/library-landing.ts";
+import { draftsOn } from "./lib/pr-size.ts";
 import { inspectSwitchOffs } from "./lib/switch-offs.ts";
 import { run } from "./lib/proc.ts";
 import { runMode } from "./lib/run-mode.ts";
@@ -886,16 +887,19 @@ type PullRequestRef = {
 };
 
 /** Whether the run opens its pull request as a draft: on only when run.json
- * says so. A run.json without the key, which is every run in flight today,
- * reads as off, as does any other shape. */
+ * says "on". A run.json without the key, which is every run in flight today,
+ * reads as off, as does any other shape; a value that is neither "on" nor
+ * "off" is a fault, as it is for every command that reads the setting. */
 function draftPullRequests(dispatch: string): boolean {
   const meta = tryJsonFile<Record<string, unknown>>(join(dispatch, "run.json"));
   if (meta === null) die(`--dispatch has no readable run.json: ${dispatch}`);
   const config = meta.config;
   if (typeof config !== "object" || config === null || Array.isArray(config)) return false;
-  const ship = (config as Record<string, unknown>).ship;
-  if (typeof ship !== "object" || ship === null || Array.isArray(ship)) return false;
-  return (ship as Record<string, unknown>).draft_pull_requests === "on";
+  try {
+    return draftsOn((config as Record<string, unknown>).ship);
+  } catch (e) {
+    return die(e instanceof Error ? e.message : String(e));
+  }
 }
 
 function openPr(o: string[]): number {

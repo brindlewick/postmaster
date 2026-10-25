@@ -2637,6 +2637,30 @@ describe("open pull requests", () => {
     expect(r.calls.find((l) => l.startsWith("pr create ")) ?? "").toContain("--draft");
   });
 
+  test("a draft setting that is neither on nor off is a fault naming the key and the value, and opens nothing", () => {
+    for (const [label, value] of [
+      ["bool", true],
+      ["yes", "yes"],
+      ["capital", "On"],
+    ] as const) {
+      const r = openPr(`bad-${label}`, {
+        runJson: JSON.stringify({ config: { ship: { draft_pull_requests: value } } }),
+        wantCode: 1,
+      });
+      expect(r.output).toBe("");
+      expect(r.err).toContain(
+        `ship.draft_pull_requests must be "on" or "off", not ${JSON.stringify(value)}`,
+      );
+      expect(r.calls.filter((l) => l.startsWith("pr create "))).toHaveLength(0);
+    }
+    // --ready opens ready whatever the run says, and asks nothing of the setting.
+    const ready = openPr("bad-ready", {
+      ship: { draft_pull_requests: "On" },
+      extra: ["--ready"],
+    });
+    expect(ready.output).toBe(`opened ${pr} ready`);
+  });
+
   test("the open pull request for the branch is adopted, draft or ready", () => {
     const draft = openPr("adopt-draft", {
       ship: { draft_pull_requests: "on" },

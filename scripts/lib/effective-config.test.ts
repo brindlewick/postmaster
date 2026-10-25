@@ -949,3 +949,54 @@ describe("Review round 9 regressions", () => {
     expect((((JSON.parse(effective.out) as Rec).lanes as Rec).luna as Rec).model).toBe("gpt-other");
   }, 60000);
 });
+
+describe("the draft pull requests setting is on or off, wherever it is written", () => {
+  const readers = (repo: string): string[][] => [
+    ["project-settings", "effective", repo],
+    ["launch", "form", "luna", "--project", repo],
+  ];
+
+  test("a value that is neither on nor off in the person's file is refused by every reader, naming the key and the value", () => {
+    const { repo, config } = scratch();
+    const env = envFor(config);
+    for (const [written, shown] of [
+      ["true", "true"],
+      ['"yes"', '"yes"'],
+      ['"On"', '"On"'],
+    ] as const) {
+      writeSettings(repo, `[ship]\ndraft_pull_requests = ${written}\n`);
+      for (const args of readers(repo)) {
+        const bad = runCli(args, env);
+        expect(bad.code).toBe(1);
+        expect(bad.err).toContain(`ship.draft_pull_requests must be "on" or "off", not ${shown}`);
+      }
+    }
+    // Controls through the same commands: on and off pass.
+    for (const value of ["on", "off"]) {
+      writeSettings(repo, `[ship]\ndraft_pull_requests = "${value}"\n`);
+      for (const args of readers(repo)) expect(runCli(args, env).code).toBe(0);
+    }
+  }, 60000);
+
+  test("a value that is neither on nor off in the global config is refused by every reader", () => {
+    const { repo, config } = scratch();
+    const bad = example.replace('draft_pull_requests = "off"', 'draft_pull_requests = "On"');
+    expect(bad).not.toBe(example);
+    writeFileSync(config, bad);
+    for (const args of readers(repo)) {
+      const refused = runCli(args, envFor(config));
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain('ship.draft_pull_requests must be "on" or "off", not "On"');
+    }
+  }, 60000);
+
+  test("a key left out keeps its default, off, with no message", () => {
+    const { repo, config } = scratch();
+    writeFileSync(config, example.replace(/^draft_pull_requests = .*\n/mu, ""));
+    for (const args of readers(repo)) {
+      const quiet = runCli(args, envFor(config));
+      expect(quiet.code).toBe(0);
+      expect(quiet.err).not.toContain("draft_pull_requests");
+    }
+  }, 60000);
+});

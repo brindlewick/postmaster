@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   budgetOf,
+  draftsOn,
   limitsLine,
   overCap,
   parseNumstat,
@@ -126,6 +127,23 @@ describe("the budget a project's settings give", () => {
     expect(budgetOf({ draft_pull_requests: "on" }, {})).toEqual({ aim: 200, cap: 400 });
     expect(budgetOf({ draft_pull_requests: "off" }, {})).toBeNull();
     expect(budgetOf({}, {})).toBeNull();
+  });
+});
+
+describe("whether a project's runs open draft pull requests", () => {
+  test("reads on as drafts, and off, no key, no table or no settings as ready", () => {
+    expect(draftsOn({ draft_pull_requests: "on" })).toBe(true);
+    for (const ship of [undefined, null, {}, { draft_pull_requests: "off" }, "on", []]) {
+      expect(draftsOn(ship)).toBe(false);
+    }
+  });
+
+  test("refuses any other value, naming the key and the value, and never reads it as off", () => {
+    for (const value of [true, false, "yes", "On", "ON", "", 1, null]) {
+      expect(() => draftsOn({ draft_pull_requests: value })).toThrow(
+        `ship.draft_pull_requests must be "on" or "off", not ${JSON.stringify(value)}`,
+      );
+    }
   });
 });
 

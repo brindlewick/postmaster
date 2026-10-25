@@ -33,7 +33,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { parseTomlText } from "./data.ts";
 import { scriptsDir } from "./paths.ts";
-import { type Budget, budgetOf } from "./pr-size.ts";
+import { type Budget, budgetOf, draftsOn } from "./pr-size.ts";
 import { mkstempSync, run } from "./proc.ts";
 import { readSources } from "./sources.ts";
 import {
@@ -727,6 +727,11 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
       if (data.confine !== "on" && data.confine !== "off")
         fail(`${label}.confine must be "on" or "off"`);
     }
+    try {
+      draftsOn(data.ship);
+    } catch (e) {
+      fail(errText(e));
+    }
   }
   return data;
 };
@@ -1327,6 +1332,13 @@ export const effectiveConfigForProject = (repo: string, configPath?: string): Ef
       "roles",
     );
     applyRoles(merged, roles, explicitTeam);
+    // The machine config is not validated as the person's file is; a draft setting that is neither
+    // on nor off stops every reader here, never reading as off.
+    try {
+      draftsOn(merged.ship);
+    } catch (e) {
+      return failed(errText(e), notice, globalPath);
+    }
     return {
       config: merged,
       notice,
