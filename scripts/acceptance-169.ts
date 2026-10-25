@@ -1,4 +1,4 @@
-// Helpers for the #169 oracle beside it: the hold command spawned as a
+// Helpers for the #594 oracle beside it: the hold command spawned as a
 // subprocess, and the reading of the steps the postmaster's instructions
 // give itself. Nothing here imports the change under test.
 import { readFileSync } from "node:fs";

@@ -1,4 +1,4 @@
-// Helpers for the #168 oracle beside it: scratch run roots, a stub `gh`
+// Helpers for the #593 oracle beside it: scratch run roots, a stub `gh`
 // whose pull-request checks answer is read from a mode file, and the
 // watcher and status commands spawned as subprocesses. Nothing here
 // imports the change under test.
