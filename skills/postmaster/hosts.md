@@ -220,7 +220,11 @@ onto the fragment it supersedes.
   copy's one tab in the postmaster project's space: the copy never gets a space of its own.
   `stop-run` stops the copy's root launches, and `close-run` closes the tab with the run's
   panes. The project's own watcher is told apart from the copy's by the checkout recorded at
-  launch, never by a label, and stays.
+  launch, never by a label, and stays. The copy's postmaster calls both from inside its own
+  launch, so neither touches that launch: `stop-run` spares the caller and what it runs under,
+  and `close-run` neither counts the caller's launch as running nor closes the pane, window or
+  tab the caller runs in. The caller's pane or window closes when its launch ends. A launch of
+  anything else in the copy's root still refuses the close.
 - **It degrades rather than refuses.** If the host cannot place the launch, or its pane has not
   started it within 20 seconds, it runs in the background instead, exactly once, and `run host`
   prints `host=none` rather than where it would have been.

@@ -29,15 +29,20 @@ import {
   freshHerdr,
   freshTmux,
   fxEnv,
+  launchAt,
   makeFixtureRepo,
   makeFx,
   readHerdr,
+  readTmux,
   saveHerdr,
   saveTmux,
   sh,
   stubConfig,
+  touchesId,
+  type Fx,
+  type HerdrState,
 } from "./acceptance-373.ts";
-import { cleanup, placementRecords, runLaunch, runTabRecords } from "./acceptance-374.ts";
+import { cleanup, paneView, placementRecords, runLaunch, runTabRecords } from "./acceptance-374.ts";
 import {
   copyWatcher,
   fixTabRecords,
@@ -1373,6 +1378,191 @@ describe("375 review round 1 fixes", () => {
       expect(placementRecords(fx)).toEqual([]);
       expect(runTabRecords(fx)).toEqual([]);
       expect(fixTabRecords(fx)).toEqual([]);
+    } finally {
+      cleanup(fx);
+    }
+  }, 600000);
+});
+
+describe("close-run from inside the launch that called it", () => {
+  // A fixture copy's headless postmaster is a live launch registered at the copy's root, and its
+  // own aftercare runs close-run from inside it, so the launch close-run meets there is the
+  // caller's own. The caller here is a launch of that name that runs close-run once told to go.
+  const startCaller = (fx: Fx, env: Record<string, string>, fix: string, dispatch: string) => {
+    const go = join(fx.root, "caller.go");
+    const rc = join(fx.root, "caller.rc");
+    const out = join(fx.root, "caller.out");
+    const script = join(fx.root, "caller.sh");
+    writeFileSync(
+      script,
+      [
+        "#!/bin/bash",
+        `n=0; while [ ! -e "${go}" ] && [ "$n" -lt 600 ]; do /bin/sleep 0.1; n=$((n + 1)); done`,
+        `"${SELF}" host close-run "${dispatch}" > "${out}" 2>&1`,
+        `echo $? > "${rc}"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const marker = join(fx.logs, "caller.done");
+    const started = sh(
+      SELF,
+      [
+        "host",
+        "run",
+        "postmaster",
+        fix,
+        "--out",
+        `${marker}.out`,
+        "--err",
+        `${marker}.err`,
+        "--marker",
+        marker,
+        "--project",
+        fix,
+        "--",
+        script,
+      ],
+      env,
+      fx.caller,
+    );
+    expect(started.code).toBe(0);
+    return { go, rc, out };
+  };
+
+  const registeredAs = (fx: Fx, name: string): boolean => {
+    try {
+      const dir = join(fx.state, "launches");
+      return readdirSync(dir).some(
+        (entry) => readFileSync(join(dir, entry), "utf8").split("\n")[1] === name,
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  /** Let the caller run close-run, once its launch is on the registry, and wait for its answer. */
+  const release = async (
+    fx: Fx,
+    caller: { go: string; rc: string; out: string },
+  ): Promise<{ rc: string; out: string }> => {
+    expect(await waitFor(() => registeredAs(fx, "postmaster"), 30)).toBe(true);
+    writeFileSync(caller.go, "");
+    expect(await waitFor(() => existsSync(caller.rc), 90)).toBe(true);
+    return {
+      rc: readFileSync(caller.rc, "utf8").trim(),
+      out: readFileSync(caller.out, "utf8"),
+    };
+  };
+
+  const scenario = (tag: string, extra: Record<string, string> = {}) => {
+    const fx = makeFx(tag);
+    // The stub hosts hand a launch its environment through a named pipe, which the pane's PATH
+    // must be able to make, or the launch never starts.
+    symlinkSync(Bun.which("mkfifo") ?? "/usr/bin/mkfifo", join(fx.sys, "mkfifo"));
+    const tool = toolCheckout();
+    const pmRoot = mainRepoOf(tool);
+    expect(pmRoot).not.toBe("");
+    const fix = makeFixtureRepo(fx, "fixcopy");
+    seedProjectSpace(fx, pmRoot);
+    const synth = addWorktree(fix, "1", "1");
+    const dispatch = join(fx.root, "dispatch", "1");
+    writeFixtureDispatch(dispatch, synth, tool);
+    const env = fxEnv(fx, {
+      POSTMASTER_CONFIG: stubConfig(fx),
+      POSTMASTER_HOST_FINISH_DELAY: "3600",
+      ...extra,
+    });
+    return { fx, fix, dispatch, env };
+  };
+
+  const paneLabelled = (st: HerdrState, label: string): string =>
+    Object.keys(st.panes).find((pane) => paneView(st, pane).label === label) ?? "";
+
+  test("herdr: the caller's own launch is not counted, its pane and tab stay, and the rest closes", async () => {
+    const { fx, fix, dispatch, env } = scenario("213-herdr");
+    try {
+      const watchMarker = join(fx.logs, "watch.done");
+      expect(copyWatcher(fx, env, fix, watchMarker).code).toBe(0);
+      expect(await waitFor(() => existsSync(watchMarker), 30)).toBe(true);
+      const caller = startCaller(fx, env, fix, dispatch);
+      const before = readHerdr(fx);
+      const pmPane = paneLabelled(before, "postmaster");
+      const watchPane = paneLabelled(before, "watch · fixcopy");
+      expect(pmPane).not.toBe("");
+      expect(watchPane).not.toBe("");
+      const fixTab = paneView(before, pmPane).tab;
+
+      const done = await release(fx, caller);
+      expect(done.out).not.toContain("still running");
+      expect(done.rc).toBe("0");
+      const after = readHerdr(fx);
+      expect(after.panes[watchPane]).toBeUndefined();
+      expect(after.panes[pmPane]).not.toBeUndefined();
+      expect(after.tabs[fixTab]).not.toBeUndefined();
+      const hcalls = calls(fx, "herdr");
+      expect(touchesId(hcalls, watchPane).length).toBe(1);
+      expect(touchesId(hcalls, pmPane)).toEqual([]);
+      expect(touchesId(hcalls, fixTab)).toEqual([]);
+      expect(placementRecords(fx).map((item) => item.pane)).toEqual([pmPane]);
+    } finally {
+      cleanup(fx);
+    }
+  }, 600000);
+
+  test("herdr control: a launch of another process in the copy still refuses, and nothing closes", async () => {
+    const { fx, fix, dispatch, env } = scenario("213-herdr-foreign");
+    const foreign = launchAt(fix, fx.state);
+    try {
+      const watchMarker = join(fx.logs, "watch.done");
+      expect(copyWatcher(fx, env, fix, watchMarker).code).toBe(0);
+      expect(await waitFor(() => existsSync(watchMarker), 30)).toBe(true);
+      const caller = startCaller(fx, env, fix, dispatch);
+      const before = readHerdr(fx);
+      const pmPane = paneLabelled(before, "postmaster");
+      const watchPane = paneLabelled(before, "watch · fixcopy");
+
+      const done = await release(fx, caller);
+      expect(done.rc).toBe("2");
+      expect(done.out).toContain(`a launch is still running in ${fix}: stop-probe\n`);
+      expect(done.out).not.toContain("postmaster;");
+      expect(done.out).not.toContain(";postmaster");
+      const hcalls = calls(fx, "herdr");
+      expect(touchesId(hcalls, watchPane)).toEqual([]);
+      expect(touchesId(hcalls, pmPane)).toEqual([]);
+      expect(placementRecords(fx).length).toBe(2);
+    } finally {
+      try {
+        process.kill(foreign.sleep);
+      } catch {}
+      cleanup(fx);
+    }
+  }, 600000);
+
+  test("tmux: the caller's own window stays and the rest closes", async () => {
+    const { fx, fix, dispatch, env } = scenario("213-tmux", { POSTMASTER_HOST: "tmux" });
+    try {
+      const watchMarker = join(fx.logs, "watch.done");
+      expect(copyWatcher(fx, env, fix, watchMarker).code).toBe(0);
+      expect(await waitFor(() => existsSync(watchMarker), 30)).toBe(true);
+      const caller = startCaller(fx, env, fix, dispatch);
+      const before = readTmux(fx);
+      const windowNamed = (name: string): string =>
+        Object.keys(before.windows).find((win) => before.windows[win]!.name === name) ?? "";
+      const pmWindow = windowNamed("postmaster");
+      const watchWindow = windowNamed("watch · fixcopy");
+      expect(pmWindow).not.toBe("");
+      expect(watchWindow).not.toBe("");
+
+      const done = await release(fx, caller);
+      expect(done.out).not.toContain("still running");
+      expect(done.rc).toBe("0");
+      const after = readTmux(fx);
+      expect(after.windows[watchWindow]).toBeUndefined();
+      expect(after.windows[pmWindow]).not.toBeUndefined();
+      const tcalls = calls(fx, "tmux");
+      expect(touchesId(tcalls, watchWindow).length).toBe(1);
+      expect(touchesId(tcalls, pmWindow)).toEqual([]);
     } finally {
       cleanup(fx);
     }

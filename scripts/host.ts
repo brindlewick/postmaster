@@ -39,7 +39,9 @@
 //   run host stop-run <dispatch>           stop launches in every worktree the run created,
 //                                         and at a fixture copy's root
 //   run host close-run <dispatch>          close the run tab and every worktree's panes/windows,
-//                                         and for a fixture copy the copy's own space too
+//                                         and for a fixture copy the copy's own space too; never
+//                                         the launch it is called from, whose pane or window, and
+//                                         the tab around it, stay
 //   run host spawn <handle> <cwd> [--label <text>] -- <command...>   an interactive session;
 //                                         the handle becomes a Herdr agent name
 //   run host send <handle> <file> [--wait [<seconds>]]   submit the file's text to that session,
@@ -109,7 +111,8 @@
 //
 //   exit 0  detected, named, started, stopped, closed, sent, settled or read
 //   exit 1  usage, or nothing could be started
-//   exit 2  close refused: a launch still runs in the worktree, or an affected pane or space
+//   exit 2  close refused: a launch still runs in the worktree (close-run does not count the
+//           launch it is called from), or an affected pane or space
 //           holds something run host did not open; or stop left something of a launch running,
 //           named, or refused a set of processes it could not vouch for, saying why
 //   exit 3  spawn, send, wait or read with no host that keeps an interactive session; or a send
@@ -861,10 +864,39 @@ function registryMembers(group: number): void {
   if (rec.members.length) saveRecord(path, rec);
   else rmSync(path, { force: true });
 }
-function registryScan(dir: string): Array<{ group: string; name: string; roots: string[] }> {
+/** The calling process and every process above it, by pid. */
+function callerChain(table: ReadonlyMap<number, ProcRow>, pid: number): Set<number> {
+  const chain = new Set<number>();
+  for (let at = pid; at > 1 && table.has(at) && !chain.has(at); at = table.get(at)!.ppid)
+    chain.add(at);
+  return chain;
+}
+/** Whether a launch's live roots hold the calling process: a root group that the caller or one of
+ * its ancestors belongs to, or a root process that is one of them. Such a launch is the caller's own. */
+function holdsCaller(
+  roots: readonly string[],
+  chain: ReadonlySet<number>,
+  table: ReadonlyMap<number, ProcRow>,
+): boolean {
+  return roots.some((root) => {
+    const [kind, pid] = root.split("|");
+    return kind === "group"
+      ? [...chain].some((at) => table.get(at)!.group === Number(pid))
+      : chain.has(Number(pid));
+  });
+}
+/** The live launches registered for one directory. With `skipCaller` the launches the calling
+ * process is part of are left out, for a call that closes what a run opened and must not wait on,
+ * or refuse for, the launch it is itself running in. */
+function registryScan(
+  dir: string,
+  skipCaller = false,
+): Array<{ group: string; name: string; roots: string[] }> {
   fixtureGuard();
   const procs = processes();
   const boot = bootId();
+  const table = skipCaller ? processTable() : new Map<number, ProcRow>();
+  const chain = callerChain(table, process.pid);
   let names: string[] = [];
   try {
     names = readdirSync(registryDir()).sort();
@@ -877,7 +909,8 @@ function registryScan(dir: string): Array<{ group: string; name: string; roots: 
     if (!rec) continue;
     const roots = recordRoots(path, Number(name), rec, procs, boot);
     if (!roots.length) rmSync(path, { force: true });
-    else if (rec.dir === dir) found.push({ group: name, name: rec.name, roots });
+    else if (rec.dir === dir && !(skipCaller && holdsCaller(roots, chain, table)))
+      found.push({ group: name, name: rec.name, roots });
   }
   return found;
 }
@@ -3569,12 +3602,7 @@ async function stopTree(
   }
   let table = processTable();
   if (!table.has(process.pid)) return { code: 1, text: "cannot list processes" };
-  const spare = new Set([0, 1]);
-  let ancestor = process.pid;
-  while (table.has(ancestor) && !spare.has(ancestor)) {
-    spare.add(ancestor);
-    ancestor = table.get(ancestor)!.ppid;
-  }
+  const spare = new Set([0, 1, ...callerChain(table, process.pid)]);
   const accepted = parsed.filter(
     (root) =>
       table.has(root.pid) &&
@@ -7142,6 +7170,10 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     }
   }
   if (!collectOk) found.clear();
+  // The pane this call runs in, which a fixture copy's own postmaster shares with the run's tab:
+  // it goes with the caller's launch, and closing it, or the tab around it, would end the caller.
+  const ownPane = process.env.HERDR_PANE_ID ?? "";
+  let callerStays = false;
   let rc = 0;
   for (const file of placementFiles()) {
     try {
@@ -7160,7 +7192,11 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
     }
     if (!fields) continue;
     const [space, tab, pane, cwd] = fields as [string, string, string, string];
-    const live = registryScan(cwd);
+    if (ownPane !== "" && pane === ownPane) {
+      callerStays = true;
+      continue;
+    }
+    const live = registryScan(cwd, true);
     if (live.length) {
       warn(`a launch is still running in ${cwd}: ${live.map((item) => item.name).join(";")}`);
       rc = 2;
@@ -7173,8 +7209,8 @@ function herdrCloseRunPlacements(givenDispatch: string): number {
   }
   // The run's tab lives in the repository's space: close it once no launch
   // runs, while its panes are all run host's own. A user pane inside keeps
-  // it open, named in the refusal.
-  if (rc === 0) {
+  // it open, named in the refusal, and so does the caller's own.
+  if (rc === 0 && !callerStays) {
     const runTab = readRunTab(dispatch);
     if (runTab) {
       rc = herdrCloseRunTab(dispatch, runTab.workspace, runTab.tab);
@@ -7239,6 +7275,8 @@ function tmuxCloseRunWindows(givenDispatch: string): number {
   const dispatch = realpathLoose(givenDispatch);
   const repo = dispatchRepo(dispatch);
   const fixture = repo !== "" && isFixtureRepo(repo);
+  // The pane this call runs in: its window goes with the caller's launch, never with this call.
+  const ownPane = process.env.TMUX_PANE ?? "";
   const rows = run("tmux", [
     "list-windows",
     "-a",
@@ -7264,7 +7302,8 @@ function tmuxCloseRunWindows(givenDispatch: string): number {
       rc = 2;
       continue;
     }
-    const live = registryScan(cwd);
+    if (ownPane !== "" && paneRest.join("\t") === ownPane) continue;
+    const live = registryScan(cwd, true);
     if (live.length) {
       warn(`a launch is still running in ${cwd}; left run window ${w} open`);
       rc = 2;
