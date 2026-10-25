@@ -1436,10 +1436,11 @@ degrade, never a pass: the card says so.
    names `web-journey`, the walk is the journey report: write it to the path
    `<tool>/scripts/run verify journey-path <synthesis-wt> <dispatch>` prints. Put the preview link and
    QA results on the card. If the project has no UI or browser suite, say `none`.
-3. **Review link.** Put the absolute path of the synthesis worktree on the card and, when
-   `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review
-   surface already running; never start a duplicate. Verify the link from the user's device or
-   mark it unverified.
+3. **Review link.** Put the synthesis worktree's path inside the project, `.worktrees/<TICKET>`,
+   on the card, never its absolute path, which the card's private-data scan refuses, and, when
+   `run.json` config has `ship.review_link`, its value with `{path}` filled in with that same path.
+   Reuse a review surface already running; never start a duplicate. Verify the link from the
+   user's device or mark it unverified.
 4. **Check reach before the card.** Run `<tool>/scripts/run reach check <dispatch> card`
    and record its output. Exit 1 is a fault in the `reach` control: follow Tool faults and
    stop. Findings, notes and `not checked` records at this point are shown on the card and do
@@ -1534,8 +1535,9 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    is wrong, and a test is updated only when you can NAME the deliberate change that made the
    old assertion obsolete. Worse than red is a run that HANGS: if the suite stops being fast,
    re-read the change rather than waiting it out.
-2. **Review link.** The ship card carries the absolute path of the synthesis worktree and, where
-   the config in `run.json` sets a `ship.review_link` template, that template with the path filled in.
+2. **Review link.** The ship card carries the synthesis worktree's path inside the project,
+   `.worktrees/<TICKET>`, never its absolute path, and, where the config in `run.json` sets a
+   `ship.review_link` template, that template with that path filled in.
    Reuse whatever review surface is already running; never start a duplicate or restart one,
    since it may be serving another run. Never trust a check from the serving machine as proof
    the link works for the user: verify it from the device the user will open it on, or
