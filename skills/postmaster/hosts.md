@@ -96,7 +96,10 @@ resuming or taking over a leg. It derives the marker, event, error and attempt-r
 the previous attempt, `takeover` preserves the old stream and starts a fresh fallback stream,
 and `retry` repeats the last refused, pre-thread or user-routed wall attempt with its saved prompt.
 The leg command records one of `refused`, `pre-thread`, `walled`, `incomplete` or `finished`
-before `--marker` lands. A refusal to load the env file remains `refused`; no runbook reads
+before `--marker` lands. A leg is `walled` only when a request was refused: a `rate_limit_event`
+whose status is `rejected`, or an error shaped like a wall; a `rate_limit_event` whose status is
+`allowed` or `allowed_warning`, the notice that a usage window is nearly spent, is not a wall. A
+refusal to load the env file remains `refused`; no runbook reads
 `.err` text to classify the result. One starter holds the leg's lock at a time: a lock whose
 owner is dead is stolen, a live one refuses. The launch names itself in the lock as its
 first act, through a temporary file, and never runs unowned; a release removes only a lock

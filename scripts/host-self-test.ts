@@ -5309,6 +5309,13 @@ export async function runControls(): Promise<number> {
         "  *rateinfo-shape*)",
         '    printf \'{"type":"rate_limit_event","rate_limit_info":"limited","session_id":"thread-rl"}\\n\'',
         "    exit 1 ;;",
+        "  *rate-warning*)",
+        '    printf \'{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day","utilization":0.77,"surpassedThreshold":0.75},"session_id":"thread-rate-warning"}\\n\'',
+        '    printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"still working"}]}}\\n\'',
+        "    exit 1 ;;",
+        "  *rate-rejected*)",
+        '    printf \'{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"},"session_id":"thread-rate-rejected"}\\n\'',
+        "    exit 1 ;;",
         "  *wall-binary*)",
         '    printf \'{"session_id":"thread-bin"}\\n\'',
         "    printf 'Error: quota exceeded\\n' >&2",
@@ -5620,6 +5627,22 @@ export async function runControls(): Promise<number> {
         r.code === 0 &&
         nonEmptyLines(attemptsPath).length === before + 1 &&
         lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "rate-warning.txt");
+    writeFileSync(prompt, "rate-warning event\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a seven-day usage warning that still allows requests is not a wall",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "incomplete",
+      safeOutcome(attemptsPath),
+    );
+    prompt = join(legD, "rate-rejected.txt");
+    writeFileSync(prompt, "rate-rejected event\n");
+    r = await legRun(["launch", legD, legWt, "synthesis", "1", prompt]);
+    await pass(
+      "a rate-limit event whose request was rejected is a wall",
+      () => r.code === 0 && lastRecord(attemptsPath).outcome === "walled",
       safeOutcome(attemptsPath),
     );
     prompt = join(legD, "wall-chatter.txt");

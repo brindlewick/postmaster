@@ -5014,7 +5014,9 @@ function legClassify(params: {
         typeof info === "object" && info !== null && !Array.isArray(info)
           ? (info as Record<string, unknown>).status
           : undefined;
-      if (status !== undefined && status !== null && status !== "allowed") {
+      // Only a rejected request is a wall. "allowed" and "allowed_warning", the provider's notice
+      // that a usage window is nearly spent, are requests that went through.
+      if (status === "rejected") {
         writeFileSync(p.wall, "wall\n");
         break;
       }

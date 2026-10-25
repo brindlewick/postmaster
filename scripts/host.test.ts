@@ -86,7 +86,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "interactive sessions", count: 20 },
   { name: "clerk close", count: 6 },
   { name: "run role: the explicit host role", count: 2 },
-  { name: "leg attempt controls", count: 89 },
+  { name: "leg attempt controls", count: 91 },
   {
     name: "run environment identity, Claude session and lane env file: Herdr, tmux and no host",
     count: 42,
