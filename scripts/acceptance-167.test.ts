@@ -1,4 +1,4 @@
-// Oracle for #167, committed before the change: a report shows how long each
+// Oracle for #592, committed before the change: a report shows how long each
 // user message waited to be seen and for its answer, and how many times the
 // conversation was compacted, from Claude Code's own session record. Every
 // case drives scripts/run responsiveness as a subprocess on made-up records.

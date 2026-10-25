@@ -1,4 +1,4 @@
-// Oracle for #169, committed before the change: on Claude Code the
+// Oracle for #594, committed before the change: on Claude Code the
 // postmaster hands its steps to helpers, and keeps only talking, deciding
 // and starting them. Every test spawns `scripts/run` as a subprocess and
 // never imports the change. Timeouts are scaled down from the ticket's 30s
