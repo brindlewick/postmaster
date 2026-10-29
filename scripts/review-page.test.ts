@@ -2,11 +2,18 @@
 // against a throwaway repository with a base and a head commit, so its totals are held to git's
 // own for the same range (positive control) and a file with no address keeps its text (negative).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { run } from "./lib/proc.ts";
-import { groupChanges, lineCount, packChunks, parseChanges, titled } from "./review-page.ts";
+import {
+  checkSize,
+  groupChanges,
+  lineCount,
+  packChunks,
+  parseChanges,
+  titled,
+} from "./review-page.ts";
 
 const script = join(import.meta.dir, "review-page.ts");
 
@@ -49,6 +56,11 @@ describe("pure core", () => {
   test("a chunk closes before it would pass the limit", () => {
     expect(packChunks([4, 4, 4, 9, 1], 10)).toEqual([0, 0, 1, 2, 2]);
     expect(packChunks([], 10)).toEqual([]);
+  });
+
+  test("a page over the limit is refused with its size; one at the limit passes", () => {
+    expect(() => checkSize("the page", "x".repeat(11), 10)).toThrow("the page is");
+    expect(() => checkSize("the page", "x".repeat(10), 10)).not.toThrow();
   });
 
   test("the title is replaced, and markup in it dropped", () => {
@@ -111,6 +123,14 @@ afterAll(() => {
   rmSync(repo, { recursive: true, force: true });
 });
 
+/** The inline JSON block a page carries under an id. */
+function block(html: string, id: string): unknown {
+  const open = `<script type="application/json" id="${id}">`;
+  const at = html.indexOf(open);
+  expect(at).toBeGreaterThanOrEqual(0);
+  return JSON.parse(html.slice(at + open.length, html.indexOf("</script>", at)));
+}
+
 describe("the script", () => {
   test("change: totals match git's, the address is removed, the page is titled", () => {
     const out = join(repo, ".out-change");
@@ -120,33 +140,54 @@ describe("the script", () => {
       { cwd: repo },
     );
     expect(r.code).toBe(0);
-    const review = JSON.parse(readFileSync(join(out, "review.json"), "utf8"));
+    expect(r.out).toContain(
+      `index.html review-${basename(repo).toLowerCase()}-${head.slice(0, 7)}`,
+    );
+    // one file, nothing beside it: the shelf serves a page alone
+    expect(readdirSync(out)).toEqual(["index.html"]);
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    const review = block(html, "review-data") as {
+      changedFiles: number;
+      additions: number;
+      deletions: number;
+      redactions: number;
+      files: { path: string; lines: number | null }[];
+    };
     const short = run("git", ["-C", repo, "diff", "--shortstat", base, head]).out;
     expect(short).toContain(`${review.changedFiles} files changed`);
     expect(short).toContain(`${review.additions} insertions`);
     expect(short).toContain(`${review.deletions} deletion`);
     // once in the diff and once in the file as it stands
     expect(review.redactions).toBe(2);
-    const chunk = readFileSync(join(out, "chunks", "0.json"), "utf8");
-    expect(chunk).toContain("<address removed>");
-    expect(chunk).not.toContain("som" + "eon" + "e@c" + "omp" + "any" + ".co");
-    expect(chunk).toContain("one\\n2\\nthree\\nfour");
-    expect(readFileSync(join(out, "index.html"), "utf8")).toContain("<title>");
-    expect(review.files.find((f: { path: string }) => f.path === "gone.txt").lines).toBeNull();
+    const items = JSON.stringify(block(html, "review-items"));
+    expect(items).toContain("<address removed>");
+    expect(html).not.toContain("som" + "eon" + "e@c" + "omp" + "any" + ".co");
+    expect(items).toContain("one\\n2\\nthree\\nfour");
+    expect(html).toContain(`<title>${head.slice(0, 7)} review</title>`);
+    expect(html).not.toContain("<!-- page data -->");
+    expect(html).not.toContain("window.claude");
+    expect(review.files.find((f) => f.path === "gone.txt")?.lines).toBeNull();
   });
 
   test("files: each path as it stands at the ref, with its own file", () => {
     const out = join(repo, ".out-files");
     const r = run("bun", [script, "files", out, head, "keep.txt", "src/new.ts"], { cwd: repo });
     expect(r.code).toBe(0);
-    const data = JSON.parse(readFileSync(join(out, "files.json"), "utf8"));
-    expect(data.files.map((f: { path: string; lines: number }) => [f.path, f.lines])).toEqual([
-      ["keep.txt", 4],
-      ["src/new.ts", 2],
+    expect(readdirSync(out)).toEqual(["index.html"]);
+    expect(r.out).toContain(
+      `index.html code-${basename(repo).toLowerCase()}-${head.slice(0, 7)}: f0 f1`,
+    );
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    const data = block(html, "files-data") as {
+      files: { id: string; path: string; lines: number; text: string }[];
+    };
+    expect(data.files.map((f) => [f.id, f.path, f.lines])).toEqual([
+      ["f0", "keep.txt", 4],
+      ["f1", "src/new.ts", 2],
     ]);
-    expect(readFileSync(join(out, "files", "0.txt"), "utf8")).toBe("one\n2\nthree\nfour\n");
-    expect(readFileSync(join(out, "files", "1.txt"), "utf8")).toContain("<address removed>");
-    expect(existsSync(join(out, "index.html"))).toBe(true);
+    expect(data.files[0]?.text).toBe("one\n2\nthree\nfour\n");
+    expect(data.files[1]?.text).toContain("<address removed>");
+    expect(html).not.toContain("window.claude");
   });
 
   test("usage and an unknown ref exit 1", () => {

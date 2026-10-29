@@ -559,8 +559,8 @@ describe("skill: sessions learn the story page", () => {
       "story-picture",
       "lettering",
       "one file",
-      "no capabilities",
-      "watch",
+      "artifact publish",
+      "story-<repo>-<ticket>",
     ]) {
       expect(text).toContain(needle);
     }

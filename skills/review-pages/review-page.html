@@ -40,7 +40,7 @@
   color-scheme: dark;
 }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.5; }
-.app { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-inline: 16px; padding-block: 14px 110px; max-width: 1600px; margin: 0 auto; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-inline: 16px; padding-block: 14px 32px; max-width: 1600px; margin: 0 auto; }
 .top { display: grid; gap: 4px; }
 .eyebrow { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ex-ink); }
 h1 { margin: 0; font-family: var(--font-display); font-size: 21px; line-height: 1.25; text-wrap: balance; }
@@ -75,7 +75,7 @@ details.file[open] > summary { border-bottom: 1px solid var(--rule); }
 .code { font-family: var(--font-code); font-size: 12.5px; line-height: 1.6; overflow-x: auto; padding-block: 4px; background: var(--panel); }
 .rows { min-width: 100%; } .nowrap .rows { width: max-content; }
 .hunk { color: var(--muted); background: var(--accent-soft); padding: 2px 12px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.r { display: grid; grid-template-columns: 4.5ch 4.5ch 2ch minmax(0, 1fr); cursor: pointer; scroll-margin-top: 90px; }
+.r { display: grid; grid-template-columns: 4.5ch 4.5ch 2ch minmax(0, 1fr); scroll-margin-top: 90px; }
 .fileview .r { grid-template-columns: 1ch 5ch minmax(0, 1fr); }
 .nowrap .r { grid-template-columns: 4.5ch 4.5ch 2ch max-content; } .nowrap .fileview .r { grid-template-columns: 1ch 5ch max-content; }
 .n { color: var(--gutter); text-align: right; padding-right: 1ch; user-select: none; -webkit-user-select: none; font-variant-numeric: tabular-nums; }
@@ -85,12 +85,8 @@ details.file[open] > summary { border-bottom: 1px solid var(--rule); }
 .r.add { background: var(--add); } .r.add .sg { color: var(--add-ink); }
 .r.del { background: var(--del); } .r.del .sg { color: var(--del-ink); }
 .fileview .r.changed .sg { background: var(--add-ink); } .fileview .r.after-del .sg { box-shadow: inset 0 2px 0 var(--del-ink); }
-.r.sel { background: var(--mark); box-shadow: inset 3px 0 0 var(--mark-edge); }
 .r.hit { animation: hit 1.6s ease-out; }
 @keyframes hit { from { background: var(--mark); } }
-.thread { margin: 4px 10px 8px; display: grid; gap: 6px; font-family: var(--font-ui); }
-.cm { background: var(--bg); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 6px 10px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cm.claude { border-left-color: var(--ok); } .cm .who { display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
 .status { padding: 14px; color: var(--muted); }
 .more { display: block; width: 100%; font: inherit; font-size: 13px; color: var(--accent); background: var(--accent-soft); border: 0; padding: 8px; cursor: pointer; }
 .hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-selector-tag { color: var(--hl-keyword); }
@@ -100,16 +96,9 @@ details.file[open] > summary { border-bottom: 1px solid var(--rule); }
 .hljs-title, .hljs-section, .hljs-name, .hljs-attr, .hljs-property { color: var(--hl-title); }
 .hljs-type, .hljs-params, .hljs-variable, .hljs-template-variable { color: var(--hl-type); }
 .hljs-meta, .hljs-link, .hljs-deletion { color: var(--hl-meta); }
-.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--panel); border-top: 1px solid var(--rule); box-shadow: 0 -6px 18px rgb(0 0 0 / .08); padding-inline: 16px; padding-block: 8px calc(8px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; }
-.barrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.barrow .grow { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
 .btn { font: inherit; font-size: 14px; font-weight: 600; border-radius: 9px; padding: 8px 12px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); cursor: pointer; }
 .btn.quiet { background: transparent; color: var(--accent); }
 .btn:disabled { opacity: .5; cursor: default; }
-.sheet { display: grid; gap: 6px; }
-.sheet label { font-size: 13px; font-weight: 600; }
-.sheet textarea { font: inherit; font-size: 15px; color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 9px; padding: 8px 10px; min-height: 4em; width: 100%; box-sizing: border-box; resize: vertical; }
-.copyout { width: 100%; box-sizing: border-box; font-family: var(--font-code); font-size: 12px; }
 .loadtime { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
 @media (min-width: 900px) {
   .app { grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.6fr); grid-template-areas: "top top" "side tabs" "side main"; column-gap: 24px; align-items: start; }
@@ -121,7 +110,6 @@ details.file[open] > summary { border-bottom: 1px solid var(--rule); }
   .main { grid-area: main; min-width: 0; }
   body.focus-side .main, body.focus-main .side { display: block; }
   .code { font-size: 13.5px; }
-  .bar { left: auto; right: 24px; bottom: 18px; width: min(560px, calc(100vw - 48px)); border: 1px solid var(--rule); border-radius: 14px; }
   h1 { font-size: 26px; }
 }
 @media (max-width: 899.98px) { body.focus-side .main { display: none; } body.focus-main .side { display: none; } }
@@ -133,6 +121,7 @@ details.file[open] > summary { border-bottom: 1px solid var(--rule); }
     <p class="eyebrow" id="eyebrow">Review</p>
     <h1 id="title">Loading the review…</h1>
     <p class="meta" id="meta"></p>
+    <p class="meta">Select any text to comment on it. Your verdict goes in your chat with the session.</p>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Views">
@@ -168,30 +157,15 @@ details.file[open] > summary { border-bottom: 1px solid var(--rule); }
   </main>
 </div>
 
-<div class="bar" id="bar">
-  <div class="barrow" id="selrow" hidden>
-    <span class="grow" id="seltext"></span>
-    <button class="btn" type="button" id="comment">Comment</button>
-    <button class="btn quiet" type="button" id="clear">Clear</button>
-  </div>
-  <form class="sheet" id="csheet" hidden>
-    <label for="ctext" id="clabel">Comment</label>
-    <textarea id="ctext" maxlength="3000" placeholder="What should change here?"></textarea>
-    <div class="barrow"><span class="grow"></span><button class="btn quiet" type="button" id="ccancel">Cancel</button><button class="btn" type="submit" id="csave">Save comment</button></div>
-  </form>
-  <div class="barrow" id="vrow"><span class="grow" id="state">Tap a line to comment on it. Your verdict goes in your chat with the session.</span><button class="btn quiet" type="button" id="copy">Copy for chat</button></div>
-  <textarea class="copyout" id="copyout" rows="3" hidden aria-label="Text to paste into your chat"></textarea>
-</div>
-
+<!-- page data -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 <script>
 const T0 = performance.now();
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-let R = null; const chunks = new Map(); let db = null;
-let sel = null, comments = [];
+// The data is inline, written by scripts/review-page.ts: the change, then every file's diff and text.
+let R = null; let ITEMS = null;
 let sideTab = "ticket", mainTab = "changes";
-const PAGE = "review";
 const BIG = 12;          // more files than this: diffs start folded and draw when opened
 const SLICE = 400;       // rows drawn at a time in a long diff or file
 
@@ -280,11 +254,8 @@ function parseDiff(text) {
   }
   return hunks;
 }
-async function chunk(k) {
-  if (!chunks.has(k)) chunks.set(k, fetch("chunks/" + k + ".json").then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }));
-  return chunks.get(k);
-}
-async function item(fi) { const items = await chunk(R.files[fi].chunk); return items.find((x) => x.i === fi); }
+function readData(id) { const node = document.getElementById(id); return node ? JSON.parse(node.textContent) : null; }
+async function item(fi) { if (!ITEMS) ITEMS = readData("review-items") || []; return ITEMS.find((x) => x.i === fi); }
 function drawInSlices(container, makeRows, total) {
   // Draws rows SLICE at a time; a button draws the next slice, so a huge file never blocks the page.
   let at = 0;
@@ -293,7 +264,7 @@ function drawInSlices(container, makeRows, total) {
     const frag = document.createDocumentFragment();
     makeRows(at, end, frag); at = end;
     container.append(frag);
-    if (at < total) { const b = el("button", "more", "Show " + Math.min(SLICE, total - at) + " more of " + (total - at) + " lines"); b.type = "button"; b.addEventListener("click", () => { b.remove(); step(); paintComments(); }); container.append(b); }
+    if (at < total) { const b = el("button", "more", "Show " + Math.min(SLICE, total - at) + " more of " + (total - at) + " lines"); b.type = "button"; b.addEventListener("click", () => { b.remove(); step(); }); container.append(b); }
   };
   step();
 }
@@ -311,7 +282,7 @@ let focus = "main";
 for (const b of document.querySelectorAll(".tabs [data-tab]")) b.addEventListener("click", () => {
   const t = b.dataset.tab;
   if (t === "ticket" || t === "summary") { sideTab = t; focus = "side"; } else { mainTab = t; focus = "main"; if (t === "files") renderFile(); }
-  clearSel(); applyTabs(focus); window.scrollTo({ top: 0 });
+  applyTabs(focus); window.scrollTo({ top: 0 });
 });
 for (const b of document.querySelectorAll("[data-side]")) b.addEventListener("click", () => { sideTab = b.dataset.side; applyTabs(focus); });
 window.matchMedia("(min-width: 900px)").addEventListener("change", () => applyTabs(focus));
@@ -335,7 +306,6 @@ function diffRows(fi, f, hunks, into) {
       const l = x.l;
       const r = el("div", "r" + (l.t === "+" ? " add" : l.t === "-" ? " del" : ""));
       r.id = "c-" + fi + "-" + (l.n != null ? "n" + l.n : "o" + l.o);
-      r.dataset.fi = String(fi); r.dataset.side = l.n != null ? "new" : "old"; r.dataset.line = String(l.n != null ? l.n : l.o);
       r.append(el("span", "n", l.o != null ? String(l.o) : ""), el("span", "n", l.n != null ? String(l.n) : ""), el("span", "sg", l.t === " " ? "" : l.t), runs(el("span", "c"), x.runs));
       frag.append(r);
     }
@@ -352,7 +322,6 @@ async function openDiff(fi, det) {
     if (f.binary) rows.append(el("div", "status", "A binary file: nothing to show."));
     else if (!it.diff.trim()) rows.append(el("div", "status", f.status === "R" ? "Renamed, with no change to its text." : "No change to show."));
     else diffRows(fi, f, parseDiff(it.diff), rows);
-    paintComments();
   } catch (e) { code.replaceChildren(el("div", "status", "This file did not load (" + e.message + ").")); det.dataset.drawn = ""; }
 }
 function renderChanges() {
@@ -403,7 +372,7 @@ async function renderFile() {
     for (let k = a; k < b; k++) {
       const n = k + 1;
       const r = el("div", "r" + (changed.has(n) ? " changed" : "") + (afterDel.has(n) ? " after-del" : ""));
-      r.id = "f-" + fi + "-" + n; r.dataset.fi = String(fi); r.dataset.side = "new"; r.dataset.line = String(n);
+      r.id = "f-" + fi + "-" + n;
       r.append(el("span", "sg", ""), el("span", "n", String(n)), runs(el("span", "c"), lines[k]));
       frag.append(r);
     }
@@ -411,7 +380,6 @@ async function renderFile() {
   // a file is drawn whole up to 3000 lines; past that, in slices
   if (total <= 3000) { const frag = document.createDocumentFragment(); make(0, total, frag); rows.append(frag); }
   else drawInSlices(rows, make, total);
-  paintComments();
 }
 function stepChange(dir) {
   const rows = [...document.querySelectorAll("#files .r.changed, #files .r.after-del")]; if (!rows.length) return;
@@ -424,73 +392,10 @@ $("prev").addEventListener("click", () => stepChange(-1));
 $("wrap-c").addEventListener("change", (e) => $("changes").classList.toggle("nowrap", !e.target.checked));
 $("wrap-f").addEventListener("change", (e) => $("files").classList.toggle("nowrap", !e.target.checked));
 
-// ---------- selection and comments ----------
-function rowId(v, fi, side, n) { return v === "changes" ? "c-" + fi + "-" + (side === "new" ? "n" : "o") + n : "f-" + fi + "-" + n; }
-function selectRange(v, fi, side, a, b) {
-  const from = Math.min(a, b), to = Math.max(a, b);
-  clearSel(true);
-  sel = { view: v, fi, side, from, to };
-  for (let n = from; n <= to; n++) $(rowId(v, fi, side, n))?.classList.add("sel");
-  $("seltext").textContent = R.files[fi].path.split("/").at(-1) + (side === "old" ? ", removed lines " : ", lines ") + (from === to ? from : from + "–" + to);
-  $("selrow").hidden = false; $("vrow").hidden = true;
-}
-function clearSel(keepBar) {
-  sel = null;
-  for (const r of document.querySelectorAll(".r.sel")) r.classList.remove("sel");
-  if (!keepBar) { $("selrow").hidden = true; $("csheet").hidden = true; $("vrow").hidden = false; }
-}
-document.addEventListener("click", (ev) => {
-  const r = ev.target.closest(".r"); if (!r) return;
-  if (String(window.getSelection ? window.getSelection() : "").length) return;
-  const v = r.closest("#files") ? "files" : "changes";
-  const fi = Number(r.dataset.fi), side = r.dataset.side, n = Number(r.dataset.line);
-  if (sel && sel.view === v && sel.fi === fi && sel.side === side && sel.from === sel.to) { if (sel.from === n) { clearSel(); return; } selectRange(v, fi, side, sel.from, n); return; }
-  selectRange(v, fi, side, n, n);
-});
-$("clear").addEventListener("click", () => clearSel());
-$("comment").addEventListener("click", () => { if (!sel) return; $("clabel").textContent = "Comment on " + $("seltext").textContent; $("selrow").hidden = true; $("csheet").hidden = false; $("ctext").focus(); });
-$("ccancel").addEventListener("click", () => { $("csheet").hidden = true; $("selrow").hidden = !sel; });
-$("csheet").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const text = $("ctext").value.trim(); if (!text || !sel) return;
-  if (!db) { note("Saving is off in this view, so the comment was not kept."); return; }
-  const f = R.files[sel.fi];
-  const doc = { kind: "comment", page: PAGE, path: f.path, side: sel.side, from: sel.from, to: sel.to, view: sel.view, text, by: "user", at: new Date().toISOString() };
-  $("csave").disabled = true;
-  try { await db.collection("comments").add(doc); $("ctext").value = ""; $("csheet").hidden = true; clearSel(); note("Comment saved " + hm(doc.at) + ". Claude reads it when you tell your session."); }
-  catch (e) { note("The comment was not saved (" + (e && e.code || "error") + "). Your text is still in the box."); $("csheet").hidden = false; }
-  finally { $("csave").disabled = false; }
-});
-function paintComments() {
-  for (const t of document.querySelectorAll(".thread")) t.remove();
-  for (const c of comments.filter((x) => !x.replyTo)) {
-    const fi = R.files.findIndex((f) => f.path === c.path); if (fi < 0) continue;
-    for (const v of ["changes", "files"]) {
-      if (v === "files" && c.side !== "new") continue;
-      const row = $(rowId(v, fi, c.side, c.to)); if (!row) continue;
-      const th = el("div", "thread");
-      const add = (x) => { const m = el("div", "cm" + (x.by === "claude" ? " claude" : "")); m.append(el("span", "who", (x.by === "claude" ? "Claude" : "You") + " · " + (c.from === c.to ? "line " + c.from : "lines " + c.from + "–" + c.to) + " · " + hm(x.at))); m.append(x.text); th.append(m); };
-      add(c); for (const r of comments.filter((x) => x.replyTo === c.id)) add(r);
-      row.after(th);
-    }
-  }
-}
-
-function note(t) { $("state").textContent = t; }
-function chatText() {
-  const n = comments.filter((c) => !c.replyTo && c.by !== "claude").length;
-  return "I reviewed " + (R.ticket ? "#" + R.ticket : "the change") + (R.pr ? " (pull request " + R.pr + ")" : "") + " on its page: " + n + (n === 1 ? " line comment" : " line comments") + ". Read them there.";
-}
-$("copy").addEventListener("click", async () => {
-  const t = chatText();
-  try { await navigator.clipboard.writeText(t); note("Copied. Paste it into your chat with the session."); $("copyout").hidden = true; }
-  catch (e) { const o = $("copyout"); o.value = t; o.hidden = false; o.focus(); o.select(); note("Copy the selected text and paste it into your chat."); }
-});
-
 // ---------- start ----------
 (async () => {
-  try { const res = await fetch("review.json"); if (!res.ok) throw new Error("HTTP " + res.status); R = await res.json(); }
-  catch (e) { $("title").textContent = "The review data did not load (" + e.message + "). Reload to try again."; return; }
+  try { R = readData("review-data"); if (!R) throw new Error("no data in the page"); }
+  catch (e) { $("title").textContent = "The review data did not load (" + e.message + "). Rebuild the page with scripts/run review-page."; return; }
   $("title").textContent = R.ticket ? "#" + R.ticket + ", " + R.ticketTitle : R.ticketTitle;
   $("eyebrow").textContent = "Review" + (R.pr ? " · pull request " + R.pr : "") + (R.mergedAt ? " · merged " + hm(R.mergedAt) : "") + " · head " + R.head.slice(0, 7);
   $("meta").append(R.changedFiles + (R.changedFiles === 1 ? " file · " : " files · "), el("b", null, "+" + R.additions), " ", el("i", null, "−" + R.deletions));
@@ -501,8 +406,5 @@ $("copy").addEventListener("click", async () => {
   await Promise.all(firstOpen);
   const ms = Math.round(performance.now() - T0);
   $("loadtime").textContent = "Loaded in " + ms + " ms" + (R.files.length <= BIG ? ", every diff drawn." : ", diffs drawn when opened.");
-  try { db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null; } catch (e) { db = null; }
-  if (!db) { note("Saving is off in this view: comments would not be kept."); return; }
-  db.collection("comments").orderBy("at").onSnapshot((s) => { comments = s.docs.map((d) => Object.assign({ id: d.id }, d.data())); paintComments(); }, (e) => note("Comments stopped updating (" + e.code + ")."));
 })();
 </script>

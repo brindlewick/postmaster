@@ -363,8 +363,8 @@ ticket or a comment, write it as a clickable link, so that nobody has to look it
   address its adapter gives (`skills/postmaster/trackers.md`).
 - A file or folder in a repository on GitHub: its page at the commit or branch you mean,
   `[scripts/launch.ts](https://github.com/<owner>/<repo>/blob/<commit>/scripts/launch.ts)`, with `#L<a>-L<b>` when you name lines.
-- A project's homepage, a published documentation or wiki page, an artifact or a document: its address (for an
-  artifact, `https://claude.ai/code/artifact/<uuid>`).
+- A project's homepage, a published documentation or wiki page, a page or a document: its address (for a page on
+  the Artifact Shelf, the link `artifact publish` printed).
 
 A path that exists only on the machine, such as a run's record or a file a lane has not committed, stays plain
 text, since no link can reach it.
@@ -377,10 +377,12 @@ criteria, the decisions made and who made them, and the direction, with no file,
 premises verified at a base commit. The user reviews the plain part once. The coachman writes no spec of its own, and
 the workhorses decide the files and the tasks.
 
-**Comment auto-replies stay off.** Publishing or watching an artifact turns on automatic replies to comments sent to Claude,
-and a reply can land in a thread the conversation never sees. Right after each publish or watch, stop the session's watch on
-that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
+**Comments are read when the user says so, on any page.** The user says when they have left comments on a page or a
+document; then read each thread, answer it, and make the change it asks for. On the Artifact Shelf, read them with
+`artifact comments <slug> --open --json`, answer in the chat, and close each one answered with `artifact close <id>`. Publishing
+or watching a claude.ai document turns on automatic replies to comments sent to Claude, which can land in a thread the
+conversation never sees: right after each publish or watch, stop the session's watch on it.
 **Show a change or ticket-linked code on a page made for the phone.** When the user reviews a change with automatic merging off,
-opens files named in the ticket's technical notes, or asks for a ticket's story, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`):
+opens files named in the ticket's technical notes, or asks for a ticket's story, publish it on the Artifact Shelf with the `review-pages` skill (`skills/review-pages/SKILL.md`):
 a review page with the ticket, the summary, the diff and the files as they stand, a code viewer at the cited lines, or a story page for a ticket's story.
-The user comments on the page and gives the verdict in the chat. Claude Code only, until the dashboard shows changes.
+The user comments on the page and gives the verdict in the chat.

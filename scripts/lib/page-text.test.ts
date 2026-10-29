@@ -1,7 +1,7 @@
 // Tests beside scripts/lib/page-text.ts: the redaction keeps line numbers and
 // example addresses, and languages come from the extension.
 import { describe, expect, test } from "bun:test";
-import { langOf, scrub } from "./page-text.ts";
+import { DATA_MARK, dataBlock, langOf, scrub, shelfSlug, withData } from "./page-text.ts";
 
 describe("page text", () => {
   test("addresses outside the example domains are removed, line numbers kept", () => {
@@ -56,5 +56,29 @@ describe("page text", () => {
     expect(langOf("a/b.sh")).toBe("bash");
     expect(langOf("README.md")).toBe("markdown");
     expect(langOf("Makefile")).toBe("plaintext");
+  });
+
+  test("inline data reads back whole, and no text in it can close its block", () => {
+    const value = { a: "</script><b>", n: [1, 2] };
+    const block = dataBlock("d", value);
+    expect(block.startsWith('<script type="application/json" id="d">')).toBe(true);
+    const inner = block.slice(block.indexOf(">") + 1, block.lastIndexOf("</script>"));
+    expect(inner).not.toContain("<");
+    expect(JSON.parse(inner)).toEqual(value);
+  });
+
+  test("the data goes where the template marks it; a template without the mark is refused", () => {
+    expect(withData(`<p>a</p>${DATA_MARK}<script>x</script>`, ["B1", "B2"])).toBe(
+      "<p>a</p>B1\nB2<script>x</script>",
+    );
+    expect(() => withData("<p>no mark</p>", ["B"])).toThrow("no data mark");
+  });
+
+  test("a slug keeps to the shelf's alphabet and length", () => {
+    expect(shelfSlug(["review", "My_Repo.v2", "#12"])).toBe("review-my-repo-v2-12");
+    expect(shelfSlug(["--x--"])).toBe("x");
+    const long = shelfSlug(["code", "a".repeat(80)]);
+    expect(long.length).toBe(64);
+    expect(long).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/u);
   });
 });

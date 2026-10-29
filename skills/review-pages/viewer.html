@@ -47,7 +47,7 @@
   color-scheme: dark;
 }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.5; }
-.app { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-inline: 16px; padding-block: 16px 96px; max-width: 1400px; margin: 0 auto; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-inline: 16px; padding-block: 16px 32px; max-width: 1400px; margin: 0 auto; }
 .top { display: grid; gap: 6px; }
 .eyebrow { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wt-ink); }
 h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.2; text-wrap: balance; }
@@ -67,7 +67,7 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
 .code { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; font-family: var(--font-code); font-size: 12.5px; line-height: 1.6; padding-block: 8px; }
 .lines { min-width: 100%; }
 .nowrap .lines { width: max-content; }
-.l { display: grid; grid-template-columns: calc(var(--digits, 3) * 1ch + 1.8ch) minmax(0, 1fr); cursor: pointer; scroll-margin-top: 72px; }
+.l { display: grid; grid-template-columns: calc(var(--digits, 3) * 1ch + 1.8ch) minmax(0, 1fr); scroll-margin-top: 72px; }
 .nowrap .l { grid-template-columns: calc(var(--digits, 3) * 1ch + 1.8ch) max-content; }
 .n { color: var(--gutter); text-align: right; padding-right: 1ch; user-select: none; -webkit-user-select: none; font-variant-numeric: tabular-nums; }
 .c { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 14px; min-width: 0; }
@@ -85,16 +85,7 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
 .hljs-meta, .hljs-link, .hljs-deletion { color: var(--hl-meta); }
 .hljs-strong { font-weight: 600; }
 .hljs-emphasis { font-style: italic; }
-.selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; padding-inline: 16px; padding-block: 10px calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 1px solid var(--rule); box-shadow: 0 -6px 18px rgb(0 0 0 / .08); }
-#seltext { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.btn { font: inherit; font-size: 14px; font-weight: 600; border-radius: 9px; padding: 9px 14px; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); cursor: pointer; }
-.btn.quiet { background: transparent; color: var(--accent); }
-.btn:disabled { opacity: .55; cursor: default; }
-#note { flex-basis: 100%; text-align: center; margin: 0; font-size: 12.5px; color: var(--muted); }
-.composer { flex-basis: 100%; display: grid; gap: 6px; }
-.composer label { font-size: 13px; font-weight: 600; }
-.composer textarea { font: inherit; font-size: 15px; color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 9px; padding: 8px 10px; resize: vertical; min-height: 4.5em; width: 100%; box-sizing: border-box; }
-.cactions { display: flex; gap: 8px; justify-content: flex-end; }
+.lede a { color: var(--accent); }
 .foot { font-size: 12.5px; color: var(--muted); max-width: 68ch; margin: 0; }
 @media (min-width: 760px) {
   .app { grid-template-columns: 270px minmax(0, 1fr); grid-template-areas: "top top" "files viewer" "foot viewer"; align-items: start; column-gap: 22px; }
@@ -105,7 +96,6 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
   .viewer { grid-area: viewer; }
   .foot { grid-area: foot; }
   .code { font-size: 13.5px; }
-  .selbar { left: auto; right: 24px; bottom: 20px; border: 1px solid var(--rule); border-radius: 14px; max-width: 520px; }
   h1 { font-size: 28px; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
@@ -115,7 +105,7 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
   <header class="top">
     <p class="eyebrow" id="eyebrow">Code</p>
     <h1 id="h1">Code</h1>
-    <p class="lede">Tap a line to select it, tap another to make a range, then comment. A comment is pinned to the first line you chose and starts with the file and the lines.</p>
+    <p class="lede">Select any text to comment on it. A link to cited lines lights them. <a id="tocomment" href="" target="_blank" rel="noopener" hidden>Open this page with comments</a></p>
   </header>
 
   <nav class="files" id="files" aria-label="Files"></nav>
@@ -128,27 +118,13 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
     <div class="code" id="code" role="region" aria-label="File contents"><div class="status">Loading the file…</div></div>
   </main>
 
-  <p class="foot">A comment is pinned to the first line you chose and starts with the file and the lines, then goes to Claude. Colours come from highlight.js 11.11.1; if it cannot load, the file shows as plain text.</p>
+  <p class="foot">Colours come from highlight.js 11.11.1; if it cannot load, the file shows as plain text.</p>
 </div>
 
-<div class="selbar" id="selbar" hidden>
-  <span id="seltext"></span>
-  <button class="btn" id="comment" type="button">Comment on these lines</button>
-  <button class="btn quiet" id="clear" type="button">Clear</button>
-  <form class="composer" id="composer" hidden>
-    <label for="ctext" id="clabel">Your comment</label>
-    <textarea id="ctext" rows="3" maxlength="3000" placeholder="What should change here?"></textarea>
-    <div class="cactions">
-      <button class="btn" id="send" type="submit">Send to Claude</button>
-      <button class="btn quiet" id="cancel" type="button">Cancel</button>
-    </div>
-  </form>
-  <p id="note" hidden></p>
-</div>
-
+<!-- page data -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 <script>
-// The files come from files.json, written beside the page by scripts/review-page.ts.
+// The files are inline, written into the page by scripts/review-page.ts.
 let FILES = [];
 let REF = "";
 const WHERE = { at: "As it stands at " };
@@ -157,7 +133,6 @@ const $ = (id) => document.getElementById(id);
 const cache = new Map();
 let current = null;
 let sel = null;
-let comments = null;
 
 function baseName(path) { return path.split("/").at(-1); }
 
@@ -209,9 +184,7 @@ function highlight(text, lang) {
 
 async function load(f) {
   if (cache.has(f.id)) return cache.get(f.id);
-  const res = await fetch(f.src);
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  const raw = await res.text();
+  const raw = f.text;
   const text = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
   const entry = { text, bytes: new TextEncoder().encode(raw).length, lines: highlight(text, f.lang) };
   cache.set(f.id, entry);
@@ -227,8 +200,6 @@ function renderLines(f, entry) {
     const row = document.createElement("div");
     row.className = "l";
     row.id = f.id + "-L" + n;
-    row.dataset.n = String(n);
-    row.setAttribute("data-comment-target", "");
     const num = document.createElement("span"); num.className = "n"; num.textContent = String(n);
     const code = document.createElement("span"); code.className = "c";
     for (const r of runs) {
@@ -257,7 +228,7 @@ async function openFile(id, range) {
     $("fmeta").textContent = WHERE.at + REF.slice(0, 7) + " · " + entry.lines.length + " lines · " + (entry.bytes / 1024).toFixed(1) + " KB";
     code.replaceChildren(renderLines(f, entry));
     if (range) { select(range.from, range.to); scrollToLine(range.from); }
-    else { code.scrollTop = 0; updateSelbar(); }
+    else code.scrollTop = 0;
   } catch (e) {
     code.replaceChildren(Object.assign(document.createElement("div"), { className: "status", textContent: "Could not load " + f.path + " (" + e.message + "). Reload the page to try again." }));
   }
@@ -273,93 +244,20 @@ function select(from, to) {
   sel = { from: a, to: b };
   for (const row of document.querySelectorAll(".l.sel")) row.classList.remove("sel");
   for (let n = a; n <= b; n++) $(current.id + "-L" + n)?.classList.add("sel");
-  updateSelbar();
 }
 
-function clearSel() {
-  sel = null;
-  for (const row of document.querySelectorAll(".l.sel")) row.classList.remove("sel");
-  updateSelbar();
-}
-
-function rangeText() { return sel.from === sel.to ? "line " + sel.from : "lines " + sel.from + "–" + sel.to; }
-
-function updateSelbar() {
-  const bar = $("selbar");
-  bar.hidden = !sel;
-  $("note").hidden = true;
-  $("composer").hidden = true;
-  $("comment").hidden = false;
-  if (!sel) return;
-  $("seltext").textContent = sel.from === sel.to ? "Line " + sel.from : "Lines " + sel.from + "–" + sel.to;
-}
-
-$("code").addEventListener("click", (ev) => {
-  const row = ev.target.closest(".l");
-  if (!row) return;
-  const picked = window.getSelection && String(window.getSelection()).length > 0;
-  if (picked) return;
-  const n = Number(row.dataset.n);
-  if (!sel) select(n, n);
-  else if (sel.from === sel.to && sel.from === n) clearSel();
-  else if (sel.from === sel.to) select(sel.from, n);
-  else select(n, n);
-});
-
-$("clear").addEventListener("click", clearSel);
 $("wrap").addEventListener("change", (ev) => { $("code").classList.toggle("nowrap", !ev.target.checked); });
 
-function note(text) { const p = $("note"); p.textContent = text; p.hidden = false; }
-
-// A comment is pinned to the first chosen line, and its text starts with the file and the
-// lines, so whoever reads the thread knows exactly where it points.
-let canSend = "off";
-
-$("comment").addEventListener("click", async () => {
-  if (!sel) return;
-  if (!comments) { note("Commenting from this page is off here. Use claude.ai's comment mode and tap a line."); return; }
-  try { canSend = await comments.canSendToClaude(); } catch (e) { canSend = "off"; }
-  $("send").textContent = canSend === "available" ? "Send to Claude" : "Post comment";
-  $("clabel").textContent = "Comment on " + baseName(current.path) + ", " + rangeText();
-  $("comment").hidden = true;
-  $("composer").hidden = false;
-  $("note").hidden = true;
-  $("ctext").focus();
-});
-
-$("cancel").addEventListener("click", () => { $("composer").hidden = true; $("comment").hidden = false; });
-
-$("composer").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  if (!sel || !comments) return;
-  const words = $("ctext").value.trim();
-  if (!words) { note("Write a comment first."); return; }
-  const row = $(current.id + "-L" + sel.from);
-  if (!row) return;
-  const text = current.path + ", " + rangeText() + "\n" + words;
-  $("send").disabled = true;
+// Opened by its raw address, as a ticket's link to lines opens it, the page offers the shelf's
+// viewer, where comments are made. Inside the viewer's frame it is already there.
+function offerComments() {
   try {
-    const anchor = await comments.anchorFor(row);
-    if (canSend === "available") {
-      await comments.sendToClaude({ anchor, text });
-      note("Sent to Claude. The reply appears in the comment thread on line " + sel.from + ".");
-    } else {
-      await comments.create({ anchor, text });
-      note("Posted on line " + sel.from + ". It was not sent to Claude.");
-    }
-    $("ctext").value = "";
-    $("composer").hidden = true;
-    $("comment").hidden = false;
-  } catch (e) {
-    const code = e && e.code ? e.code : "error";
-    if (code === "consent_required") note("Not posted. Allow comments from this page when claude.ai asks, then send again.");
-    else if (code === "forbidden" || code === "not_granted" || code === "capability_disabled") { $("comment").disabled = true; $("composer").hidden = true; note("Commenting from this page is off here."); }
-    else if (code === "claude_unavailable") { canSend = "off"; $("send").textContent = "Post comment"; note("Claude cannot take it from this view. Post it as a plain comment instead."); }
-    else note("Not posted (" + code + "). Your text is still here; try again once.");
-  } finally {
-    $("send").disabled = false;
-  }
-});
+    if (window.top !== window.self) return;
+    const m = /^\/raw\/([a-z0-9-]+)$/.exec(location.pathname);
+    if (!m) return;
+    const a = $("tocomment"); a.href = "/a/" + m[1]; a.hidden = false;
+  } catch (e) { /* framed elsewhere: nothing to offer */ }
+}
 
 function fromHash() {
   const m = /^#(f\d+)(?:-L(\d+)(?:-L(\d+))?)?$/.exec(location.hash);
@@ -370,18 +268,15 @@ function fromHash() {
 
 (async () => {
   try {
-    const res = await fetch("files.json"); if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json(); FILES = data.files; REF = data.ref || "";
+    const node = document.getElementById("files-data"); if (!node) throw new Error("no data in the page");
+    const data = JSON.parse(node.textContent); FILES = data.files; REF = data.ref || "";
     if (data.title) { $("h1").textContent = data.title; $("eyebrow").textContent = "Code · " + FILES.length + (FILES.length === 1 ? " file" : " files"); }
   } catch (e) { $("fpath").textContent = "The file list did not load (" + e.message + "). Reload to try again."; return; }
   renderFileList();
+  offerComments();
   const start = fromHash();
   if (start) openFile(start.id, start.range); else if (FILES.length) openFile(FILES[0].id, null);
   window.addEventListener("hashchange", () => { const h = fromHash(); if (h) openFile(h.id, h.range); });
 })();
 
-(async () => {
-  try { comments = window.claude && typeof window.claude.use === "function" ? await window.claude.use("comments") : null; }
-  catch (e) { comments = null; }
-})();
 </script>

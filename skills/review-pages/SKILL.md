@@ -1,39 +1,49 @@
 ---
 name: review-pages
-description: Show the user a change, or code named by a ticket, on a private claude.ai page made for a phone and an iPad. A review page has tabs for the ticket, the change's summary, the diff and the files as they stand, and takes comments on lines that the session reads and answers. A code viewer shows ticket-linked code files in colour at the lines the ticket cites. A story page tells a finished change, or a ticket, as one scroll: the change drawn first, then shown in code beside the ticket's words. Use it when the user reviews a change with automatic merging off, or opens files named in a ticket, and to tell a finished change in the order of the ticket's criteria. Claude Code only, until the dashboard shows changes.
+description: Show the user a change, or code named by a ticket, on an Artifact Shelf page made for a phone and an iPad. A review page has tabs for the ticket, the change's summary, the diff and the files as they stand. A code viewer shows ticket-linked code files in colour at the lines the ticket cites. A story page tells a finished change, or a ticket, as one scroll: the change drawn first, then shown in code beside the ticket's words. Each page is one file; the user comments on selected text on the shelf, and the session reads the comments with the shelf's command line and answers in the chat. Use it when the user reviews a change with automatic merging off, or opens files named in a ticket, and to tell a finished change in the order of the ticket's criteria.
 ---
 
 # Review pages
 
-Two pages the user shaped in #214 ("Research: review a change in an artifact page instead of in
-code-server"): a **review page** for a change, and a **code viewer** for code files a ticket names.
-Both are private artifacts that only Claude Code can publish. `<tool>` below is the postmaster
-repository: the folder two above this file once its link is resolved. Run the builder from the
-repository the change belongs to.
+Pages the user shaped in #214 ("Research: review a change in an artifact page instead of in
+code-server"): a **review page** for a change, a **code viewer** for code files a ticket names,
+and **story pages**. `<tool>` below is the postmaster repository: the folder two above this file
+once its link is resolved. Run a builder from the repository the change belongs to.
+
+## The Artifact Shelf
+
+Every page here is one self-contained HTML file, published on the Artifact Shelf with its
+command line, `artifact`, which reads the shelf's address from `ARTIFACT_SHELF_URL`. When
+`artifact` is not on PATH, say so and give the user the built file's path instead.
+
+- Publish: `artifact publish <file> --slug <slug>`. It prints `Title: <title>` and the page's
+  link on two lines; give the user both. Publishing to a slug that exists adds that page's next
+  version, and its link shows the newest, so a rebuilt page goes to the slug it had.
+- Comments: the user selects text on the page and comments on it on the shelf. When they say
+  they have, read the open ones with `artifact comments <slug> --open --json`: each has its id,
+  the quoted text and its body. Answer each one in the chat, act on what it asks, and close it
+  with `artifact close <id>` once answered.
+- A page is for the user alone: it is never shared, and its link is never written into a
+  repository or into text that becomes public.
 
 ## A review page for a change
 
-1. Build its data into a folder of your scratchpad:
+1. Build it into a folder of your scratchpad:
    - a pull request: `<tool>/scripts/run review-page change <dir> --pr <number>`. The title,
      its text as the summary, and the ticket it names (`#<n>, <title>`) come from GitHub.
    - a run's branch before its pull request: `<tool>/scripts/run review-page change <dir>
      --base <base> --head <branch> --ticket <n> --summary <file>`, the summary
      being what the card says the change does.
-   It prints one line with the files, lines and chunks, and how many email addresses it removed.
-2. Before the first publish, read `review.json` and search the chunks for home paths, host
-   names, private addresses and anything private. The builder removes email addresses and
-   nothing else; publish nothing private.
-3. Publish `<dir>/index.html` with the Artifact tool, `capabilities: {"db": {}}`, and `files`
-   mapping `review.json` and each `chunks/<k>.json` to their paths. Then, at once, stop the watch
-   on it (ArtifactComments, `action: watch`, `on: false`), as `AGENTS.md` says.
-4. Give the user the link as `https://claude.ai/code/artifact/<uuid>`: read `review.json` back
-   with the Artifact tool's `read` and `path`, and take the uuid from the folder it is saved in.
-5. When the user says they have commented, read the comments: ArtifactData `list` of the
-   collection `comments`. Each has `path`, `side` (`new` or `old`), `from`, `to`, `text` and
-   `at`. Answer each one on the page with ArtifactData `set` in `comments`, `doc_id`
-   `reply-<its id>`, data `{replyTo, path, side, from, to, by: "claude", text, at}`; the reply
-   shows under the comment without a reload. Then act on what they asked in the conversation.
-6. The verdict comes in the chat. The page has no verdict control and shows no checks or review
+   It writes `<dir>/index.html`, with every diff and file inline, and prints a line with the
+   files, lines, size and the email addresses it removed, then the page's path and its slug. A
+   change too big for the shelf's 10 MB limit is refused; review it on GitHub instead.
+2. Before the first publish, search `index.html` for home paths, host names, private addresses
+   and anything private. The builder removes email addresses and nothing else; publish nothing
+   private.
+3. Publish it to the printed slug, as the shelf section says.
+4. When the user says they have commented, read and answer the comments as the shelf section
+   says.
+5. The verdict comes in the chat. The page has no verdict control and shows no checks or review
    findings, by the user's choice.
 
 ## A code viewer for a ticket's files
@@ -44,14 +54,16 @@ repository the change belongs to.
    the blob; the Docs connector's `topic.uploads` and `topic.tabs` say how. Link each tab from
    the ticket with a tab chip.
 2. Code files go in one viewer: `<tool>/scripts/run review-page files <dir> <ref> <path>...`
-   writes `index.html`, `files.json` and `files/<k>.txt`. Read them as step 2 above says, then
-   publish `index.html` with `capabilities: {"comments": {}}` and `files` mapping `files.json`
-   and each `files/<k>.txt`, and stop the watch at once.
-3. Link each file from the ticket at the lines it cites:
-   `https://claude.ai/code/artifact/<uuid>#f<k>-L<a>-L<b>`, where `f<k>` is the file's `id` in
-   `files.json`.
-4. A comment from the viewer is pinned to its first line and starts with the file and the
-   lines. When the user says they have commented, read it with ArtifactComments `read`.
+   writes `index.html` with the files inline, and prints, for each page, its path, its slug and
+   the ids of the files it holds. Files too big for one page together go in `index-1.html`,
+   `index-2.html` and so on, each with its own slug. Read each page as step 2 above says, then
+   publish each to its slug.
+3. Link each file from the ticket's document, never from text that becomes public, at the lines
+   it cites: the page's link with `/a/` changed to `/raw/`, then `#f<k>-L<a>-L<b>`, where `f<k>`
+   is the file's id. That address opens the page alone at those lines, lit; the page then
+   offers a link to itself on the shelf, where comments are made.
+4. When the user says they have commented, read and answer the comments as the shelf section
+   says.
 
 ## A story page for a ticket
 
@@ -80,11 +92,12 @@ repository the change belongs to.
 4. Read `index.html` back for home paths, host names, private addresses and anything
    private, as step 2 of the review page says: the builder removes email addresses and
    nothing else.
-5. Publish `index.html` as one file with no capabilities (`{}`), and no files beside
-   it — the picture and the data are inline — then stop the watch on it at once, as
-   `AGENTS.md` says.
-6. The page is for reading: it takes no comments and has no verdict. The user answers in
-   the chat and edits the ticket in its document, as now.
+5. Publish `index.html` as one file, as the shelf section says, to the slug
+   `story-<repo>-<ticket>`, where `<repo>` is the repository's folder name: the picture and
+   the data are inline.
+6. The page is for reading and has no verdict. The user answers in the chat and edits the
+   ticket in its document; a comment left on the shelf is read and answered as the shelf
+   section says.
 
 ## A story page for a finished change
 
@@ -127,13 +140,15 @@ merged. The review page stays the place for comments on lines.
    console is clean.
 5. Read `index.html` back for home paths, host names, private addresses and anything private, as
    step 2 of the review page says: the builder removes email addresses and nothing else.
-6. Publish `index.html` as one file with no capabilities (`{}`), then stop the watch on it at
-   once, as `AGENTS.md` says, and give the user the link as step 4 of the review page says.
-7. The page is for reading: it takes no comments and has no verdict.
+6. Publish `index.html` as one file, as the shelf section says, to the slug
+   `story-<repo>-<head>`, with the head's first seven characters, and give the user the title
+   and the link.
+7. The page is for reading and has no verdict; a comment left on the shelf is read and
+   answered as the shelf section says.
 
 ## Never
 
 - Share a page, or publish one that holds a credential, a home path, a host name, an email
   address, a link to this machine, or a value from `~/.config`, `~/.claude` or `~/.postmaster`.
 - Delete a page without the user's word.
-- Record a page's link in a repository.
+- Record a page's link in a repository, or in text that becomes public.

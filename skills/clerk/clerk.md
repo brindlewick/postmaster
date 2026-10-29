@@ -222,8 +222,10 @@ Publish the draft as an editable document when your harness can publish one. Oth
 user the editor link from the brief; if no editor link is configured, give them the draft path. If
 you publish or watch a document, stop watching it immediately after publishing so comment
 auto-replies stay off. The user tells you when they have finished commenting. Then read each
-comment, reply in its thread, and make the requested change in the draft. Do not treat silence as
-approval.
+comment, reply in its thread, and make the requested change in the draft; for a comment on a
+page on the Artifact Shelf, such as the story, read it with `artifact comments <slug> --open
+--json`, answer in the chat, and close it with `artifact close <id>`, as the review-pages skill
+says. Do not treat silence as approval.
 
 Once the draft is first shown, run the message command once for the ticket —
 `<tool>/scripts/run notify clerk <repo> <ticket>` — and none for its later questions: by
