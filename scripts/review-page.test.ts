@@ -6,6 +6,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { run } from "./lib/proc.ts";
+import { shelfSlug } from "./lib/page-text.ts";
 import {
   checkSize,
   groupChanges,
@@ -140,9 +141,7 @@ describe("the script", () => {
       { cwd: repo },
     );
     expect(r.code).toBe(0);
-    expect(r.out).toContain(
-      `index.html review-${basename(repo).toLowerCase()}-${head.slice(0, 7)}`,
-    );
+    expect(r.out).toContain(`index.html review-${shelfSlug([basename(repo)])}-${head.slice(0, 7)}`);
     // one file, nothing beside it: the shelf serves a page alone
     expect(readdirSync(out)).toEqual(["index.html"]);
     const html = readFileSync(join(out, "index.html"), "utf8");
@@ -175,7 +174,7 @@ describe("the script", () => {
     expect(r.code).toBe(0);
     expect(readdirSync(out)).toEqual(["index.html"]);
     expect(r.out).toContain(
-      `index.html code-${basename(repo).toLowerCase()}-${head.slice(0, 7)}: f0 f1`,
+      `index.html code-${shelfSlug([basename(repo)])}-${head.slice(0, 7)}: f0 f1`,
     );
     const html = readFileSync(join(out, "index.html"), "utf8");
     const data = block(html, "files-data") as {

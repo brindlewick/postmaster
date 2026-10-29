@@ -62,7 +62,7 @@ export function withData(template: string, blocks: string[]): string {
 export function shelfSlug(parts: string[]): string {
   return parts
     .join("-")
-    .toLowerCase()
+    .toLowerCase() // LOWER: every letter not in a-z after this becomes a hyphen
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-+|-+$/gu, "")
     .slice(0, 64)
