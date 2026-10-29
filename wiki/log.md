@@ -1,12 +1,25 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-25] update | a split's pieces carry their own tests, and a split request ends in the clerk
+
+At the user's request, after fixture runs of the size rule met three gaps between the runbooks and
+a run. The coachman's closing line for a split request said its thread would be resumed once a
+piece's own count fit, where the postmaster's Stage E sends the work back to the clerk to plan the
+pieces as tickets; the coachman now ends the request with that step. Stage F names `f-size` as the
+one helper that counts at landing, and `f-verify` leaves the size to it. The rule that the acceptance
+tests come first, in a commit of their own, cannot hold under a split, so
+[the page](concepts/pull-request-size.md) says what happens instead: each piece carries its own tests,
+and the full acceptance set lands with the last piece. The change touches two coachman contract files,
+`skills/postmaster/coachman.md` and `skills/postmaster/postmaster.md`, so it merges only after a
+fixture run scores clean. No standing changed.
 
 ## [2026-10-24] update | a pull request for review keeps to a size budget
 

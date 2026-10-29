@@ -1,7 +1,7 @@
 // Tests beside scripts/libraries.ts: the cache merge and the command's
 // refusals. The list, facts and record flows sit in the #424 oracle.
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./lib/proc.ts";
@@ -77,6 +77,7 @@ describe("libraries usage", () => {
     const runs = mkdtempSync(join(tmpdir(), "postmaster-libraries-"));
     const dispatch = join(runs, "424");
     mkdirSync(dispatch, { recursive: true });
+    writeFileSync(join(dispatch, "manifest.json"), "{}\n");
     const wt = mkdtempSync(join(tmpdir(), "postmaster-libraries-wt-"));
     try {
       const id = libraries(["identity", "@babel/parser", "7.10.0"]);

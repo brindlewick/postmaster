@@ -173,14 +173,16 @@ merge_authority = "user"
 checkpoint_mode = "autonomous"
 
 # Optional. A template for the review link the ship card carries, with {path} replaced by the
-# absolute path of the synthesis worktree. Leave empty to ship the path alone.
+# synthesis worktree's path inside the project, .worktrees/<ticket>: the card is scanned for private
+# paths, and an absolute path under a home folder fails the scan. Leave empty to ship the path alone.
 review_link = ""
 
 # Whether a project's runs open their pull requests as drafts: "on" or "off",
-# "off" when absent. A draft is marked ready for review only on the user's
-# word, and only then do its checks decide the merge. A project's own settings
-# may turn drafts on for that project alone (scripts/run setup --project).
-# Drafts on also put each pull request under a size budget (project.example.toml).
+# "off" when absent; any other value is refused by every command that reads it.
+# A draft is marked ready for review only on the user's word, and only then do
+# its checks decide the merge. A project's own settings may turn drafts on for
+# that project alone (scripts/run setup --project). Drafts on also put each pull
+# request under a size budget (project.example.toml).
 draft_pull_requests = "off"
 
 # Knowledge sources: wikis, knowledge bases and standards pages kept on this machine, registered once by

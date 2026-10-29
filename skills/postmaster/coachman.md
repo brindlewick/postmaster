@@ -261,9 +261,17 @@ own disposable scratch. **The one prohibition for a reviewer is modifying the co
 review.** When `confine = "on"`, lanes also run in a process space of their own and cannot
 signal processes they did not start (`harnesses.md`, Confinement).
 
+**A lane keeps its scratch files inside its own folder.** A temporary folder or file a lane needs
+is made inside its own copy, a workhorse's under `.postmaster/verify/`, which git ignores, and
+never in the system temp folder: the tool removes the copy, while the user's safety hook refuses a
+recursive delete of a temp folder and the folder stays behind. A lane never deletes recursively,
+and never looks for another way round a command a hook refused; it says so in its report. It names
+any temp folder it left behind in its report.
+
 **Say so in every workhorse brief.** A workhorse that does not know it may run the suite reasons
 about the code instead of executing it. A reviewer checks a finding with a targeted probe and
-leaves the project-wide checks to the coachman.
+leaves the project-wide checks to the coachman. Every brief carries the scratch-file rule above, a
+workhorse's and a reviewer's alike.
 
 ## The workhorse contract
 
@@ -459,7 +467,9 @@ second implementer wrote (single-thread).
   any synthesis code (Stage 1 below); a ticket that leaves the interface to the lanes still
   gets none there (#280 takes that up). In single-thread mode, the first commit on the branch
   adds them and touches nothing else (D6). Where the ticket's design question is the
-  interface, the interface is settled first, then the tests, then the code.
+  interface, the interface is settled first, then the tests, then the code. Under a split
+  request (Stage 1) that first commit cannot hold: each piece carries its own tests, and the full
+  acceptance set lands with the last piece.
 - **A code commit never touches them.** A whole-tree formatter (`npm run format`, `biome
   check --write`) will reflow an acceptance-test file that is already committed and fold it
   into a code commit, which the next rule forbids: before staging a code commit,
@@ -566,8 +576,9 @@ what it owes them back.
    `WORKHORSE-BLOCKED.md` contract, and the line that the ready ticket is the run's contract,
    the autonomous-defaults rule (decide within-brief questions
    yourself and record the decision in `WORKHORSE-SUMMARY.md`), the capability statement above, the
-   instruction to commit incrementally, and the line that the workhorse must not read other branches
-   or `.worktrees/`. It names the run's checks as the waybill lists them and the loop: build,
+   scratch-file rule above, the instruction to commit incrementally, and the line that the
+   workhorse must not read other branches or `.worktrees/`. It names the run's checks as the
+   waybill lists them and the loop: build,
    run each criterion's check from the ticket's `### Checks`,
    fix what fails, and run it again, until every criterion's check shows it working and the
    run's checks pass; the lane may add checks of its own, never drop or weaken one the ticket
@@ -886,11 +897,13 @@ from it.
   that each fit the cap and each merge on their own, the ones that depend on another ordered so the
   lowest merges first; and, where the pieces cannot stand alone as working slices, that the plan is
   increments behind a feature flag, the project's own flag system, each within the cap, the flag off
-  until a last small increment turns it on, with the flag's name. Say plainly when you can do
-  neither. Then log `escalate`, touch `.escalation-ready` and exit, with no `checkpoint-1.md` and the
-  stage unchanged. The postmaster puts it to the user, who chooses how the work is split or put
-  behind a flag, and resumes this thread only when its own count is within the cap. Exit 1 is an
-  input fault: fix the inputs and run it again.
+  until a last small increment turns it on, with the flag's name. Under a split each piece carries
+  its own tests, and the full acceptance set lands with the last piece. Say plainly when you can do
+  neither. End the request with the next step, as the postmaster's Stage E has it: the postmaster
+  counts afresh; within the cap it resumes this thread, and over it the user chooses how the work
+  is split or put behind a flag, the clerk plans the pieces as tickets, and this run ends. Then
+  log `escalate`, touch `.escalation-ready` and exit, with no `checkpoint-1.md` and the stage
+  unchanged. Exit 1 is an input fault: fix the inputs and run it again.
 - **Checkpoint 1 card, then the hand-off** (synthesis mode: in single-thread mode the card is
   The run's mode's — the SYNTHESIS line, convention gaps, dropped work, gate and checks, and
   no per-workhorse outcome, ranking or shares): per-workhorse outcome (or stall), each walled lane
@@ -948,7 +961,8 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    **State in every brief that the lane is working in its own disposable copy of the repository
    with dependencies installed, that it checks a finding with a targeted probe rather than running the project's
    gate, lint, build or tests, and that the one thing it must not do is modify the code under
-   review.** It is expected to RUN things to check its own claims, and to say for each finding
+   review.** A lane's scratch files stay inside that copy (Lane capability, above). It is
+   expected to RUN things to check its own claims, and to say for each finding
    whether it was verified by execution or by reading. A finding verified by execution outranks
    the same finding filed as a hypothesis, and a test that passes is not evidence until someone
    has seen it fail for the right reason. The coachman runs the recorded project checks once
@@ -1432,10 +1446,11 @@ degrade, never a pass: the card says so.
    names `web-journey`, the walk is the journey report: write it to the path
    `<tool>/scripts/run verify journey-path <synthesis-wt> <dispatch>` prints. Put the preview link and
    QA results on the card. If the project has no UI or browser suite, say `none`.
-3. **Review link.** Put the absolute path of the synthesis worktree on the card and, when
-   `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review
-   surface already running; never start a duplicate. Verify the link from the user's device or
-   mark it unverified.
+3. **Review link.** Put the synthesis worktree's path inside the project, `.worktrees/<TICKET>`,
+   on the card, never its absolute path, which the card's private-data scan refuses, and, when
+   `run.json` config has `ship.review_link`, its value with `{path}` filled in with that same path.
+   Reuse a review surface already running; never start a duplicate. Verify the link from the
+   user's device or mark it unverified.
 4. **Check reach before the card.** Run `<tool>/scripts/run reach check <dispatch> card`
    and record its output. Exit 1 is a fault in the `reach` control: follow Tool faults and
    stop. Findings, notes and `not checked` records at this point are shown on the card and do
@@ -1530,8 +1545,9 @@ Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
    is wrong, and a test is updated only when you can NAME the deliberate change that made the
    old assertion obsolete. Worse than red is a run that HANGS: if the suite stops being fast,
    re-read the change rather than waiting it out.
-2. **Review link.** The ship card carries the absolute path of the synthesis worktree and, where
-   the config in `run.json` sets a `ship.review_link` template, that template with the path filled in.
+2. **Review link.** The ship card carries the synthesis worktree's path inside the project,
+   `.worktrees/<TICKET>`, never its absolute path, and, where the config in `run.json` sets a
+   `ship.review_link` template, that template with that path filled in.
    Reuse whatever review surface is already running; never start a duplicate or restart one,
    since it may be serving another run. Never trust a check from the serving machine as proof
    the link works for the user: verify it from the device the user will open it on, or

@@ -10,6 +10,20 @@ export interface Budget {
   readonly cap: number;
 }
 
+/** Whether a project's runs open draft pull requests: `ship.draft_pull_requests` is "on". A key left
+ * out reads as off. Throws when it holds anything but "on" or "off", so a mistaken value (`true`,
+ * "yes", "On") fails loudly and is never read as off in silence. */
+export function draftsOn(ship: unknown): boolean {
+  const table = typeof ship === "object" && ship !== null ? (ship as Record<string, unknown>) : {};
+  const drafts = table.draft_pull_requests;
+  if (drafts !== undefined && drafts !== "on" && drafts !== "off") {
+    throw new Error(
+      `ship.draft_pull_requests must be "on" or "off", not ${JSON.stringify(drafts)}`,
+    );
+  }
+  return drafts === "on";
+}
+
 /** The budget a project's settings give, or null when it has none. It applies where the project's
  * runs open draft pull requests for the user to review (`ship.draft_pull_requests` is "on") and
  * where the project names a number for `pr_size_cap`, which turns it on by itself, whatever the
@@ -19,15 +33,9 @@ export interface Budget {
  * when `ship.draft_pull_requests` holds anything but "on" or "off": a mistaken value fails loudly
  * and never drops the limit quietly. */
 export function budgetOf(ship: unknown, project: Readonly<Record<string, unknown>>): Budget | null {
-  const table = typeof ship === "object" && ship !== null ? (ship as Record<string, unknown>) : {};
-  const drafts = table.draft_pull_requests;
-  if (drafts !== undefined && drafts !== "on" && drafts !== "off") {
-    throw new Error(
-      `ship.draft_pull_requests must be "on" or "off", not ${JSON.stringify(drafts)}`,
-    );
-  }
+  const drafts = draftsOn(ship);
   const named = project.pr_size_cap;
-  if (named === "off" || (drafts !== "on" && typeof named !== "number")) return null;
+  if (named === "off" || (!drafts && typeof named !== "number")) return null;
   const cap = typeof named === "number" ? named : DEFAULT_CAP;
   const aim =
     typeof project.pr_size_aim === "number" ? project.pr_size_aim : Math.min(DEFAULT_AIM, cap);

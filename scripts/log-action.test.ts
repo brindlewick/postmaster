@@ -7,8 +7,10 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -738,6 +740,7 @@ describe("positive controls", () => {
   test("an older runs/<project>/<TICKET> layout is still read as that project", () => {
     const old = join(tmp, "oldlayout", "legacy-proj", "RUN-2");
     mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, "manifest.json"), "{}\n");
     const r = spawnSync(SELF, ["log-action", old, "postmaster", "note", "RUN-2", "old"], {
       encoding: "utf8",
     });
@@ -1176,5 +1179,108 @@ describe("negative controls: nothing is written", () => {
     });
     expect(r.status).toBe(1);
     expect((r.stderr ?? "").includes(`no such dir: ${missing}`)).toBe(true);
+  });
+});
+
+describe("a folder that is not a run's", () => {
+  // A helper that was not told its dispatch once passed <repo>/.postmaster: log-action wrote
+  // actions.jsonl there and ledger.jsonl in the project root, outside every ignore rule, and the
+  // dirty tree stopped the postmaster at its next base check.
+  function project(name: string): string {
+    const repo = join(tmp, name);
+    mkdirSync(join(repo, ".postmaster", "runs"), { recursive: true });
+    // The folder's own ignore rules, as the tool writes them: run records stay out of git.
+    writeFileSync(join(repo, ".postmaster", ".gitignore"), "runs/\n.gitignore\n");
+    spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
+    return repo;
+  }
+  const dirty = (repo: string): string =>
+    spawnSync("git", ["-C", repo, "status", "--porcelain", "--untracked-files=all"], {
+      encoding: "utf8",
+    }).stdout ?? "";
+  /** Every file under a folder, git's own aside, by its path inside the folder. */
+  const filesUnder = (folder: string, inside = ""): string[] =>
+    readdirSync(join(folder, inside))
+      .filter((name) => inside !== "" || name !== ".git")
+      .flatMap((name) => {
+        const path = inside === "" ? name : `${inside}/${name}`;
+        return statSync(join(folder, path)).isDirectory() ? filesUnder(folder, path) : [path];
+      })
+      .sort();
+  const through = (folder: string): { code: number; err: string } => {
+    const r = spawnSync(SELF, ["log-action", folder, "postmaster", "note", "RUN-1", "probe"], {
+      encoding: "utf8",
+    });
+    return { code: r.status ?? -1, err: r.stderr ?? "" };
+  };
+
+  test("the project's .postmaster folder is refused, the refusal says so and prints the form that works, and nothing is written", () => {
+    const repo = project("wrong-path");
+    const r = through(join(repo, ".postmaster"));
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("is not a run's folder");
+    expect(r.err).toContain("log-action --project <repo>");
+    expect(r.err).toContain(".postmaster/runs/postmaster");
+    expect(existsSync(join(repo, ".postmaster", "actions.jsonl"))).toBe(false);
+    expect(existsSync(join(repo, "ledger.jsonl"))).toBe(false);
+    expect(dirty(repo)).toBe("");
+  });
+
+  test("so are the project's root, its runs folder and a loose folder", () => {
+    const repo = project("wrong-paths");
+    const loose = join(tmp, "loose-folder");
+    mkdirSync(loose, { recursive: true });
+    for (const folder of [repo, join(repo, ".postmaster", "runs"), loose]) {
+      const r = through(folder);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("is not a run's folder");
+    }
+    expect(filesUnder(repo)).toEqual([".postmaster/.gitignore"]);
+    expect(filesUnder(loose)).toEqual([]);
+    expect(existsSync(join(tmp, "ledger.jsonl"))).toBe(false);
+  });
+
+  test("a folder directly in a runs folder is a run's, a fresh one and the postmaster's own included, and so is any folder that holds a record of a run", () => {
+    const repo = project("right-paths");
+    const runs = join(repo, ".postmaster", "runs");
+    for (const name of ["T-1", "postmaster"]) {
+      mkdirSync(join(runs, name));
+      expect(through(join(runs, name)).code).toBe(0);
+      expect(existsSync(join(runs, name, "actions.jsonl"))).toBe(true);
+    }
+    expect(existsSync(join(runs, "ledger.jsonl"))).toBe(true);
+    expect(dirty(repo)).toBe("");
+    for (const record of ["manifest.json", "run.json", "brief.md"]) {
+      const folder = join(tmp, "elsewhere", record);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, record), "x\n");
+      expect(through(folder).code).toBe(0);
+      expect(existsSync(join(folder, "actions.jsonl"))).toBe(true);
+    }
+  });
+
+  test("the --project form writes only into the folders git ignores", () => {
+    const repo = project("project-form");
+    const before = filesUnder(repo);
+    const r = projectAction(repo, ["postmaster", "ticket-check", "T-9", "probe"]);
+    expect(r.code).toBe(0);
+    expect(filesUnder(repo).filter((path) => !before.includes(path))).toEqual([
+      ".postmaster/runs/ledger.jsonl",
+      ".postmaster/runs/postmaster/actions.jsonl",
+    ]);
+    expect(dirty(repo)).toBe("");
+  });
+
+  test("the helper brief contract names the one form a helper logs with: its dispatch folder, or the postmaster's own", () => {
+    const doc = readFileSync(join(import.meta.dir, "../skills/postmaster/postmaster.md"), "utf8");
+    const contract = doc
+      .slice(doc.indexOf("### The brief contract"), doc.indexOf("## Stage A"))
+      // ASCII: the runbook is ASCII text, so \s matches the whitespace it holds.
+      .replace(/\s+/gu, " ");
+    expect(contract).toContain(
+      "`<tool>/scripts/run log-action <dispatch> postmaster <action> <target> <detail>`",
+    );
+    expect(contract).toContain("`<runs>/postmaster` for work on no run");
+    expect(contract).toContain("refuses a folder that is not a run's");
   });
 });

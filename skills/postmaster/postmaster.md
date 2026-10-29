@@ -102,8 +102,10 @@ same helper steps run there as in a real session.
 
 Every brief ends the same way, and every brief points here for it:
 
-1. Log every action through `<tool>/scripts/run log-action` in the postmaster's name,
-   saying a helper took it, as the watcher does.
+1. Log every action through `<tool>/scripts/run log-action <dispatch> postmaster <action> <target> <detail>`
+   in the postmaster's name, saying a helper took it, as the watcher does. `<dispatch>` is the
+   folder your report goes in: the run's directory, or `<runs>/postmaster` for work on no run.
+   Name no other folder: the command refuses a folder that is not a run's.
 2. Decide nothing: rulings, merges and scope calls are the postmaster's. Report what you
    did and found, with each check's command and output, so the decision rests on the
    checks rather than on your word.
@@ -1277,9 +1279,9 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    coachman can do neither goes up the same way, and says so. On the user's answer, clear the wait
    through the `d-unwait` brief, record what was decided with `<tool>/scripts/run log-action
    <dispatch> postmaster rule <TICKET> "size <the count> changed lines, cap <the cap>:
-   <split|flag>"`, and brief `e-sendback` as step 4 does for `send it back`, so the clerk plans
-   the pieces, or the increments with the flag named, and the user signs the tickets off as for
-   any ticket.
+   <split|flag>"`, and brief `e-sendback` as step 4 does for `send it back`, which abandons this
+   run, so the clerk plans the pieces, or the increments with the flag named, and the user signs
+   the tickets off as for any ticket.
 
 ## Stage F (contract 2): verify and land the ship card
 
@@ -1380,7 +1382,8 @@ commit or the hand-off records why they were not written; that the Style residue
 what `<tool>/scripts/run style-findings count <dispatch>` prints, and the residues the card
 lists are exactly what `<tool>/scripts/run style-findings list <dispatch>` prints; and all
 open findings, browser suite and QA when present, the review link, and every run-created
-branch. Report each claim pass or fail with its evidence. Decide nothing: the postmaster
+branch. Leave the size to the `f-size` brief, the one count at landing; this brief counts no
+changed lines. Report each claim pass or fail with its evidence. Decide nothing: the postmaster
 withholds or lands.
 Write your report to `<dispatch>/helper-f-verify-<subject>-<rand>.md`, subject the run's
 ticket and rand six hex digits you pick fresh, before you end, and end as the brief contract says.
@@ -1562,7 +1565,8 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    pull request or merges. Any other exit is an input fault: stop the stage, fix the
    inputs and re-run.
 
-   Check the size after the libraries and before step 2's landing route, through a helper:
+   Count the size after the libraries and before step 2's landing route, through the `f-size`
+   brief, the one count at landing:
 
 ```helper
 Helper brief `f-size` for run `<TICKET>` at `<dispatch>`: count the changed lines.

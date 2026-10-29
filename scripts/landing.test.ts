@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { run } from "./lib/proc.ts";
 import { findingState, isFindingShaped, privateDataBlock, pyRepr } from "./landing.ts";
-import { email } from "./scrub-test-kit.ts";
+import { email, privatePath } from "./scrub-test-kit.ts";
 
 const SELF = join(import.meta.dir, "run");
 const HERE = import.meta.dir;
@@ -62,6 +62,29 @@ function markedResolutions(text: string): boolean {
   if (start === -1 || end === -1 || end < start) return false;
   const section = text.slice(start, end);
   return section.includes("via: marker") && section.includes("detections-resolved.jsonl");
+}
+
+/** The coachman's review link steps, current and legacy: each from its bold name to the next step. */
+function reviewLinkSteps(text: string): string[] {
+  // ASCII: the runbook is ASCII text, so \s and \d match the whitespace and digits it holds.
+  return [...text.matchAll(/\*\*Review link\.\*\*[\s\S]*?(?=\n\d+\. \*\*|\n\n)/gu)].map(
+    (step) => step[0],
+  );
+}
+
+/** Whether every review link step tells the coachman to name the synthesis worktree by its path
+ * inside the project, and none by an absolute one. */
+function namesProjectPath(text: string): boolean {
+  const steps = reviewLinkSteps(text);
+  return (
+    steps.length === 2 &&
+    steps.every(
+      (step) =>
+        step.includes(".worktrees/<TICKET>") &&
+        !step.includes("absolute path of the synthesis worktree") &&
+        !/\/(?:home|Users)\//u.test(step),
+    )
+  );
 }
 
 function identify(dir: string): void {
@@ -1791,6 +1814,46 @@ describe("private-data-card", () => {
   });
 });
 
+describe("the ship card's review link", () => {
+  test("a card that names the synthesis worktree by its path inside the project passes the scan, and one that names it by an absolute path does not", () => {
+    const dispatch = join(tmp, "private-data-review-link");
+    mkdirSync(dispatch, { recursive: true });
+    const block = privateDataBlock(dispatch);
+    const absolute = join(dirname(privatePath()), "widget", ".worktrees", "T-1");
+    const cardWith = (link: string, name: string): string => {
+      const card = join(dispatch, name);
+      writeFileSync(card, `# Ship card\n\n${block}\n## Review link\n\n${link}\n`);
+      return card;
+    };
+    check(
+      ["private-data-card", dispatch, cardWith(".worktrees/T-1", "card-relative.md")],
+      0,
+      "match",
+    );
+    check(
+      ["private-data-card", dispatch, cardWith(absolute, "card-absolute.md")],
+      1,
+      "landing: card: private-data scan is not clean",
+    );
+  });
+
+  test("the runbook tells the coachman to write that path inside the project, in the ship step and its legacy twin, and never an absolute one", () => {
+    const doc = readFileSync(join(import.meta.dir, "../skills/postmaster/coachman.md"), "utf8");
+    expect(namesProjectPath(doc)).toBe(true);
+    // Negative control: the wording before this change names the absolute path.
+    const old =
+      "3. **Review link.** Put the absolute path of the synthesis worktree on the card and, when\n" +
+      "   `run.json` config has `ship.review_link`, its value with the path filled in. Reuse a review\n" +
+      "   surface already running; never start a duplicate.\n" +
+      "4. **Check reach before the card.**\n\n" +
+      "2. **Review link.** The ship card carries the absolute path of the synthesis worktree and, where\n" +
+      "   the config in `run.json` sets a `ship.review_link` template, that template with the path filled in.\n" +
+      "3. **Preview build, always.**\n";
+    expect(reviewLinkSteps(old)).toHaveLength(2);
+    expect(namesProjectPath(old)).toBe(false);
+  });
+});
+
 describe("card-findings", () => {
   const findings = (cp: string): string[] => [
     "card-findings",
@@ -2635,6 +2698,30 @@ describe("open pull requests", () => {
     const r = openPr("on", { ship: { draft_pull_requests: "on" } });
     expect(r.output).toBe(`opened ${pr} draft`);
     expect(r.calls.find((l) => l.startsWith("pr create ")) ?? "").toContain("--draft");
+  });
+
+  test("a draft setting that is neither on nor off is a fault naming the key and the value, and opens nothing", () => {
+    for (const [label, value] of [
+      ["bool", true],
+      ["yes", "yes"],
+      ["capital", "On"],
+    ] as const) {
+      const r = openPr(`bad-${label}`, {
+        runJson: JSON.stringify({ config: { ship: { draft_pull_requests: value } } }),
+        wantCode: 1,
+      });
+      expect(r.output).toBe("");
+      expect(r.err).toContain(
+        `ship.draft_pull_requests must be "on" or "off", not ${JSON.stringify(value)}`,
+      );
+      expect(r.calls.filter((l) => l.startsWith("pr create "))).toHaveLength(0);
+    }
+    // --ready opens ready whatever the run says, and asks nothing of the setting.
+    const ready = openPr("bad-ready", {
+      ship: { draft_pull_requests: "On" },
+      extra: ["--ready"],
+    });
+    expect(ready.output).toBe(`opened ${pr} ready`);
   });
 
   test("the open pull request for the branch is adopted, draft or ready", () => {
