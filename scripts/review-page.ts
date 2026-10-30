@@ -1,6 +1,7 @@
 // Build the data a review page or a code viewer page shows, for a session to publish as a
 // private artifact. skills/review-pages/SKILL.md says how a page is published and how its
-// comments are read and answered; docs/review-page.md says how the page is made and improved.
+// comments are read and answered; docs/review-page.md says what the page is, and
+// docs/review-page/improve-it.md how it is made and improved.
 //
 //   scripts/run review-page change <out-dir> --pr <number> [options]
 //   scripts/run review-page change <out-dir> --base <ref> --head <ref> [--ticket <number>]

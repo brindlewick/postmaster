@@ -382,5 +382,5 @@ and a reply can land in a thread the conversation never sees. Right after each p
 that artifact. The user says when they have left comments; then read each thread, answer it there, and make the change it asks for.
 **Show a change or ticket-linked code on a page made for the phone.** When the user reviews a change with automatic merging off,
 opens files named in the ticket's technical notes, or asks for a ticket's story, publish it with the `review-pages` skill (`skills/review-pages/SKILL.md`):
-a review page with the ticket, the summary, the diff and the files as they stand, a code viewer at the cited lines, or a story page for a ticket's story.
+a phone-first review page (an overview, the file tree of the change, the files by importance, and a diff screen with ticks and comments on lines), a code viewer at the cited lines, or a story page for a ticket's story.
 The user comments on the page and gives the verdict in the chat. Claude Code only, until the dashboard shows changes.
