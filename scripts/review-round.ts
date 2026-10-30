@@ -12,6 +12,10 @@
 // When the run bundled written rules for the style lens (<dispatch>/rules/rules.json, from
 // run project-notes bundle), launch cuts them into batches, writes each style lane its own
 // prompt file naming its batches, and starts the lane with it.
+// A reviewer whose launch left a cut-off marker beside its stream (the harness stopped helpers it
+// still had running as it ended, or a shell they left, lib/lane-cutoff.ts) is collected as
+// finished and recorded DEGRADED, as a provider wall is: what it returned is a status line, not
+// a review. A reviewer that walled is recorded for the wall alone.
 //
 //   run review-round start    <dispatch> <round> [<lens>:<lane>...]
 //   run review-round cut      <dispatch> <round> <repo> <synthesis-wt>
@@ -60,6 +64,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { CUTOFF_CAUSE, cutoffMarkerPath, readCutoffMarker } from "./lib/lane-cutoff.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { mkstempSync, run } from "./lib/proc.ts";
 import { bootId, sameBoot } from "./lib/processes.ts";
@@ -357,6 +362,17 @@ function wallOrLostWall(
   const lost = lostWallFor(dispatch, lane, lens, round);
   if (lost === null) return null;
   return { message: `detected but not recorded: ${lost.message}` };
+}
+
+/**
+ * Whether a reviewer's launch left its cut-off marker (lib/lane-cutoff.ts): the harness stopped
+ * the helpers it had running as the reviewer ended its turn, so the reviewer returned a status
+ * line and its review never happened. The marker sits beside the reviewer's stream, which the
+ * round names `review-r<round>-<lens>-<lane>.jsonl`, as the host's `.done` marker does.
+ */
+function cutOffReviewer(dispatch: string, lane: string, lens: string, round: string): boolean {
+  const stream = join(dispatch, "logs", `review-r${round}-${lens}-${lane}.jsonl`);
+  return readCutoffMarker(cutoffMarkerPath(stream)) !== null;
 }
 
 function unswitch(s: string, ticket: string): string {
@@ -1332,7 +1348,7 @@ if (import.meta.main) {
     }
     mkdirSync(LOGS, { recursive: true });
     for (const f of readdirSync(LOGS)) {
-      if (f.startsWith(`review-r${R}-`) && f.endsWith(".done")) {
+      if (f.startsWith(`review-r${R}-`) && (f.endsWith(".done") || f.endsWith(".cutoff"))) {
         rmSync(join(LOGS, f), { force: true });
       }
     }
@@ -1424,6 +1440,18 @@ if (import.meta.main) {
       console.log(`NOT RECORDED in actions.jsonl: ${logArgs.join(" ")}`);
       (globalThis as Record<string, unknown>).UNRECORDED = 1;
     }
+  };
+
+  // A reviewer cut off with its helpers still running is out of the round as one that walled is:
+  // its verdict counts for nothing and it is launched again in the next round.
+  const recordCutOff = (lane: string, lens: string): void => {
+    console.log(`CUTOFF ${lens} ${lane}: DEGRADED, ${CUTOFF_CAUSE}`);
+    record(
+      `${lane} ${lens}: DEGRADED, ${CUTOFF_CAUSE}`,
+      "degrade",
+      lane,
+      `${lens} r${R}: ${CUTOFF_CAUSE}`,
+    );
   };
 
   const readReviewers = (
@@ -1541,9 +1569,9 @@ if (import.meta.main) {
   };
 
   // The deadline close wait and wait-next share: whoever had not finished is recorded and
-  // stopped. A round started again meanwhile stands down and records nothing. The walled
-  // reviewers among the finished are recorded with it; wait-next passes none, having
-  // recorded each wall as its reviewer finished. A reviewer still running stops the leg
+  // stopped. A round started again meanwhile stands down and records nothing. The walled and
+  // cut-off reviewers among the finished are recorded with it; wait-next passes none, having
+  // recorded each as its reviewer finished. A reviewer still running stops the leg
   // with no check, and a whole-round close otherwise collects the round's reach check.
   const closeTimedOut = (
     attempt: string | undefined,
@@ -1551,6 +1579,7 @@ if (import.meta.main) {
     missing: number[],
     lim: string | undefined,
     walls: Array<[string, string, string]>,
+    cuts: Array<[string, string]>,
   ): never => {
     const nowCheck = stateCmd("check", STATE, []);
     if (nowCheck.code !== 0) process.exit(1);
@@ -1583,6 +1612,7 @@ if (import.meta.main) {
         `${lens} r${R}: provider wall: "${message}"`,
       );
     }
+    for (const [lane, lens] of cuts) recordCutOff(lane, lens);
     const stopPids: Array<number | null> = [];
     for (const i of missing) {
       const s = scratch(REPO, TICKET, reviewers[i]?.[0], reviewers[i]?.[1]);
@@ -1688,11 +1718,13 @@ if (import.meta.main) {
     // A walled reviewer takes part in the next round as any DEGRADED lane does (C12).
     (globalThis as Record<string, unknown>).UNRECORDED = 0;
     const wallLines: Array<[string, string, string]> = [];
+    const cutLines: Array<[string, string]> = [];
     for (let i = 0; i < n; i++) {
       if (missing.includes(i)) continue;
       const [lens, lane] = reviewers[i]!;
       const w = wallOrLostWall(D, lane, lens, R);
       if (w !== null) wallLines.push([lane, lens, w.message]);
+      else if (cutOffReviewer(D, lane, lens, R)) cutLines.push([lane, lens]);
     }
     if (missing.length === 0) {
       if (rc === 3) {
@@ -1709,6 +1741,7 @@ if (import.meta.main) {
           `${lens} r${R}: provider wall: "${message}"`,
         );
       }
+      for (const [lane, lens] of cutLines) recordCutOff(lane, lens);
       collectRoundCheck(reviewers);
       if ((globalThis as Record<string, unknown>).UNRECORDED) process.exit(4);
       process.exit(0);
@@ -1722,7 +1755,7 @@ if (import.meta.main) {
       }
       die(`the count was made up by markers no reviewer of round ${R} lands:${strays}`);
     }
-    closeTimedOut(attempt, reviewers, missing, lim, wallLines);
+    closeTimedOut(attempt, reviewers, missing, lim, wallLines, cutLines);
   }
 
   if (cmd === "wait-next") {
@@ -1796,8 +1829,8 @@ if (import.meta.main) {
             `${lens} round ${R}`,
           );
         }
-        // The wall check runs whenever no degrade row exists yet, so an
-        // interruption between the two rows cannot lose the wall.
+        // The wall and cut-off checks run whenever no degrade row exists yet, so an
+        // interruption between the two rows cannot lose either.
         if (!records.degraded.has(key)) {
           const w = wallOrLostWall(D, lane, lens, R);
           if (w !== null) {
@@ -1808,6 +1841,8 @@ if (import.meta.main) {
               lane,
               `${lens} r${R}: provider wall: "${w.message}"`,
             );
+          } else if (cutOffReviewer(D, lane, lens, R)) {
+            recordCutOff(lane, lens);
           }
         }
       }
@@ -1818,7 +1853,7 @@ if (import.meta.main) {
     for (let i = 0; i < n; i++) {
       if (!markerIn(reviewers[i]?.[0] ?? "", reviewers[i]?.[1] ?? "")) missing.push(i);
     }
-    closeTimedOut(attempt, reviewers, missing, lim, []);
+    closeTimedOut(attempt, reviewers, missing, lim, [], []);
   }
 
   // teardown

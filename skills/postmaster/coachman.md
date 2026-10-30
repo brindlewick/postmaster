@@ -1192,10 +1192,20 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    DEGRADED lane. Its `wall` line was written as its launch ended, with the message and the
    reset.
 
+   **A reviewer cut off with its helpers still running moves the round on without it, too.**
+   A Claude reviewer may start helpers. When the harness stopped the ones it still had running
+   as it ended its turn, or a shell they left running, what it returned is a status line, not a
+   review, and its launch left `<dispatch>/logs/review-r<round>-<lens>-<lane>.cutoff` beside its
+   stream. The wait records it as `<lane> <lens>: DEGRADED, cut off with helpers still running`
+   in `run-log.md` with its `degrade` line, and reports the reviewer finished: its verdict counts
+   for nothing and it is launched again in the next round, as for a wall. A reviewer that walled
+   is recorded for the wall alone.
+
    **At harvest, classify every lane under every lens REVIEWED or DEGRADED.** A lane that
-   never launched, died and was not recovered, had not finished by the round's deadline, or ran
-   without tool use is DEGRADED: record it, unless the wait already has, and do not count its
-   verdict toward closing the round (hard rules, below).
+   never launched, died and was not recovered, had not finished by the round's deadline, was cut
+   off with its helpers still running, or ran without tool use is DEGRADED: record it, unless
+   the wait already has, and do not count its verdict toward closing the round (hard rules,
+   below).
 
    **Close the round once every reviewer is in or cut off and every fix is saved.** The
    collection ran the round's check for changes by its reviewers, and restored what it found,
@@ -1804,8 +1814,9 @@ ticket that needs another's change waits for it to land.
   skip it.** A lane is DEGRADED for a round whenever it did not read that round's snapshot
   with tool use and return a verdict: it never launched (a provider wall, a usage limit, a
   quota wall, a spawn misfire, a stale session lock), it died mid-round and was not recovered,
-  it was still running at the round's deadline, or it ran in a preloaded-diff single-turn
-  fallback with no tool use. Three consequences, all mandatory:
+  it was still running at the round's deadline, the harness cut it off with its helpers still
+  running, or it ran in a preloaded-diff single-turn fallback with no tool use. Three
+  consequences, all mandatory:
   **(1)** write it in `run-log.md` for that round as `<lane> <lens>: DEGRADED, <cause>`, quoting
   the provider's own error string where there is one; **(2)** carry the word DEGRADED onto the
   checkpoint card AND the ship card, with the cause and how many lanes actually reviewed under

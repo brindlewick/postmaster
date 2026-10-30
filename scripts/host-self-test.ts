@@ -7930,11 +7930,17 @@ export async function runControls(): Promise<number> {
           observe(launchObserved, "POSTMASTER_CONFIG") === join(root, "claude-launch.toml") &&
           observe(launchObserved, "CLAUDE_CONFIG_DIR") === join(root, "claude-config") &&
           observe(launchObserved, "CLAUDE_EFFORT") === "high" &&
-          observe(launchObserved, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS") === "456" &&
           observe(launchObserved, "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY") === "1" &&
           observe(launchObserved, "ANTHROPIC_BASE_URL") === "https://lane.invalid" &&
           observe(launchObserved, "ANTHROPIC_AUTH_TOKEN") === "fixture-auth-token" &&
           observe(launchObserved, "LANE_ENV_ONLY") === "from-lane-env-file",
+        lastLine(launchObserved),
+      );
+      // The launch fixes the wait for a lane's background helpers at 0 (#607), after the lane's
+      // env file has loaded: neither the caller's 123 nor the file's 456 reaches the harness.
+      await pass(
+        `AC3 ${mode} Claude control: the launch sets the wait for a lane's helpers to 0, over the caller's and the lane env file's`,
+        () => observe(launchObserved, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS") === "0",
         lastLine(launchObserved),
       );
       await pass(
@@ -7987,11 +7993,11 @@ export async function runControls(): Promise<number> {
         `${streamSessions(launchEvents)} / ${readText(sessionRecord)}`,
       );
       await pass(
-        `AC1 and AC3 ${mode} resume control: identity stays stripped and env file stays present`,
+        `AC1 and AC3 ${mode} resume control: identity stays stripped, env file stays present, and the helper wait stays 0`,
         () =>
           observe(launchObserved, "identity_keys") === "" &&
           observe(launchObserved, "LANE_ENV_ONLY") === "from-lane-env-file" &&
-          observe(launchObserved, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS") === "456",
+          observe(launchObserved, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS") === "0",
         lastLine(launchObserved),
       );
     }
