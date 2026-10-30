@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beside, toolRoot } from "./lib/paths.ts";
 import { run } from "./lib/proc.ts";
+import { processTable } from "./lib/processes.ts";
 
 export const ROOT = toolRoot(import.meta);
 export const RUN = beside(import.meta, "run");
@@ -57,8 +58,8 @@ export interface BuiltTarball {
 
 /** Pack a fixture package dir into a registry-style tarball with a package/
  * root, rewriting its version. Returns the file name and its integrity. The
- * bytes are deterministic per machine (sorted entries, fixed mtimes, gzip
- * without name or mtime), so manager caches stay valid across runs. */
+ * bytes are deterministic (sorted entries, fixed mtimes, gzip without name or
+ * mtime), so a tarball built twice has one integrity. */
 export function buildTarball(pkgDir: string, destDir: string, version: string): BuiltTarball {
   const stage = join(destDir, "stage");
   const root = join(stage, "package");
@@ -308,15 +309,100 @@ export interface Guarded {
   err: string;
 }
 
+/** The variables a machine uses to say where a manager keeps its cache, store
+ * and config (XDG_*, BUN_*, PNPM_*, YARN_*, COREPACK_*, npm's `npm_config_*`
+ * and kin), the token its registry settings would read, and the proxy its
+ * requests would take. A fresh HOME does not make up for leaving them in:
+ * pnpm takes its store from PNPM_HOME and bun its cache from BUN_INSTALL
+ * ahead of HOME, so a machine that sets either hands every call its own
+ * long-lived store, and once that holds a library an install downloads
+ * nothing. */
+const MACHINE_NAMED =
+  /^(?:XDG_|BUN_|PNPM_|YARN_|COREPACK_|NPM_|NODE_AUTH_TOKEN$|(?:HTTP|HTTPS|ALL)_PROXY$)/iu;
+
+/** The environment a package manager runs in under this oracle: `base` minus
+ * those variables, plus a cache, a store and a config of its own for each of
+ * the four, all inside `home`. Pure: `base` is left as it was. It also drops
+ * `npm_config_user_agent`, which `bun run` injects for every child and npm
+ * would send as its own User-Agent, so the downloads arrive under the
+ * manager's name. */
+export function managerEnv(
+  base: Record<string, string | undefined>,
+  home: string,
+): Record<string, string | undefined> {
+  const kept: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (key !== "HOME" && !MACHINE_NAMED.test(key)) kept[key] = value;
+  }
+  return {
+    ...kept,
+    HOME: home,
+    XDG_DATA_HOME: join(home, ".local", "share"),
+    XDG_CACHE_HOME: join(home, ".cache"),
+    XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_STATE_HOME: join(home, ".local", "state"),
+    BUN_INSTALL: join(home, ".bun"),
+    BUN_INSTALL_CACHE_DIR: join(home, ".bun", "install", "cache"),
+    PNPM_HOME: join(home, ".pnpm-home"),
+    YARN_CACHE_FOLDER: join(home, ".yarn-cache"),
+    npm_config_cache: join(home, ".npm"),
+  };
+}
+
+/** `root` and every process under it, parents before children. */
+export function treeOf(root: number): number[] {
+  const children = new Map<number, number[]>();
+  for (const [pid, info] of processTable()) {
+    const list = children.get(info.parent) ?? [];
+    list.push(pid);
+    children.set(info.parent, list);
+  }
+  const out = [root];
+  const queue = [root];
+  while (queue.length > 0) {
+    const pid = queue.pop() as number;
+    for (const kid of children.get(pid) ?? []) {
+      out.push(kid);
+      queue.push(kid);
+    }
+  }
+  return out;
+}
+
+/** SIGKILL `root` and everything under it, leaf-first, so a parent cannot fork
+ * replacements while we kill. A second pass takes a child forked between the
+ * listing and the kill. */
+export function killTree(root: number): void {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const pid of treeOf(root).reverse()) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+}
+
+/** How long one manager call may take before it is killed: just under the 60
+ * seconds every test has by default, so a call that stalls is named in the
+ * failure, and everything it started is killed, before the test's own generic
+ * time-out. A call takes a second or two when the machine is quiet; the
+ * slowest, an install that waits out the guard's five tries at an
+ * unreachable scanner, ten. */
+export const CALL_TIMEOUT_MS = 55_000;
+
 /** Async spawn for commands that need the loopback registry: spawnSync would
  * block the server's event loop and deadlock. Mirrors run()'s 127 shape for
- * a missing command. */
+ * a missing command. A call still running after `timeoutMs` is killed with
+ * everything it started, and the call throws, naming the command. */
 export async function runAsync(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; env?: Record<string, string | undefined> } = {},
+  opts: { cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number } = {},
 ): Promise<Guarded> {
   let child: {
+    pid: number;
     stdout: ReadableStream<Uint8Array> | null;
     stderr: ReadableStream<Uint8Array> | null;
     exited: Promise<number>;
@@ -349,11 +435,28 @@ export async function runAsync(
       return { code: 127, out: "", err: `command not found: ${cmd}` };
     }
   }
-  const [code, out, err] = await Promise.all([
+  const limit = opts.timeoutMs ?? CALL_TIMEOUT_MS;
+  const finished = Promise.all([
     child.exited,
     child.stdout === null ? "" : new Response(child.stdout).text(),
     child.stderr === null ? "" : new Response(child.stderr).text(),
   ]);
+  let timer = 0;
+  const expired = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), limit);
+  });
+  const result = await Promise.race([finished, expired]);
+  clearTimeout(timer);
+  if (result === null) {
+    killTree(child.pid);
+    // The pipes close with the tree; take what was said, bounded, to quote it.
+    const said = await Promise.race([finished, Bun.sleep(2000).then(() => null)]);
+    const tail = said === null ? "" : `: ${(said[2] + said[1]).slice(-400)}`;
+    throw new Error(
+      `${[cmd, ...args].join(" ")} did not finish within ${limit / 1000}s and was killed with everything it started${tail}`,
+    );
+  }
+  const [code, out, err] = result;
   return { code, out, err };
 }
 
@@ -361,8 +464,9 @@ export async function runAsync(
  * shim first on the PATH, with the run's dispatch, tool, lane, registry and
  * Socket seams in the environment. A missing shim (the base) fails like any
  * missing command, exit 127, which no oracle case accepts. Each dispatch gets
- * a fresh HOME, so no manager cache survives from an earlier run to swallow
- * the downloads the log assertions count, and no npm_config_user_agent, so a
+ * its own HOME and its own cache, store and config for every manager
+ * (managerEnv), so nothing the machine already holds can swallow the
+ * downloads the log assertions count, and no npm_config_user_agent, so a
  * harness-injected agent never stands in for the manager's own. */
 export function guarded(
   registry: Registry,
@@ -383,12 +487,8 @@ export function guarded(
   const home = join(dispatch, "home");
   mkdirSync(home, { recursive: true });
   const childEnv: Record<string, string | undefined> = {
-    ...(process.env as Record<string, string>),
+    ...managerEnv(process.env, home),
     PATH: `${bin}:${DEV_BIN}:${process.env.PATH ?? ""}`,
-    HOME: home,
-    XDG_DATA_HOME: join(home, ".local", "share"),
-    XDG_CACHE_HOME: join(home, ".cache"),
-    XDG_CONFIG_HOME: join(home, ".config"),
     POSTMASTER_DISPATCH: dispatch,
     POSTMASTER_TOOL: ROOT,
     POSTMASTER_GUARD_LANE: "testlane",
@@ -405,6 +505,35 @@ export function guarded(
   delete childEnv.npm_config_user_agent;
   delete childEnv.NPM_CONFIG_USER_AGENT;
   return runAsync(join(bin, prog), args, { cwd: project, env: childEnv });
+}
+
+/** A plain install of one library into a scratch project, straight through
+ * the manager and not the guard, against the loopback registry with scripts
+ * off. `env` is the whole environment the manager runs in; the pinned
+ * managers come first on its PATH. Throws when the install fails. */
+export async function directAdd(
+  registry: Registry,
+  pm: Pm,
+  dir: string,
+  spec: string,
+  env: Record<string, string | undefined>,
+): Promise<void> {
+  const bin = pmBin(pm);
+  if (bin === null) throw new Error(`no ${pm} to install with`);
+  const r = await runAsync(
+    bin,
+    [
+      "add",
+      spec,
+      "--registry",
+      registry.url,
+      "--ignore-scripts",
+      ...(pm === "yarn" ? ["--non-interactive"] : []),
+      ...(pm === "npm" ? ["--no-audit", "--no-fund"] : []),
+    ],
+    { cwd: dir, env: { ...env, PATH: `${DEV_BIN}:${env.PATH ?? ""}` } },
+  );
+  if (r.code !== 0) throw new Error(`${pm} add ${spec}: ${(r.err + r.out).slice(0, 400)}`);
 }
 
 /** The installed version of a package, or null when it is not installed.
