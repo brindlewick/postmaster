@@ -1022,7 +1022,8 @@ describe("purity", () => {
 describe("inline safety", () => {
   // The review page inlines this file with its exports stripped, so the file has to stand alone.
   const text = readFileSync(join(import.meta.dir, "review-tree.ts"), "utf8");
-  const code = text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/.*$/gmu, "");
+  const code = text.replace(/\/\*[^]*?\*\//gu, "").replace(/\/\/.*$/gmu, "");
+  const words = new Set(code.match(/[A-Za-z0-9_$]+/gu) ?? []);
 
   test("no import, default export, export list or locale-aware compare", () => {
     expect(text.split("\n").filter((line) => line.startsWith("import "))).toEqual([]);
@@ -1032,25 +1033,32 @@ describe("inline safety", () => {
   });
 
   test("no dynamic import, platform global, clock, chance, locale call, class or enum", () => {
-    for (const banned of [
-      /\bimport\s*\(/u,
-      /\brequire\s*\(/u,
-      /\bexport\s+\*/u,
-      /\b(?:Bun|process|document|window|globalThis|navigator|console)\b/u,
-      /\bDate\b/u,
-      /\bMath\.random\b/u,
-      /\bIntl\b/u,
-      /\btoLocale\w*/u,
-      /^\s*(?:export\s+)?(?:abstract\s+)?(?:class|enum|namespace)\s/mu,
-    ]) {
-      expect(banned.test(code)).toBe(false);
-    }
+    const banned = [
+      "import",
+      "require",
+      "Bun",
+      "process",
+      "document",
+      "window",
+      "globalThis",
+      "navigator",
+      "console",
+      "Date",
+      "Intl",
+      "class",
+      "enum",
+      "namespace",
+    ];
+    expect(banned.filter((word) => words.has(word))).toEqual([]);
+    expect([...words].filter((word) => word.startsWith("toLocale"))).toEqual([]);
+    expect(code).not.toContain("Math.random");
+    expect(code).not.toMatch(/export[ \t]+\*/u);
   });
 
   test("the top level holds only declarations", () => {
     const stray = code
       .split("\n")
-      .filter((line) => /^\S/u.test(line))
+      .filter((line) => /^[^ \t]/u.test(line))
       .filter((line) => !/^(?:export |function |const |interface |type |[}\])])/u.test(line));
     expect(stray).toEqual([]);
   });

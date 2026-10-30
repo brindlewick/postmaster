@@ -261,15 +261,17 @@ describe("the script: files", () => {
 
 // ---------- the demo build: an invented sample repository, fixed commits ----------
 
+// ASCII: the page is machine-made HTML, where a link ends at a space, a quote or a bracket.
 const EXTERNAL = /https?:\/\/[^"'\s)<>]+/gu;
+// ASCII: an attribute follows an ASCII space in the page's own markup.
 const IDS = /\sid="([^"]+)"/gu;
 
 /** What the page is made of, in a form a person can read in a diff: the loads, the ids, the assets. */
 function pageStructure(html: string): string {
   const loads = [...new Set(html.match(EXTERNAL) ?? [])].sort();
   const ids = [...html.matchAll(IDS)].map((m) => m[1] ?? "");
-  const scripts = (html.match(/<script\b/gu) ?? []).length;
-  const styles = (html.match(/<style\b/gu) ?? []).length;
+  const scripts = (html.match(/<script[ >]/gu) ?? []).length;
+  const styles = (html.match(/<style[ >]/gu) ?? []).length;
   return [
     `title: ${/<title>([^<]*)<\/title>/u.exec(html)?.[1] ?? ""}`,
     `scripts: ${scripts}, styles: ${styles}`,
@@ -305,7 +307,7 @@ describe("the script: demo", () => {
 
   test("the sample change builds, and the summary line counts its files, groups and withheld file", () => {
     expect(resultA.code).toBe(0);
-    expect(resultA.out).toMatch(/\d+ files in \d+ groups/u);
+    expect(resultA.out).toMatch(/[0-9]+ files in [0-9]+ groups/u);
     expect(resultA.out).toContain("1 withheld");
   });
 
@@ -343,7 +345,7 @@ describe("the script: demo", () => {
 
   test("the page script is one function body that parses, and no slot marker is left", () => {
     const html = readFileSync(join(outA, "index.html"), "utf8");
-    const scripts = [...html.matchAll(/<script>\n([\s\S]*?)\n<\/script>/gu)].map((m) => m[1] ?? "");
+    const scripts = [...html.matchAll(/<script>\n([^]*?)\n<\/script>/gu)].map((m) => m[1] ?? "");
     expect(scripts.length).toBe(1);
     expect(() => new Function(scripts[0] ?? "")).not.toThrow();
     expect(html).not.toMatch(/@@(TITLE|CSS|SCRIPT)@@/u);
@@ -356,10 +358,11 @@ describe("the script: demo", () => {
     );
     for (const url of loads) {
       expect(
-        /^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)\b/u.test(url) ||
+        /^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)(\/|$)/u.test(url) ||
           url === "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js",
       ).toBe(true);
     }
+    // ASCII: the page's own source, where a word boundary is an ASCII one.
     expect(html).not.toMatch(/\bfetch\(["'`]https?:/u);
   });
 

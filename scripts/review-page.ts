@@ -226,7 +226,7 @@ function buildFrom(out: string, args: string[], facts: Facts, extra: unknown[], 
   if (built.problems.length > 0) throw new Error(`layout: ${built.problems.join("; ")}`);
   mkdirSync(join(out, "chunks"), { recursive: true });
   for (const name of readdirSync(join(out, "chunks"))) {
-    if (/^\d+\.json$/u.test(name)) rmSync(join(out, "chunks", name));
+    if (/^[0-9]+\.json$/u.test(name)) rmSync(join(out, "chunks", name));
   }
   built.chunks.forEach((items, k) => {
     writeFileSync(join(out, "chunks", `${k}.json`), JSON.stringify(items));

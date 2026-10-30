@@ -81,6 +81,7 @@ const isRecord = (x: unknown): x is Record<string, unknown> =>
 
 const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+// ASCII: widening to Unicode whitespace only folds more runs into one space, never splits a match.
 const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
 const WHY_NOT_CLICKED =
@@ -90,6 +91,7 @@ const WHY_NOT_CLICKED =
 export function failure(e: unknown): string {
   const lines = errorMessage(e).split("\n");
   const why = lines.findLast((line) => WHY_NOT_CLICKED.test(line));
+  // ASCII: the call log's bullets are plain spaces and a hyphen.
   const reason = why === undefined ? "" : ` (${why.replace(/^\s*-\s*/u, "")})`;
   return oneLine(`${lines[0] ?? ""}${reason}`).slice(0, 300);
 }
@@ -126,6 +128,7 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 };
 
 export function contentType(path: string): string {
+  // LOWER: lowered for a lookup among ASCII extensions.
   return CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
@@ -229,6 +232,7 @@ const FONT_HOSTS: readonly string[] = ["fonts.googleapis.com", "fonts.gstatic.co
 /** The host of a failed-request entry ("<url> <reason>") or of a bare URL. */
 function hostOf(entry: string): string | null {
   try {
+    // ASCII: an entry is a URL, a space and a status, and a parsed hostname is ASCII.
     return new URL(entry.trim().split(/\s+/u)[0] ?? "").hostname.toLowerCase();
   } catch {
     return null;
@@ -297,7 +301,7 @@ const SHELL_OTHER = [
   "chrome-headless-shell-linux64/chrome-headless-shell",
   "chrome-linux/headless_shell",
 ];
-const BROWSER_FOLDER = /^(chromium|chromium_headless_shell)-(\d+)$/u;
+const BROWSER_FOLDER = /^(chromium|chromium_headless_shell)-([0-9]+)$/u;
 
 function cacheFolder(env: Env, platform: string, home: string): string {
   const custom = env["PLAYWRIGHT_BROWSERS_PATH"];
@@ -544,6 +548,7 @@ export function parseArgs(args: readonly string[]): ParsedArgs {
 const stemTokens = (path: string): string[] =>
   (path.split("/").pop() ?? path)
     .replace(/\.[^.]*$/u, "")
+    // LOWER: lowered to cut a name into ASCII words; a letter that does not lower to ASCII ends a word.
     .toLowerCase()
     .split(/[^a-z0-9]+/u)
     .filter(Boolean);
@@ -554,6 +559,7 @@ const stemTokens = (path: string): string[] =>
  * Null when there are no files.
  */
 export function pickSearchWord(review: ReviewInfo): string | null {
+  // LOWER: lowered for a case-blind match of ASCII search words.
   const paths = review.files.map((f) => f.path.toLowerCase());
   const words = [...new Set(review.files.flatMap((f) => stemTokens(f.path)))].map((word) => ({
     word,
@@ -576,6 +582,7 @@ function reachableText(review: ReviewInfo, file: ReviewFile): string {
   const strings = [...Object.values(file), ...Object.values(group ?? {})].filter(
     (v): v is string => typeof v === "string",
   );
+  // LOWER: lowered for the same case-blind match.
   return [...strings, "new", "deleted", "renamed", "read closely"].join(" ").toLowerCase();
 }
 
@@ -584,9 +591,11 @@ function reachableText(review: ReviewInfo, file: ReviewFile): string {
  * within the files whose text the word can reach (the page also searches purposes and group names).
  */
 export function searchVerdict(review: ReviewInfo, word: string, shown: readonly number[]): Verdict {
+  // ASCII: the word came from pickSearchWord, which builds it from ASCII letters and digits.
   const words = word.toLowerCase().split(/\s+/u).filter(Boolean);
   const holds = (text: string): boolean => words.every((w) => text.includes(w));
   const indexes = review.files.map((_f, fi) => fi);
+  // LOWER: lowered for the same case-blind match.
   const must = indexes.filter((fi) => holds((review.files[fi]?.path ?? "").toLowerCase()));
   const may = indexes.filter((fi) => holds(reachableText(review, review.files[fi] as ReviewFile)));
   const named = (list: readonly number[]): string =>
@@ -1123,13 +1132,14 @@ window.__gate = (() => {
     const cs = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
   };
+  // LOWER: tag names are ASCII.
   const label = (e) => e.tagName.toLowerCase()
     + (e.id ? "#" + e.id : "")
-    + (typeof e.className === "string" && e.className.trim() ? "." + e.className.trim().split(/\s+/).join(".") : "");
+    + (typeof e.className === "string" && e.className.trim() ? "." + e.className.trim().split(/[ \t\n\r\f]+/u).join(".") : "");
   const text = (sel) => { const e = $(sel); return e ? e.textContent.trim() : null; };
   const attr = (sel, name) => { const e = $(sel); return e ? e.getAttribute(name) : null; };
   const count = (sel, root) => all(sel, root).length;
-  const number = (sel) => Number((text(sel) || "").replace(/\D/g, "")) || 0;
+  const number = (sel) => Number((text(sel) || "").replace(/[^0-9]/gu, "")) || 0;
   // The width the page must fit. In mobile emulation innerWidth grows with an over-wide page, so
   // the narrower of it and the root's client width is the viewport.
   const vw = () => Math.min(innerWidth, document.documentElement.clientWidth);
@@ -1181,7 +1191,7 @@ window.__gate = (() => {
   const fonts = async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     await document.fonts.ready;
-    return Array.from(document.fonts).filter((f) => f.status === "loaded").map((f) => f.family.replace(/["']/g, ""));
+    return Array.from(document.fonts).filter((f) => f.status === "loaded").map((f) => f.family.replace(/["']/gu, ""));
   };
 
   const edges = () => {
@@ -1200,7 +1210,7 @@ window.__gate = (() => {
     const files = lis.filter((li) => li.classList.contains("file"));
     return {
       dirs: dirs.length, files: files.length,
-      noCount: dirs.filter((li) => !/\d+ files?/.test((($(".tmeta", li) || {}).textContent) || "")).map(rowName),
+      noCount: dirs.filter((li) => !/[0-9]+ files?/u.test((($(".tmeta", li) || {}).textContent) || "")).map(rowName),
       noBadge: files.filter((li) => !$(".badge", li) || !$(".tick", li)).map(rowName),
       compacted: dirs.filter((li) => rowName(li).includes("/")).length,
     };
@@ -1212,7 +1222,7 @@ window.__gate = (() => {
   });
   const collapsed = () => all('#tree li.trow.dir[aria-expanded="false"]').map((li) => ({
     id: li.dataset.id,
-    files: Number((/([\d,]+) files?/.exec((($(".tmeta", li) || {}).textContent) || "") || [0, "0"])[1].replace(/,/g, "")),
+    files: Number((/([0-9,]+) files?/u.exec((($(".tmeta", li) || {}).textContent) || "") || [0, "0"])[1].replace(/,/gu, "")),
   }));
 
   const fileFacts = () => {
@@ -1221,7 +1231,7 @@ window.__gate = (() => {
     return {
       screen: attr("#app", "data-screen"), tab: attr("#app", "data-tab"),
       fileShown: shown($("#screen-file")), treeShown: shown($("#screen-tree")),
-      rows: code ? count(".r", code) : 0, status: notes.find((t) => !/^loading/i.test(t)) || "",
+      rows: code ? count(".r", code) : 0, status: notes.find((t) => !/^loading/iu.test(t)) || "",
       fname: text("#fname"),
     };
   };

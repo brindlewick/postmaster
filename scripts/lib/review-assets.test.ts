@@ -47,6 +47,7 @@ describe("the page assets of this checkout", () => {
 
   test("modules arrive as plain JavaScript: types and imports are gone, exports remain for stripping", () => {
     for (const m of assets.modules) {
+      // ASCII: the module text is the transpiler's own output.
       expect(m).not.toMatch(/^\s*import\b/mu);
       expect(m).not.toContain(": string");
       expect(m).toMatch(/^export function /mu);

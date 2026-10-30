@@ -48,6 +48,7 @@ describe("stripExports", () => {
 
   test("output holds no export or import statement", () => {
     const out = stripExports("export const a = 1;\nexport { a };\n");
+    // ASCII: the stripped text is the test's own ASCII input.
     expect(out).not.toMatch(/^\s*(export|import)\b/mu);
   });
 });
@@ -67,6 +68,7 @@ describe("assemblePage", () => {
     expect(html.indexOf(":root { --a: 1; }")).toBeLessThan(html.indexOf("body { margin: 0; }"));
     expect(html.indexOf("function one()")).toBeLessThan(html.indexOf("const x = one();"));
     expect(html).not.toContain("@@");
+    // ASCII: the assembled page is machine-made text.
     expect(html).not.toMatch(/^export\b/mu);
   });
 

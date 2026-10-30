@@ -6,8 +6,8 @@
   "ticketBody": "",
   "body": "### What the change does\n\nThis change adds gift wrapping to the cart of a small, invented fruit shop. A shopper can switch\nwrapping on for any box. Each wrapped box adds the same fee, $3.50, to the cart and to the order,\nand an order with a wrapped box leaves the warehouse one working day later. The old free gift note\nis removed, because its small job now lives in the cart code itself.\n\n### How the files are grouped\n\nThe shop app holds the cart page, the checkout page and the new wrapping switch. The pricing\npackage, a shared folder of money rules, holds the wrapping fee, the discounts for buying many\nboxes, and the tax. The shared package of screen parts gets a reusable on and off switch and two\nsmall icons. The admin app can export a wrapped boxes column. Many of the changed lines are tests,\nand the rest is notes for readers and settings: the list of exact package versions, the setup of\nthe automatic checks, and a file that the test server reads.\n\n### Where to look first\n\nStart with `apps/shop/src/features/cart/components/GiftWrapToggle.tsx`, the switch a shopper sees.\nThen read `packages/pricing/src/rules/volume/tiers/wrap.ts`, which sets the fee. The cart tests next\nto the cart code show what the shop promises.\n\n### The two rulings\n\n1. Should the wrapping fee be taxed? Open. For now it is taxed at the same rate as the goods, which is the cautious choice. Nobody has confirmed what the rules say for a service charge. If the answer is no, the change is one line in the tax file.\n2. The wrapping fee stays a flat amount. Decided. Every wrapped box costs the same $3.50, however many boxes are in the cart. A cheaper rate for big orders was considered and left out, so the price is easy to explain at checkout.\n",
   "mergedAt": null,
-  "base": "33cb8c7d410fc935bf026b396c80f7915090936f",
-  "head": "7a27287ae440c7201fb7573eff3b9c861fdd696a",
+  "base": "789b76e39b5d55651d4f6a630a038fadf7485b9f",
+  "head": "619e0696d18b1061cbcac4cfb7f90bd81585ad5a",
   "additions": 1082,
   "deletions": 78,
   "changedFiles": 46,
@@ -79,7 +79,7 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "bbecb3259b"
+      "sig": "4ac790c058"
     },
     {
       "path": "apps/shop/src/routes/cart.tsx",
@@ -139,7 +139,7 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "4741e47847"
+      "sig": "a203be3a13"
     },
     {
       "path": "apps/shop/src/features/cart/cartTotals.ts",
@@ -319,7 +319,7 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "d67ef49108"
+      "sig": "c240760a03"
     },
     {
       "path": "apps/admin/src/orders/export/formats/json.ts",

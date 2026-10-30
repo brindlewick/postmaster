@@ -19,9 +19,11 @@ export interface PageParts {
 
 /** Drop the `export` keyword from declarations and remove export lists, so a module inlines as plain code. */
 export function stripExports(js: string): string {
-  return js
-    .replace(/^export\s*\{[^}]*\}\s*;?[ \t]*$/gmu, "")
-    .replace(/^export (?=(?:async function|function|const|let|var|class)\b)/gmu, "");
+  // ASCII: the input is the transpiler's own output, whose keywords and spacing are ASCII.
+  const withoutLists = js.replace(/^export\s*\{[^}]*\}\s*;?[ \t]*$/gmu, "");
+  // ASCII: the same input; the keyword is matched at the start of a line.
+  const declaration = /^export (?=(?:async function|function|const|let|var|class)\b)/gmu;
+  return withoutLists.replace(declaration, "");
 }
 
 function countOf(text: string, needle: string): number {

@@ -374,92 +374,95 @@ const ENTRIES: readonly Entry[] = [
   ),
   both(
     "pnpm-lock.yaml",
-    `
-lockfileVersion: 5.4
-
-importers:
-
-  .:
-    specifiers:
-      playwright: 1.48.2
-      typescript: 5.6.3
-[-]      vitest: 2.1.4
-[+]      vitest: 2.1.5
-    devDependencies:
-      playwright: 1.48.2
-      typescript: 5.6.3
-[-]      vitest: 2.1.4
-[+]      vitest: 2.1.5
-
-  apps/admin:
-    specifiers:
-      orchard-pricing: workspace:*
-    dependencies:
-      orchard-pricing: link:../../packages/pricing
-
-  apps/shop:
-    specifiers:
-      orchard-pricing: workspace:*
-      orchard-ui: workspace:*
-      react: 18.3.1
-      react-dom: 18.3.1
-      vite: 5.4.10
-    dependencies:
-      orchard-pricing: link:../../packages/pricing
-      orchard-ui: link:../../packages/ui
-      react: 18.3.1
-      react-dom: 18.3.1
-    devDependencies:
-      vite: 5.4.10
-
-  packages/pricing:
-    specifiers: {}
-
-  packages/ui:
-    specifiers:
-      react: 18.3.1
-    dependencies:
-      react: 18.3.1
-
-packages:
-
-  /playwright/1.48.2:
-    resolution: {integrity: sha512-0SNNDt2YJtmJtjgUq9UG0jzcFGc9aTlTM3T1E6C46NxvsTfNufwk4QoSBoRGxWCBxil3a/jwO8dMc2ULalQcjw==}
-    engines: {node: '>=18'}
-    hasBin: true
-    dev: true
-
-  /react-dom/18.3.1:
-    resolution: {integrity: sha512-FTUoyieo6x5ukpVO8V8VWaUz/uf3L9ICeZF0LipHzEoutqJVV63kaOqR52+nQ45m9yhoMSmduXtOo3AxQSl8qw==}
-    peerDependencies:
-      react: ^18.3.1
-    dev: false
-
-  /react/18.3.1:
-    resolution: {integrity: sha512-8B6txUisVMR6+to7flRXjQ0yxMVkBMXKUqUvOyMhbGX+dcOsScKPvINGad4N7BxwBSeRhiPWuTq6GhDth1Rwkg==}
-    engines: {node: '>=0.10.0'}
-    dev: false
-
-  /typescript/5.6.3:
-    resolution: {integrity: sha512-ArTcQOK0jMt2C5ssObqdR9W6SGd7pHw55BL2LY40GjSo3KHXgYjPUzR23SegETkqzcJM78BsiR7w3U1bBR+bfA==}
-    engines: {node: '>=14.17'}
-    hasBin: true
-    dev: true
-
-  /vite/5.4.10:
-    resolution: {integrity: sha512-EavrrAiL/lbJhTtSChPmyLhHSkGSPsvllt8nxi7erhnmX3s6VQZpCpuaiXIJ3XcWna09DBntQMmp0lfiM/SoOg==}
-    engines: {node: ^18.0.0 || >=20.0.0}
-    hasBin: true
-    dev: true
-
-[-]  /vitest/2.1.4:
-[-]    resolution: {integrity: sha512-+gdlBUK17Nmcvb5M3ZD2mT94TcjF5jhB1XsXo80/UqVcOr5PYxIIJIUEX4IlWZBXM4C0u3PNUT90GiWi+Xii1g==}
-[+]  /vitest/2.1.5:
-[+]    resolution: {integrity: sha512-mkpe/cF/pxcxBATrISu21G1VlgyFZnOwK9Ibe/uFO3W30o299clbcVeFIK7jFwKBark5js4gBipk8VmXobY4rA==}
-    engines: {node: ^18.0.0 || >=20.0.0}
-    hasBin: true
-    dev: true
-`,
+    // Strings, not a template: a template cannot carry the marker that the guard in
+    // lib/text.test.ts wants beside a line starting with a slash, which it reads as a regex literal.
+    [
+      "lockfileVersion: 5.4",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    specifiers:",
+      "      playwright: 1.48.2",
+      "      typescript: 5.6.3",
+      "[-]      vitest: 2.1.4",
+      "[+]      vitest: 2.1.5",
+      "    devDependencies:",
+      "      playwright: 1.48.2",
+      "      typescript: 5.6.3",
+      "[-]      vitest: 2.1.4",
+      "[+]      vitest: 2.1.5",
+      "",
+      "  apps/admin:",
+      "    specifiers:",
+      "      orchard-pricing: workspace:*",
+      "    dependencies:",
+      "      orchard-pricing: link:../../packages/pricing",
+      "",
+      "  apps/shop:",
+      "    specifiers:",
+      "      orchard-pricing: workspace:*",
+      "      orchard-ui: workspace:*",
+      "      react: 18.3.1",
+      "      react-dom: 18.3.1",
+      "      vite: 5.4.10",
+      "    dependencies:",
+      "      orchard-pricing: link:../../packages/pricing",
+      "      orchard-ui: link:../../packages/ui",
+      "      react: 18.3.1",
+      "      react-dom: 18.3.1",
+      "    devDependencies:",
+      "      vite: 5.4.10",
+      "",
+      "  packages/pricing:",
+      "    specifiers: {}",
+      "",
+      "  packages/ui:",
+      "    specifiers:",
+      "      react: 18.3.1",
+      "    dependencies:",
+      "      react: 18.3.1",
+      "",
+      "packages:",
+      "",
+      "  /playwright/1.48.2:",
+      "    resolution: {integrity: sha512-0SNNDt2YJtmJtjgUq9UG0jzcFGc9aTlTM3T1E6C46NxvsTfNufwk4QoSBoRGxWCBxil3a/jwO8dMc2ULalQcjw==}",
+      "    engines: {node: '>=18'}",
+      "    hasBin: true",
+      "    dev: true",
+      "",
+      "  /react-dom/18.3.1:",
+      "    resolution: {integrity: sha512-FTUoyieo6x5ukpVO8V8VWaUz/uf3L9ICeZF0LipHzEoutqJVV63kaOqR52+nQ45m9yhoMSmduXtOo3AxQSl8qw==}",
+      "    peerDependencies:",
+      "      react: ^18.3.1",
+      "    dev: false",
+      "",
+      "  /react/18.3.1:",
+      "    resolution: {integrity: sha512-8B6txUisVMR6+to7flRXjQ0yxMVkBMXKUqUvOyMhbGX+dcOsScKPvINGad4N7BxwBSeRhiPWuTq6GhDth1Rwkg==}",
+      "    engines: {node: '>=0.10.0'}",
+      "    dev: false",
+      "",
+      "  /typescript/5.6.3:",
+      "    resolution: {integrity: sha512-ArTcQOK0jMt2C5ssObqdR9W6SGd7pHw55BL2LY40GjSo3KHXgYjPUzR23SegETkqzcJM78BsiR7w3U1bBR+bfA==}",
+      "    engines: {node: '>=14.17'}",
+      "    hasBin: true",
+      "    dev: true",
+      "",
+      "  /vite/5.4.10:",
+      "    resolution: {integrity: sha512-EavrrAiL/lbJhTtSChPmyLhHSkGSPsvllt8nxi7erhnmX3s6VQZpCpuaiXIJ3XcWna09DBntQMmp0lfiM/SoOg==}",
+      "    engines: {node: ^18.0.0 || >=20.0.0}",
+      "    hasBin: true",
+      "    dev: true",
+      "",
+      "[-]  /vitest/2.1.4:",
+      "[-]    resolution: {integrity: sha512-+gdlBUK17Nmcvb5M3ZD2mT94TcjF5jhB1XsXo80/UqVcOr5PYxIIJIUEX4IlWZBXM4C0u3PNUT90GiWi+Xii1g==}",
+      "[+]  /vitest/2.1.5:",
+      "[+]    resolution: {integrity: sha512-mkpe/cF/pxcxBATrISu21G1VlgyFZnOwK9Ibe/uFO3W30o299clbcVeFIK7jFwKBark5js4gBipk8VmXobY4rA==}",
+      "    engines: {node: ^18.0.0 || >=20.0.0}",
+      "    hasBin: true",
+      "    dev: true",
+      "",
+    ].join("\n"),
   ),
   both(
     "README.md",
@@ -1003,7 +1006,7 @@ export function withNote(cart: Cart, text: string): Cart {
 [+]
 [+]/** Tidy a note before it is stored: single spaces only, and never longer than the card. */
 [+]function tidyNote(text: string): string | null {
-[+]  const tidy = text.trim().split(/ +/).join(" ");
+[+]  const tidy = text.trim().split(/ +/u).join(" ");
 [+]  return tidy === "" ? null : tidy.slice(0, NOTE_LIMIT);
 [+]}
 [+]
@@ -1051,7 +1054,7 @@ export const NOTE_LIMIT = 140;
 
 /** Tidy a note before it is stored: single spaces only, and never longer than the card. */
 export function attachNote(text: string): string | null {
-  const tidy = text.trim().split(/ +/).join(" ");
+  const tidy = text.trim().split(/ +/u).join(" ");
   if (tidy === "") return null;
   return tidy.length > NOTE_LIMIT ? tidy.slice(0, NOTE_LIMIT) : tidy;
 }
@@ -1710,7 +1713,7 @@ const HEADER = ["order", "placed_on", "boxes", "wrapped_boxes", "wrap_fee", "tot
 /** Quote a cell when it holds a comma, a quote or a line break. */
 function cell(value: string | number): string {
   const text = String(value);
-  return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+  return /[",\n]/u.test(text) ? '"' + text.replace(/"/gu, '""') + '"' : text;
 }
 
 function rowCells(row: OrderRow): string[] {

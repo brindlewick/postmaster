@@ -84,8 +84,8 @@ const MAX_RANGE = 40;
  * data change on purpose; the test that holds them then fails and shows the new ids to record here.
  */
 const RECORDED_IDS = {
-  base: "33cb8c7d410fc935bf026b396c80f7915090936f",
-  head: "7a27287ae440c7201fb7573eff3b9c861fdd696a",
+  base: "789b76e39b5d55651d4f6a630a038fadf7485b9f",
+  head: "619e0696d18b1061cbcac4cfb7f90bd81585ad5a",
 };
 
 // Small pure readers. Each has a control below, so a mistake in one cannot make a check vacuous.
@@ -99,6 +99,7 @@ const missingFrom = (have: readonly string[], want: readonly string[]): string[]
 const linesHolding = (text: string, needle: string): number[] =>
   text.split("\n").flatMap((line, i) => (line.includes(needle) ? [i] : []));
 
+// ASCII: the sample's prose is plain ASCII, where a sentence ends at an ASCII space.
 const sentences = (text: string): string[] => text.split(/(?<=[.?!])\s+/u).filter(Boolean);
 
 interface Section {
@@ -126,6 +127,7 @@ function globToRegExp(glob: string): RegExp {
 }
 
 const importSpecifiers = (source: string): string[] =>
+  // ASCII: the import statements of the sample's source are ASCII.
   [...source.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/gu)].map((m) => m[1]!);
 
 const EXTENSIONS = ["", ".ts", ".tsx", ".css", "/index.ts", "/index.tsx"];
@@ -141,9 +143,9 @@ interface Stat {
 function parseShortstat(text: string): Stat {
   const pick = (pattern: RegExp): number => Number(pattern.exec(text)?.[1] ?? 0);
   return {
-    files: pick(/(\d+) files? changed/u),
-    insertions: pick(/(\d+) insertions?\(\+\)/u),
-    deletions: pick(/(\d+) deletions?\(-\)/u),
+    files: pick(/([0-9]+) files? changed/u),
+    insertions: pick(/([0-9]+) insertions?\(\+\)/u),
+    deletions: pick(/([0-9]+) deletions?\(-\)/u),
   };
 }
 
@@ -631,7 +633,7 @@ describe("SAMPLE_LAYOUT", () => {
     expect(entries.map(([p]) => p).filter((p) => !(p in HEAD) && p !== DELETED)).toEqual([]);
     const sentenceShaped = /^[A-Z][\x20-\x7e]*\.$/u;
     expect(entries.filter(([, s]) => s.length > 110 || !sentenceShaped.test(s))).toEqual([]);
-    expect(entries.filter(([, s]) => /[.!?]\s/u.test(s))).toEqual([]);
+    expect(entries.filter(([, s]) => /[.!?] /u.test(s))).toEqual([]);
   });
 
   test("purposes cover an added, a modified, a renamed and a removed file", () => {
@@ -753,7 +755,7 @@ describe("SAMPLE_SUMMARY", () => {
     const { rulings } = SAMPLE_LAYOUT;
     const body = parts[3]!.body;
     const rows = body.split("\n").filter((l) => l.trim() !== "");
-    expect(rows.filter((l) => !/^\d+\. /u.test(l))).toEqual([]);
+    expect(rows.filter((l) => !/^[0-9]+\. /u.test(l))).toEqual([]);
     expect(rows).toHaveLength(rulings.length);
     rulings.forEach((ruling, i) => {
       const row = rows[i]!;

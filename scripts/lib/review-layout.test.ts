@@ -623,6 +623,7 @@ describe("globToRegExp", () => {
     expect(globToRegExp("a.b").test("a.b")).toBe(true);
     expect(globToRegExp("src/(a)+[b]^$|{c}.ts").test("src/(a)+[b]^$|{c}.ts")).toBe(true);
     expect(globToRegExp("src/(a)+[b]^$|{c}.ts").test("src/a+b.ts")).toBe(false);
+    // ASCII: "back\\slash" is a path with a backslash in it, not a pattern.
     expect(globToRegExp("back\\slash").test("back\\slash")).toBe(true);
   });
 

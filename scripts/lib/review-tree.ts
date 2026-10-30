@@ -61,6 +61,7 @@ interface TreeEntry {
 
 /** Names order by lower case first, then by case, one code unit at a time: -1, 0 or 1. */
 export function compareNames(a: string, b: string): number {
+  // LOWER: display order only; the exact-text tiebreak after it makes the order total.
   return codeUnitOrder(a.toLowerCase(), b.toLowerCase()) || codeUnitOrder(a, b);
 }
 
@@ -169,11 +170,11 @@ export function defaultOpen(tree: readonly TreeNode[], levels = 2): string[] {
  * An empty word is inside every text, so a blank query, or blanks around words, need no care.
  */
 export function matchWords(haystack: string, query: string): boolean {
+  // LOWER: a file filter matches letters of any case, and Unicode lowering is enough for that.
   const text = haystack.toLowerCase();
-  return query
-    .toLowerCase()
-    .split(/\s+/u)
-    .every((word) => text.includes(word));
+  // ASCII: \s takes the Unicode spaces a typed query may hold; the query is lowered like the text.
+  const words = query.toLowerCase().split(/\s+/u);
+  return words.every((word) => text.includes(word));
 }
 
 /**
