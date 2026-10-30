@@ -3,9 +3,18 @@
 // subprocesses with stand-in harnesses first on PATH; nothing here imports the change.
 // The canned Claude streams are invented: a fruit shop's review, with the shapes a headless
 // Claude Code stream-json run has (a started helper, its notice, and a result that counts them).
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { toolRoot, beside } from "./lib/paths.ts";
+import { beside, toolRoot } from "./lib/paths.ts";
 import type { Layout } from "./walls-oracle.ts";
 import { setStub } from "./walls-oracle.ts";
 
@@ -124,6 +133,39 @@ export function addClaudeLanes(dispatch: string, names: string[]): void {
     data.config.lanes[name] = { harness: "claude", model: `${name}-model`, effort: "high" };
   }
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+}
+
+/** Give the run's review rounds a time limit of this many seconds. */
+export function setRoundLimit(dispatch: string, seconds: number): void {
+  const path = join(dispatch, "run.json");
+  const data = JSON.parse(readFileSync(path, "utf8")) as {
+    config: { review?: Record<string, unknown> };
+  };
+  data.config.review = { ...data.config.review, round_timeout_seconds: seconds };
+  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+}
+
+/** One lane launch run directly, not through the host, so its exit code and error output are
+ * seen: the harness's stream goes to `stream`, and the role and stream reach the launch as the
+ * host hands them. */
+export function launchDirect(
+  lay: Layout,
+  o: { lane: string; role: "lane" | "reviewer"; cwd: string; stream: string },
+): { code: number; err: string } {
+  const prompt = join(lay.tmp, "direct-prompt.txt");
+  writeFileSync(prompt, "Review the fruit counter.\n");
+  const out = openSync(o.stream, "w");
+  try {
+    const r = spawnSync(RUN, ["launch", "launch", o.lane, o.cwd, prompt, "--run", lay.dispatch], {
+      encoding: "utf8",
+      env: { ...lay.env, POSTMASTER_EVENT_STREAM: o.stream, POSTMASTER_LAUNCH_ROLE: o.role },
+      stdio: ["ignore", out, "pipe"],
+      cwd: lay.tmp,
+    });
+    return { code: r.status ?? -1, err: r.stderr ?? "" };
+  } finally {
+    closeSync(out);
+  }
 }
 
 /** The logs folder of a dispatch. */

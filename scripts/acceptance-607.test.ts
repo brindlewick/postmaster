@@ -5,7 +5,7 @@
 // what review-decide makes of it; C5 the surveyor's refusal. Every case drives scripts/run as a
 // subprocess with stand-in harnesses. The stand-in streams are invented (acceptance-607.ts).
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   makeSurveyLayout,
@@ -27,10 +27,12 @@ import {
   finishedEvents,
   helperNotice,
   helperStarted,
+  launchDirect,
   logsOf,
   reviewerFiles,
   ROOT,
   RUN,
+  setRoundLimit,
   statusOnlyEvents,
   TEAM_TOML,
   WAIT_VAR,
@@ -266,6 +268,52 @@ describe("C3: the marker a launch leaves beside its stream", () => {
       expect(existsSync(marker)).toBe(false);
     },
   );
+
+  oracle("a workhorse lane's stream is marked too", (lay) => {
+    claudeStub(lay, cutOffEvents("s-horse"));
+    launchStep(ROOT, lay, {
+      lane: "sec",
+      role: "lane",
+      form: "launch",
+      stream: "sec-events.jsonl",
+      marker: "sec.done",
+      cwd: mkWt(lay, "wt-horse"),
+    });
+    expect(existsSync(join(logsOf(lay.dispatch), "sec-events.cutoff"))).toBe(true);
+  });
+
+  oracle("a launch that cannot write a marker it owes fails, and says so", (lay) => {
+    claudeStub(lay, cutOffEvents("s-stuck"));
+    const f = reviewerFiles(1, "security", "sec");
+    const stream = join(logsOf(lay.dispatch), f.stream);
+    // A folder where the marker belongs: the write fails, as a full disk would make it.
+    mkdirSync(join(logsOf(lay.dispatch), f.cutoff));
+    const stuck = launchDirect(lay, {
+      lane: "sec",
+      role: "reviewer",
+      cwd: mkWt(lay, "wt-stuck"),
+      stream,
+    });
+    expect(stuck.code).toBe(1);
+    expect(stuck.err).toContain("cut-off marker");
+  });
+
+  oracle(
+    "the same launch with nothing in the way ends 0 and leaves the marker (the control)",
+    (lay) => {
+      claudeStub(lay, cutOffEvents("s-clear"));
+      const f = reviewerFiles(1, "security", "sec");
+      const stream = join(logsOf(lay.dispatch), f.stream);
+      const clear = launchDirect(lay, {
+        lane: "sec",
+        role: "reviewer",
+        cwd: mkWt(lay, "wt-clear"),
+        stream,
+      });
+      expect(clear.code).toBe(0);
+      expect(existsSync(join(logsOf(lay.dispatch), f.cutoff))).toBe(true);
+    },
+  );
 });
 
 // --- C4: the round -----------------------------------------------------------------------
@@ -410,6 +458,31 @@ describe("C4: the round", () => {
     expect(existsSync(mine)).toBe(false);
     expect(existsSync(other)).toBe(true);
   });
+
+  oracle(
+    "a deadline close records a cut-off reviewer beside the timeout of one that never reported",
+    (lay) => {
+      setRoundLimit(lay.dispatch, 1);
+      addClaudeLanes(lay.dispatch, ["plum"]);
+      startRound(lay, ["security:sec", "style:plum"]);
+      launched(lay, "security", "sec", cutOffEvents("s-sec"));
+      const w = reviewRound(lay, [
+        "wait",
+        lay.dispatch,
+        "1",
+        lay.repo,
+        "security:sec",
+        "style:plum",
+      ]);
+      expect(w.code).toBe(3);
+      expect(w.out).toContain("TIMEOUT style plum: DEGRADED, timeout");
+      expect(w.out).toContain(`CUTOFF security sec: DEGRADED, ${CUTOFF_CAUSE}`);
+      expect(degrades(lay)).toEqual([
+        { target: "plum", detail: "style r1: timeout" },
+        { target: "sec", detail: `security r1: ${CUTOFF_CAUSE}` },
+      ]);
+    },
+  );
 });
 
 // --- C5: the surveyor --------------------------------------------------------------------
