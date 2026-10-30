@@ -7,12 +7,6 @@
     "postmaster/test-beside-target": "error",
     "typescript/no-explicit-any": "error"
   },
-  "overrides": [
-    {
-      "files": ["skills/review-pages/page/js/**"],
-      "rules": { "no-unused-vars": "off" }
-    }
-  ],
   "ignorePatterns": [
     "fixtures/**",
     "scripts/scrub-check.ts",

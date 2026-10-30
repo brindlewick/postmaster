@@ -1,9 +1,14 @@
 // The Order tab: the files in the order worth reading them, grouped by importance, each with a
 // plain purpose line. A group can be folded; test and generated groups start folded.
+import { $, S, el, store } from "./01-core.js";
+import { reviewedFile } from "./02-data.js";
+import { fileTextNodes, repaintCommentCounts, tickButton } from "./04-diff.js";
+import { openFile } from "./09-nav.js";
+
 const groupKey = () => `${S.key}-groups-v1`;
 let openGroups = new Set();
 
-function initGroupState() {
+export function initGroupState() {
   const saved = store.read(groupKey(), null);
   const known = new Set((saved && saved.known) || []);
   const open = new Set((saved && saved.open) || []);
@@ -11,7 +16,7 @@ function initGroupState() {
 }
 const saveGroupState = () => store.write(groupKey(), { open: [...openGroups], known: S.R.groups.map((g) => g.id) });
 
-function orderRow(f, fi) {
+export function orderRow(f, fi) {
   const row = el("div", "orow");
   row.dataset.fi = String(fi);
   const go = el("button", "ogo");
@@ -21,7 +26,7 @@ function orderRow(f, fi) {
   return row;
 }
 
-function renderOrder() {
+export function renderOrder() {
   const list = $("order-list");
   list.replaceChildren();
   S.R.groups.forEach((g, gi) => {
@@ -45,7 +50,7 @@ function renderOrder() {
   repaintCommentCounts();
 }
 
-function updateOrderCounts() {
+export function updateOrderCounts() {
   if (!S.R) return;
   const per = S.R.groups.map(() => ({ n: 0, d: 0 }));
   S.files.forEach((f, fi) => {
@@ -61,7 +66,7 @@ function updateOrderCounts() {
   });
 }
 
-function initOrder() {
+export function initOrder() {
   $("order-list").addEventListener("click", (ev) => {
     const head = ev.target.closest(".ghead");
     if (head) {

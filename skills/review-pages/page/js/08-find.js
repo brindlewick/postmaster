@@ -1,6 +1,10 @@
 // The file list sheet: search the names and purposes of every file, tap one to open it, or tick it
 // as reviewed. The sheet follows the visual viewport, so the phone keyboard does not cover it.
-function buildFind() {
+import { $, S, el } from "./01-core.js";
+import { orderRow } from "./06-order.js";
+import { openFile } from "./09-nav.js";
+
+export function buildFind() {
   const list = $("find-list");
   list.replaceChildren();
   S.R.groups.forEach((g, gi) => {
@@ -40,7 +44,7 @@ function filterFind() {
   $("find-count").textContent = words.length ? `${shown} of ${S.files.length} files match` : `${S.files.length} files. Tap one to open it, or tick it as reviewed.`;
 }
 
-function fitFind() {
+export function fitFind() {
   const x = $("find");
   const vv = window.visualViewport;
   if (!vv || x.hidden) { x.style.removeProperty("height"); x.style.removeProperty("top"); return; }
@@ -48,7 +52,7 @@ function fitFind() {
   x.style.height = `${Math.round(vv.height)}px`;
 }
 
-function openFind() {
+export function openFind() {
   $("find").hidden = false;
   document.documentElement.classList.add("lock");
   $("filebtn").setAttribute("aria-expanded", "true");
@@ -60,7 +64,7 @@ function openFind() {
   if (window.matchMedia("(pointer: fine)").matches) $("find-q").focus();
 }
 
-function closeFind() {
+export function closeFind() {
   $("find").hidden = true;
   fitFind();
   document.documentElement.classList.remove("lock");
@@ -68,7 +72,7 @@ function closeFind() {
   $("find-q").blur();
 }
 
-function initFind() {
+export function initFind() {
   $("find-q").addEventListener("input", filterFind);
   $("find-close").addEventListener("click", closeFind);
   $("find-list").addEventListener("click", (ev) => {

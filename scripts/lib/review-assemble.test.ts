@@ -1,7 +1,7 @@
 // Tests beside scripts/lib/review-assemble.ts: the page is put together from its parts by
 // plain substitution, so the same parts always give the same bytes.
 import { describe, expect, test } from "bun:test";
-import { assemblePage, stripExports } from "./review-assemble.ts";
+import { assemblePage, stripExports, stripImports } from "./review-assemble.ts";
 
 const SHELL = [
   "<title>@@TITLE@@</title>",
@@ -53,6 +53,29 @@ describe("stripExports", () => {
   });
 });
 
+describe("stripImports", () => {
+  test("a one-line import goes with its line break", () => {
+    const js = 'import { a, b } from "./x.js";\nconst c = a + b;\n';
+    expect(stripImports(js)).toBe("const c = a + b;\n");
+  });
+
+  test("an import over several lines goes whole", () => {
+    const js = 'import {\n  a, b,\n  c,\n} from "../y.ts";\nconst d = a;\n';
+    expect(stripImports(js)).toBe("const d = a;\n");
+  });
+
+  test("a line that only mentions import, or an import in a string or comment, stays", () => {
+    const js = [
+      "const important = 1;",
+      '// import { a } from "./x.js";',
+      'const s = "import { a } from x";',
+      "  importList.push(1);",
+      "",
+    ].join("\n");
+    expect(stripImports(js)).toBe(js);
+  });
+});
+
 describe("assemblePage", () => {
   const parts = {
     shell: SHELL,
@@ -94,6 +117,25 @@ describe("assemblePage", () => {
 
   test("a part that holds a slot marker is refused rather than substituted twice", () => {
     expect(() => assemblePage({ ...parts, css: ["/* @@SCRIPT@@ */"] })).toThrow(/@@SCRIPT@@/u);
+  });
+
+  test("the page scripts lose their imports and exports, and keep their code", () => {
+    const html = assemblePage({
+      ...parts,
+      js: ['import { one } from "./a.js";\nexport const x = one();', "export function g() {}"],
+    });
+    expect(html).toContain("const x = one();");
+    expect(html).toContain("function g() {}");
+    expect(html).not.toMatch(/^[ \t]*(import|export)(?![A-Za-z0-9_$])/mu);
+  });
+
+  test("an import or export it cannot take off is refused, naming the line", () => {
+    expect(() => assemblePage({ ...parts, js: ['import "./side-effect.js";'] })).toThrow(
+      /import "\.\/side-effect\.js"/u,
+    );
+    expect(() => assemblePage({ ...parts, js: ["export default function () {}"] })).toThrow(
+      /export default/u,
+    );
   });
 
   test("a closing script or style tag inside a part is refused", () => {

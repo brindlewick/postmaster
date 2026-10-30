@@ -1,11 +1,18 @@
 // The Tree tab: the real directory tree of the change. Single-child folder chains are one row,
 // folders come first, every folder row shows its file count and its added and deleted lines, and
 // a search box filters it. The open folders are remembered in this browser.
+import { matchWords, visibleRows } from "../../../../scripts/lib/review-tree.ts";
+import { $, MINUS, S, el, num, plural, store } from "./01-core.js";
+import { fileKind, reviewedFile, statusClass } from "./02-data.js";
+import { reviewedCount } from "./03-ticks.js";
+import { repaintCommentCounts, tickButton } from "./04-diff.js";
+import { openFile } from "./09-nav.js";
+
 const treeKey = () => `${S.key}-tree-v1`;
 
 // A folder the reader opened or closed keeps that state; a folder seen for the first time takes
 // the default (the first two levels open, test and generated folders closed).
-function initTreeState() {
+export function initTreeState() {
   const saved = store.read(treeKey(), null);
   const known = new Set((saved && saved.known) || []);
   const open = new Set((saved && saved.open) || []);
@@ -61,7 +68,7 @@ function treeRow(row) {
   return li;
 }
 
-function renderTree() {
+export function renderTree() {
   const rows = visibleRows(S.tree, S.open, treeKeep());
   const frag = document.createDocumentFragment();
   for (const r of rows) frag.append(treeRow(r));
@@ -78,7 +85,7 @@ function renderTree() {
   updateTreeSummary();
 }
 
-function updateTreeSummary() {
+export function updateTreeSummary() {
   if (!S.R) return;
   const q = S.query.trim();
   const done = reviewedCount();
@@ -108,7 +115,7 @@ function setAllDirs(open) {
 function dirChain(path) {
   return S.allDirs.filter((id) => path.startsWith(`${id}/`));
 }
-function revealInTree(fi) {
+export function revealInTree(fi) {
   for (const id of dirChain(S.files[fi].path)) S.open.add(id);
   S.query = "";
   $("tree-q").value = "";
@@ -118,7 +125,7 @@ function revealInTree(fi) {
   if (li && li.scrollIntoView) li.scrollIntoView({ block: "nearest" });
 }
 
-function markCurrentRows() {
+export function markCurrentRows() {
   for (const li of $("tree").children) li.classList.toggle("current", li.dataset.fi !== undefined && Number(li.dataset.fi) === S.fi);
   for (const r of document.querySelectorAll("#order-list .orow")) r.classList.toggle("current", Number(r.dataset.fi) === S.fi);
   if (S.wide && S.tab === "order") {
@@ -127,7 +134,7 @@ function markCurrentRows() {
   }
 }
 
-function initTree() {
+export function initTree() {
   $("tree").addEventListener("click", (ev) => {
     const go = ev.target.closest(".tgo");
     if (!go) return;

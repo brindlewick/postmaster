@@ -1,5 +1,10 @@
 // Data: the review file, the diff chunks that load on demand, and what is derived from the files
 // (the tree, the two file orders, the search text of each file).
+import {
+  buildTree, fileOrder, allDirIds, defaultOpen,
+} from "../../../../scripts/lib/review-tree.ts";
+import { KINDS, S } from "./01-core.js";
+
 const chunks = new Map();
 function chunk(k) {
   if (!chunks.has(k)) {
@@ -10,17 +15,17 @@ function chunk(k) {
   }
   return chunks.get(k);
 }
-async function item(fi) {
+export async function item(fi) {
   const items = await chunk(S.files[fi].chunk);
   return items.find((x) => x.i === fi);
 }
-async function loadReview() {
+export async function loadReview() {
   const res = await fetch("review.json");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-function prepare(R) {
+export function prepare(R) {
   S.R = R;
   S.files = R.files;
   S.key = R.storageKey || "review-page";
@@ -37,6 +42,6 @@ function prepare(R) {
   S.defaultOpen = new Set(defaultOpen(S.tree, 2));
 }
 
-const fileKind = (f) => KINDS[f.status] || "changed";
-const statusClass = (f) => (f.status === "A" ? "a" : f.status === "D" ? "d" : f.status === "R" ? "r" : "m");
-const reviewedFile = (fi) => S.ticks.has(S.files[fi].sig);
+export const fileKind = (f) => KINDS[f.status] || "changed";
+export const statusClass = (f) => (f.status === "A" ? "a" : f.status === "D" ? "d" : f.status === "R" ? "r" : "m");
+export const reviewedFile = (fi) => S.ticks.has(S.files[fi].sig);

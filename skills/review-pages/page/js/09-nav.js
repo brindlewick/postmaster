@@ -2,22 +2,29 @@
 // shown; from 700px the tree (or the order) is a left pane with the file beside it. Opening a file
 // on a phone pushes a history entry, so the browser's back gesture returns to the list; the Back
 // button does the same, and works by itself where history is blocked (a sandboxed frame).
+import { $, S, baseName, note } from "./01-core.js";
+import { reviewedFile } from "./02-data.js";
+import { setReviewed } from "./03-ticks.js";
+import { keepComposerVisible, renderFile } from "./04-diff.js";
+import { markCurrentRows, revealInTree } from "./05-tree.js";
+import { closeFind, fitFind, openFind } from "./08-find.js";
+
 const mqWide = window.matchMedia("(min-width: 700px)");
 let canHistory = true;
 let pushed = false;
 let backTimer = 0; // the fallback that shows the list when history.back() brings no popstate
 
 const sequence = () => (S.seq === "tree" ? S.treeSeq : S.orderSeq);
-function barOffset() {
+export function barOffset() {
   const h = $("hdr");
   return (parseFloat(getComputedStyle(h).top) || 0) + h.offsetHeight;
 }
-function scrollToEl(node, gap) {
+export function scrollToEl(node, gap) {
   window.scrollTo(0, Math.max(0, window.scrollY + node.getBoundingClientRect().top - barOffset() - (gap == null ? 8 : gap)));
 }
 const measureHeader = () => $("app").style.setProperty("--hdr-h", `${$("hdr").offsetHeight}px`);
 
-function updateFileBar() {
+export function updateFileBar() {
   if (!S.R) return;
   const have = S.fi >= 0;
   const seq = sequence();
@@ -31,7 +38,7 @@ function updateFileBar() {
   $("next").disabled = !have || at < 0 || at >= seq.length - 1;
 }
 
-function applyScreens() {
+export function applyScreens() {
   S.wide = mqWide.matches;
   if (S.wide) {
     if (S.tab === "overview" && S.screen === "file") S.tab = "tree";
@@ -60,7 +67,7 @@ function restoreScroll() {
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
 
-function selectTab(tab) {
+export function selectTab(tab) {
   saveScroll();
   S.tab = tab;
   S.screen = tab;
@@ -85,7 +92,7 @@ function pushFileState(wasOnFile) {
   }
 }
 
-async function openFile(fi, opts = {}) {
+export async function openFile(fi, opts = {}) {
   clearTimeout(backTimer);
   if (!$("find").hidden) closeFind();
   const tab = opts.tab || S.tab;
@@ -159,7 +166,7 @@ function onPop(ev) {
   }
 }
 
-function initNav() {
+export function initNav() {
   for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => selectTab(t.dataset.tab));
   $("prog").addEventListener("click", openFind);
   $("filebtn").addEventListener("click", openFind);

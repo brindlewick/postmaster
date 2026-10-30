@@ -1,4 +1,14 @@
 // Start: load the review, build everything, show the overview, then connect the database.
+import { $ } from "./01-core.js";
+import { loadReview, prepare } from "./02-data.js";
+import { connectDb, loadTicks, repaintTicks } from "./03-ticks.js";
+import { initComposer } from "./04-diff.js";
+import { initTree, initTreeState, renderTree } from "./05-tree.js";
+import { initGroupState, initOrder, renderOrder } from "./06-order.js";
+import { initOverview, renderOverview } from "./07-overview.js";
+import { buildFind, initFind } from "./08-find.js";
+import { applyScreens, initNav } from "./09-nav.js";
+
 async function boot() {
   let R;
   try {

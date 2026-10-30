@@ -11,7 +11,7 @@ skills/review-pages/page/
   assets.json          the order of the files below; the builder inlines them
   layout.default.json  the default groups, withheld rule and area roots
   css/                 tokens, header, overview, tree, order, file, find, wide
-  js/                  core, data, ticks, diff, tree, order, overview, find, nav, boot
+  js/                  core, data, ticks, diff, tree, order, overview, find, nav, boot (ES modules)
 scripts/lib/review-tree.ts      the tree (pure; also inlined into the page)
 scripts/lib/review-layout.ts    grouping, ordering, purposes and rulings (pure)
 scripts/lib/review-model.ts     review.json and the chunks (pure)
@@ -20,6 +20,11 @@ scripts/lib/review-assets.ts    reads the assets (the edge)
 scripts/review-page.ts          the command (git and gh, files written)
 scripts/review-page-gate.ts     the render gate
 ```
+
+The scripts in `js/` are ES modules: each exports what the others use and imports what it takes, so
+Oxlint checks them one by one. The builder takes the import and export lines off and inlines the
+files, in the order of `assets.json`, as one script; a test checks that every import names a file of
+the manifest and a name that file exports.
 
 The page is one HTML file plus `review.json` (the files, groups, rulings and summary) and
 `chunks/<k>.json` (the diffs, loaded when a file is opened). `review.json` has a `version` (now 2).
@@ -38,12 +43,11 @@ inlines a transpiled copy with its `export` keywords removed, so it is written o
 - Run the gate on a demo build: build with `scripts/run review-page demo <dir>`, then
   `scripts/run review-page-gate <dir>`, and look at the screenshots.
 - Change the look or behaviour in the asset files; each file has one job and a comment at its top.
-  Colours come from the tokens in `css/10-tokens.css`; add a token there with its dark value. The
-  files in `js/` are one script cut into pieces that share a scope, so Oxlint's unused-name rule is
-  off for that folder in `.oxlintrc.json`; the tests parse the assembled script.
+  Colours come from the tokens in `css/10-tokens.css`; add a token there with its dark value.
 - Add a tab: a button in `page.html`'s `.tabs`, a `<section class="screen" id="screen-<name>">`, a
-  render function in a new `js/` file listed in `assets.json`, and the name in `applyScreens` and
-  `selectTab` in `js/09-nav.js`; add its checks to `scripts/review-page-gate.ts`.
+  render function in a new `js/` module listed in `assets.json` (export it, and import what it
+  uses), and the name in `applyScreens` and `selectTab` in `js/09-nav.js`; add its checks to
+  `scripts/review-page-gate.ts`.
 - Add a grouping rule: a group in the layout, or a pattern in a group's `match`; add a case to
   `scripts/lib/review-layout.test.ts`. Add a heuristic purpose in `defaultPurpose` with its test.
 - Keep the rules the gate holds: 44 px targets, 13 px text, no horizontal page scroll, both themes,

@@ -1,5 +1,12 @@
 // The overview: the title, the reviewer's progress, the summary, the rulings with links to their
 // lines, the ticket and the line that copies a note for the chat.
+import { $, MINUS, S, el, hm, markdown, note, num, plural } from "./01-core.js";
+import { reviewedFile } from "./02-data.js";
+import { reviewedCount } from "./03-ticks.js";
+import { gotoLines } from "./04-diff.js";
+import { openFind } from "./08-find.js";
+import { openFile, selectTab } from "./09-nav.js";
+
 function ruleCards(into, ol) {
   const items = [...ol.children];
   S.R.rulings.forEach((r, k) => {
@@ -23,7 +30,7 @@ function ruleCards(into, ol) {
   });
 }
 
-function renderOverview() {
+export function renderOverview() {
   const R = S.R;
   $("ov-title").textContent = R.ticket ? `#${R.ticket}, ${R.ticketTitle}` : R.ticketTitle;
   $("ov-eyebrow").textContent = `Review${R.pr ? ` · pull request ${R.pr}` : ""}${R.mergedAt ? ` · merged ${hm(R.mergedAt)}` : ""} · head ${R.head.slice(0, 7)}`;
@@ -55,7 +62,7 @@ function renderOverview() {
 // The first file not yet reviewed, in review order, outside the groups that start folded.
 const nextEssential = () => S.orderSeq.find((fi) => !reviewedFile(fi) && !S.R.groups[S.files[fi].group].collapsed);
 
-function renderStart() {
+export function renderStart() {
   if (!S.R) return;
   const box = $("ov-start");
   box.replaceChildren();
@@ -87,7 +94,7 @@ function chatText() {
   return `I reviewed ${R.ticket ? `#${R.ticket}` : "the change"}${R.pr ? ` (pull request ${R.pr})` : ""} on its page: ${n} ${n === 1 ? "line comment" : "line comments"}. Read them there.`;
 }
 
-function initOverview() {
+export function initOverview() {
   $("copy").addEventListener("click", async () => {
     const t = chatText();
     try {

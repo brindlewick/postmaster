@@ -1,10 +1,17 @@
 // The file screen: the file's head, its unified diff, line selection, the comment box that opens
 // under a tapped line (kept above the phone keyboard) and the comment threads.
+import {
+  $, MINUS, S, baseName, dirName, el,
+  hl, hm, note, num, parseDiff, runs,
+} from "./01-core.js";
+import { fileKind, item, reviewedFile } from "./02-data.js";
+import { barOffset, openFile, scrollToEl } from "./09-nav.js";
+
 let drawn = -1;
 const SLICE = 400; // rows drawn at a time in a long diff
 
 // The text parts of a file (directory, name, purpose, counts), shared by every list that shows files.
-function fileTextNodes(f, fi) {
+export function fileTextNodes(f, fi) {
   const out = [];
   const dir = dirName(f.path);
   if (dir) out.push(el("span", "fdir", dir));
@@ -21,7 +28,7 @@ function fileTextNodes(f, fi) {
   return out;
 }
 
-function tickButton(fi) {
+export function tickButton(fi) {
   const f = S.files[fi];
   const b = el("button", "tick");
   b.type = "button";
@@ -85,7 +92,7 @@ function diffRows(f, hunks, into) {
   step(0);
 }
 
-async function renderFile(fi) {
+export async function renderFile(fi) {
   const f = S.files[fi];
   $("file-empty").hidden = true;
   $("file-card").hidden = false;
@@ -133,7 +140,7 @@ function applyFlags(fi) {
   for (let n = S.flag.from; n <= S.flag.to; n++) lineEl("new", n)?.classList.add("flag");
 }
 
-async function gotoLines(path, from, to) {
+export async function gotoLines(path, from, to) {
   const fi = S.files.findIndex((f) => f.path === path);
   if (fi < 0) return;
   for (const r of document.querySelectorAll("#file-code .r.flag")) r.classList.remove("flag");
@@ -167,7 +174,7 @@ function clearSel(keepBox) {
   if (!keepBox) closeComposer();
 }
 
-function initComposer() {
+export function initComposer() {
   const c = document.createElement("form");
   c.className = "composer";
   c.id = "composer";
@@ -221,7 +228,7 @@ function closeComposer() {
 // The visible area is the visual viewport: on a phone it shrinks when the keyboard is up. Leave room
 // under the page for the keyboard, then scroll so the whole comment box sits between the header and
 // the keyboard.
-function keepComposerVisible() {
+export function keepComposerVisible() {
   const c = $("composer");
   const app = $("app");
   const vv = window.visualViewport;
@@ -259,7 +266,7 @@ async function saveComment(ev) {
 }
 
 // ---------- threads and counts ----------
-function paintComments() {
+export function paintComments() {
   for (const t of document.querySelectorAll("#file-code .thread")) t.remove();
   if (S.fi < 0) return;
   const f = S.files[S.fi];
@@ -280,7 +287,7 @@ function paintComments() {
   }
 }
 
-function repaintCommentCounts() {
+export function repaintCommentCounts() {
   const counts = new Map();
   for (const c of S.comments) if (!c.replyTo) counts.set(c.path, (counts.get(c.path) || 0) + 1);
   for (const chip of document.querySelectorAll(".ccount[data-fi]")) {

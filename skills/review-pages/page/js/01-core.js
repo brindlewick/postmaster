@@ -1,20 +1,21 @@
 // Core: DOM helpers, number and text formatting, a small markdown renderer, code highlighting,
 // storage that never throws, the page state and the short message at the bottom.
-const $ = (id) => document.getElementById(id);
-const el = (tag, cls, text) => {
+
+export const $ = (id) => document.getElementById(id);
+export const el = (tag, cls, text) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
   return e;
 };
-const MINUS = "−";
-const num = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
-const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
-const dirName = (p) => p.slice(0, p.lastIndexOf("/") + 1);
-const KINDS = { A: "added", M: "modified", D: "deleted", R: "renamed" };
+export const MINUS = "−";
+export const num = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+export const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
+export const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
+export const dirName = (p) => p.slice(0, p.lastIndexOf("/") + 1);
+export const KINDS = { A: "added", M: "modified", D: "deleted", R: "renamed" };
 
-function hm(iso) {
+export function hm(iso) {
   try {
     return new Date(iso).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   } catch {
@@ -22,7 +23,7 @@ function hm(iso) {
   }
 }
 
-const store = {
+export const store = {
   read(key, fallback) {
     try {
       const raw = localStorage.getItem(key);
@@ -41,7 +42,7 @@ const store = {
 };
 
 // The page state. One object, read and written by the modules below.
-const S = {
+export const S = {
   R: null, files: [], key: "review-page", hay: [],
   tree: [], treeSeq: [], orderSeq: [], allDirs: [], defaultOpen: new Set(),
   open: new Set(), query: "", ticks: new Set(), comments: [], db: null, dbOff: false,
@@ -50,7 +51,7 @@ const S = {
 };
 
 let toastTimer = 0;
-function note(text) {
+export function note(text) {
   const t = $("toast");
   t.textContent = text;
   t.hidden = false;
@@ -78,7 +79,7 @@ function inline(text, into) {
   return into;
 }
 
-function markdown(src, into) {
+export function markdown(src, into) {
   const lines = src.replace(/\r/g, "").split("\n");
   const isList = (l) => /^\s*([-*]|\d+[.)])\s+/.test(l);
   let i = 0;
@@ -134,7 +135,7 @@ function markdown(src, into) {
 }
 
 // ---------- code: highlight into per-line runs, parse a unified diff ----------
-function hl(text, lang) {
+export function hl(text, lang) {
   let html = null;
   try {
     if (window.hljs && hljs.getLanguage(lang)) html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
@@ -161,7 +162,7 @@ function hl(text, lang) {
   return out;
 }
 
-function runs(into, list) {
+export function runs(into, list) {
   for (const r of list) {
     if (r.cls.length) into.append(el("span", r.cls.join(" "), r.text));
     else into.append(document.createTextNode(r.text));
@@ -170,7 +171,7 @@ function runs(into, list) {
   return into;
 }
 
-function parseDiff(text) {
+export function parseDiff(text) {
   const hunks = [];
   let h = null;
   let o = 0;

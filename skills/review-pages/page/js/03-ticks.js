@@ -1,14 +1,22 @@
 // Reviewed ticks: kept in this browser, and shared through the page's database when it is there.
 // A tick is keyed by the file's signature (its path and diff), so a file whose diff changed on a
 // new head loses its tick, and an unchanged file keeps it.
+import { $, S, note, store } from "./01-core.js";
+import { reviewedFile } from "./02-data.js";
+import { paintComments, repaintCommentCounts } from "./04-diff.js";
+import { updateTreeSummary } from "./05-tree.js";
+import { updateOrderCounts } from "./06-order.js";
+import { renderStart } from "./07-overview.js";
+import { updateFileBar } from "./09-nav.js";
+
 const tickKey = () => `${S.key}-ticks-v1`;
-function loadTicks() {
+export function loadTicks() {
   for (const s of store.read(tickKey(), [])) S.ticks.add(String(s));
 }
 const saveTicks = () => store.write(tickKey(), [...S.ticks]);
-const reviewedCount = () => S.files.reduce((n, f) => n + (S.ticks.has(f.sig) ? 1 : 0), 0);
+export const reviewedCount = () => S.files.reduce((n, f) => n + (S.ticks.has(f.sig) ? 1 : 0), 0);
 
-function setReviewed(fi, on) {
+export function setReviewed(fi, on) {
   const f = S.files[fi];
   if (on) S.ticks.add(f.sig); else S.ticks.delete(f.sig);
   saveTicks();
@@ -25,7 +33,7 @@ function writeTick(fi, on) {
 }
 
 // Every tick button, row and count on the page follows the tick set.
-function repaintTicks() {
+export function repaintTicks() {
   for (const b of document.querySelectorAll(".tick[data-fi]")) {
     const on = reviewedFile(Number(b.dataset.fi));
     b.setAttribute("aria-checked", String(on));
@@ -43,7 +51,7 @@ function repaintTicks() {
   updateFileBar();
 }
 
-async function connectDb() {
+export async function connectDb() {
   let d = null;
   try {
     d = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
