@@ -44,7 +44,7 @@ const store = {
 const S = {
   R: null, files: [], key: "review-page", hay: [],
   tree: [], treeSeq: [], orderSeq: [], allDirs: [], defaultOpen: new Set(),
-  open: new Set(), query: "", ticks: new Set(), comments: [], db: null,
+  open: new Set(), query: "", ticks: new Set(), comments: [], db: null, dbOff: false,
   tab: "overview", screen: "overview", seq: "order", fi: -1, wide: false,
   scroll: { overview: 0, tree: 0, order: 0 }, wrap: false, sel: null, flag: null,
 };

@@ -172,7 +172,7 @@ function initComposer() {
   c.className = "composer";
   c.id = "composer";
   c.hidden = true;
-  c.innerHTML = '<label for="mtext" id="mclabel">Comment</label><textarea id="mtext" maxlength="3000" rows="3" placeholder="What should change here?"></textarea><p class="mhint">Tap another line to extend the comment to a range.</p><div class="mbtns"><button type="button" class="btn quiet" id="mcancel">Cancel</button><button type="submit" class="btn" id="msave">Save comment</button></div>';
+  c.innerHTML = '<label for="mtext" id="mclabel">Comment</label><textarea id="mtext" maxlength="3000" rows="3" placeholder="What should change here?"></textarea><p class="mhint" id="mhint">Tap another line to extend the comment to a range.</p><div class="mbtns"><button type="button" class="btn quiet" id="mcancel">Cancel</button><button type="submit" class="btn" id="msave">Save comment</button></div>';
   document.body.append(c);
   $("mcancel").addEventListener("click", () => { $("mtext").value = ""; clearSel(); });
   c.addEventListener("submit", saveComment);
@@ -205,6 +205,9 @@ function placeComposer() {
   c.hidden = false;
   const where = s.from === s.to ? `${s.side === "old" ? ", removed line " : ", line "}${s.from}` : `${s.side === "old" ? ", removed lines " : ", lines "}${s.from} to ${s.to}`;
   $("mclabel").textContent = `Comment on ${baseName(S.files[S.fi].path)}${where}`;
+  $("mhint").textContent = S.dbOff
+    ? "Saving is off in this view, so a comment would not be kept."
+    : "Tap another line to extend the comment to a range.";
   if (window.matchMedia("(pointer: fine)").matches) $("mtext").focus({ preventScroll: true });
   keepComposerVisible();
 }

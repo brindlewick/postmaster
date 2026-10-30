@@ -50,7 +50,7 @@ async function connectDb() {
   } catch {
     d = null;
   }
-  if (!d) { note("Saving is off in this view: comments would not be kept."); return; }
+  if (!d) { S.dbOff = true; return; }
   S.db = d;
   const bySig = new Map(S.files.map((f, fi) => [f.sig, fi]));
   let pushed = false;

@@ -5,6 +5,7 @@
 const mqWide = window.matchMedia("(min-width: 700px)");
 let canHistory = true;
 let pushed = false;
+let backTimer = 0; // the fallback that shows the list when history.back() brings no popstate
 
 const sequence = () => (S.seq === "tree" ? S.treeSeq : S.orderSeq);
 function barOffset() {
@@ -85,6 +86,7 @@ function pushFileState(wasOnFile) {
 }
 
 async function openFile(fi, opts = {}) {
+  clearTimeout(backTimer);
   if (!$("find").hidden) closeFind();
   const tab = opts.tab || S.tab;
   const wasOnFile = S.screen === "file" && !S.wide;
@@ -114,8 +116,9 @@ function showIndex() {
 function goBack() {
   if (S.screen !== "file") return;
   if (pushed && canHistory) {
+    clearTimeout(backTimer);
     history.back();
-    setTimeout(() => { if (S.screen === "file") showIndex(); }, 400);
+    backTimer = setTimeout(() => { if (S.screen === "file") showIndex(); }, 400);
   } else {
     showIndex();
   }
@@ -136,6 +139,7 @@ function doneNext() {
 }
 
 function onPop(ev) {
+  clearTimeout(backTimer);
   const st = ev.state;
   if (st && st.s === "file" && S.files[st.fi]) {
     S.tab = st.tab;
