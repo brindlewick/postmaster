@@ -11,18 +11,24 @@ scripts/run review-page-gate <dir>
 ```
 
 It serves `<dir>` on a loopback port, wraps `index.html` the way the Artifact publisher does, and
-drives headless Chromium through Playwright at 390, 820 and 1280 px, light and dark, plus a plain
-run at 390 px without the publisher's wrapper. It fails on: console errors, a failed request outside
-the fonts and highlight.js hosts, page-level horizontal overflow, a tap target under 44 px, text
-under 13 px, fonts not loaded, a hidden element that is shown, the tree not edge to edge on a phone,
-a file tap that does not open its diff, Back that does not restore the tree's open folders and
-scroll position, a file tapped right after Back that does not stay open, the browser's back gesture
-that does not restore them either, previous and next, ticks that do not survive a reload, the
-comment box, search, expand and collapse, the ruling links, and the split layout on a wide screen.
+drives headless Chromium through Playwright at every width of the one-screen-at-a-time flow (390,
+755, 823, 904, 1024 and 1199 px) and of the two-pane layout (1200 and 1440 px): light and dark at
+390, 823 and 1440 px, light at the others, plus a plain run at 390 px without the publisher's
+wrapper. It fails on: console errors, a failed request outside the fonts and highlight.js hosts,
+page-level horizontal overflow, a tap target under 44 px, text under 13 px, a control cut off by the
+window or by a box around it (Wrap and the bars included), fonts not loaded, a hidden element that
+is shown, and below 1200 px: two screens shown at once, the tree not edge to edge, a file tap that
+does not open its diff alone, Wrap that does not fold the lines or leaves wrapped lines scrolling
+sideways, Back that does not restore the tree's open folders and scroll position, a file tapped
+right after Back that does not stay open, the browser's back gesture that does not restore them
+either, previous and next, ticks that do not survive a reload, the comment box, search, expand and
+collapse and the ruling links; from 1200 px it fails on the split layout (the tree at the left, the
+file beside it, no Back button).
 
 Screenshots and `report.json` go to `--out` (default: a new temporary folder). `--quick` keeps 390
-px light, 390 px dark, 1280 px light and the plain run. Exit 0 means every check passed, 1 means a
-check failed (the problems are printed) or the arguments are wrong.
+px light and dark, 1199 px light, 1200 px light and the plain run, so both sides of the 1200 px
+split are always looked at. Exit 0 means every check passed, 1 means a check failed (the problems
+are printed) or the arguments are wrong.
 
 The repository has no browser dependency. Point the script at one: set `PLAYWRIGHT_CORE` to a
 `playwright-core` or `playwright` package folder, and `CHROMIUM_PATH` to a Chromium executable (it

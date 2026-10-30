@@ -1,7 +1,8 @@
-// Screens and navigation. Four screens: overview, tree, order and file. On a phone exactly one is
-// shown; from 700px the tree (or the order) is a left pane with the file beside it. Opening a file
-// on a phone pushes a history entry, so the browser's back gesture returns to the list; the Back
-// button does the same, and works by itself where history is blocked (a sandboxed frame).
+// Screens and navigation. Four screens: overview, tree, order and file. Under 1200px exactly one is
+// shown (a phone, a folded-out phone, a tablet); from 1200px the tree (or the order) is a left pane
+// with the file beside it. Opening a file in the single-pane flow pushes a history entry, so the
+// browser's back gesture returns to the list; the Back button does the same, and works by itself
+// where history is blocked (a sandboxed frame). css/80-wide.css holds the same width.
 import { $, S, baseName, note } from "./01-core.js";
 import { reviewedFile } from "./02-data.js";
 import { setReviewed } from "./03-ticks.js";
@@ -9,7 +10,7 @@ import { keepComposerVisible, renderFile } from "./04-diff.js";
 import { markCurrentRows, revealInTree } from "./05-tree.js";
 import { closeFind, fitFind, openFind } from "./08-find.js";
 
-const mqWide = window.matchMedia("(min-width: 700px)");
+const mqWide = window.matchMedia("(min-width: 1200px)");
 let canHistory = true;
 let pushed = false;
 let backTimer = 0; // the fallback that shows the list when history.back() brings no popstate

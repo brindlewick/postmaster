@@ -8,12 +8,15 @@
 // publisher wraps it (a skeleton with a viewport and a style reset); /plain.html is the bare
 // file, a plain browser with no reset. Everything else is served as it is.
 //
-// The matrix is three widths (390, 820, 1280) in light and dark, then one plain run at 390.
-// --quick keeps 390 light, 390 dark, 1280 light and the plain run. Every run audits the overview,
-// the tree, the order and the file screen for sideways scroll, tap targets under 44 px, text
-// under 13 px and the fonts. Phone runs also drive the tree, Back, a tap right after Back, the
-// browser's back, Next and Previous, ticks, the comment box, the file list and the ruling links;
-// wide runs check the split view; the plain run checks that nothing hidden is displayed.
+// The matrix is the widths of the single-pane flow (390, 755, 823, 904, 1024 and 1199) and of the
+// two-pane layout (1200 and 1440): 390, 823 and 1440 in light and dark, the others in light, then
+// one plain run at 390. --quick keeps 390 light and dark, 1199 light, 1200 light and the plain run,
+// so both sides of the split are always looked at. Every run audits the overview, the tree, the
+// order and the file screen for sideways scroll, tap targets under 44 px, text under 13 px,
+// controls cut off by the window or by a box around them, and the fonts. Single-pane runs (under
+// WIDE_FROM) also drive the tree, Back, a tap right after Back, the browser's back, Next and
+// Previous, ticks, the comment box, Wrap, the file list and the ruling links; two-pane runs check
+// the split view; the plain run checks that nothing hidden is displayed.
 //
 // Screenshots and report.json go into --out (default: a new temporary folder).
 //
@@ -44,7 +47,7 @@ export const USAGE = [
   "usage: review-page-gate.ts <page-dir> [--out <dir>] [--quick]",
   "  <page-dir>   a built review page: index.html, review.json and chunks/*.json",
   "  --out <dir>  where screenshots and report.json go (default: a new temporary folder)",
-  "  --quick      390 light, 390 dark, 1280 light and the plain run only",
+  "  --quick      390 light and dark, 1199 light, 1200 light and the plain run only",
 ].join("\n");
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -158,19 +161,55 @@ export interface Run {
 }
 
 const PLAIN_URL = "/plain.html";
-/** From this width the tree is a left pane with the file beside it. */
-const WIDE_FROM = 700;
+/**
+ * The width from which the tree is a left pane with the file beside it. Below it the page shows one
+ * screen at a time (Overview, Tree, Order, then the file with Back, previous and next). The
+ * stylesheet (css/80-wide.css) and the navigation script (js/09-nav.js) hold the same number, and
+ * a test compares the three.
+ */
+export const WIDE_FROM = 1200;
 
 const isPlain = (run: Run): boolean => run.url === PLAIN_URL;
 
+interface Size {
+  label: string;
+  width: number;
+  height: number;
+  /** The colour schemes this size is run in. */
+  schemes: readonly Run["scheme"][];
+}
+
+/**
+ * Every width the gate walks. The first six are the single-pane flow, from a phone through a
+ * folded-out phone (755 to 904) and a tablet to the last pixel below the split; the last two are the
+ * two-pane layout, from its first pixel and on a desktop window.
+ */
+const SIZES: readonly Size[] = [
+  { label: "phone", width: 390, height: 844, schemes: ["light", "dark"] },
+  { label: "w755", width: 755, height: 904, schemes: ["light"] },
+  { label: "w823", width: 823, height: 1000, schemes: ["light", "dark"] },
+  { label: "w904", width: 904, height: 755, schemes: ["light"] },
+  { label: "w1024", width: 1024, height: 768, schemes: ["light"] },
+  { label: "w1199", width: 1199, height: 800, schemes: ["light"] },
+  { label: "w1200", width: 1200, height: 800, schemes: ["light"] },
+  { label: "desk", width: 1440, height: 900, schemes: ["light", "dark"] },
+];
+
+/** The quick matrix: a phone in both themes and the two sides of the split. */
+const QUICK_RUNS: readonly string[] = ["phone-light", "phone-dark", "w1199-light", "w1200-light"];
+
 export function matrix(quick: boolean): Run[] {
-  const at = (label: string, width: number, height: number, scheme: Run["scheme"]): Run => ({
-    name: `${label}-${scheme}`,
-    width,
-    height,
-    scheme,
-    url: "/index.html",
-  });
+  const sized = SIZES.flatMap((size) =>
+    size.schemes.map(
+      (scheme): Run => ({
+        name: `${size.label}-${scheme}`,
+        width: size.width,
+        height: size.height,
+        scheme,
+        url: "/index.html",
+      }),
+    ),
+  );
   const plain: Run = {
     name: "phone-plain",
     width: 390,
@@ -178,25 +217,10 @@ export function matrix(quick: boolean): Run[] {
     scheme: "light",
     url: PLAIN_URL,
   };
-  return quick
-    ? [
-        at("phone", 390, 844, "light"),
-        at("phone", 390, 844, "dark"),
-        at("desk", 1280, 900, "light"),
-        plain,
-      ]
-    : [
-        at("phone", 390, 844, "light"),
-        at("phone", 390, 844, "dark"),
-        at("tablet", 820, 1180, "light"),
-        at("tablet", 820, 1180, "dark"),
-        at("desk", 1280, 900, "light"),
-        at("desk", 1280, 900, "dark"),
-        plain,
-      ];
+  return [...(quick ? sized.filter((run) => QUICK_RUNS.includes(run.name)) : sized), plain];
 }
 
-/** The browser context of a run: a phone gets touch and the mobile viewport, a plain run never. */
+/** The browser context of a run: every width of the single-pane flow gets touch and the mobile viewport, a plain run never. */
 export function contextOptions(run: Run) {
   const touch = run.width < WIDE_FROM && !isPlain(run);
   return {
@@ -208,7 +232,9 @@ export function contextOptions(run: Run) {
   };
 }
 
+/** The steps photographed in a single-pane run (any width under WIDE_FROM). */
 const PHONE_SHOTS = ["overview", "tree", "tree-search", "file", "composer", "order", "find"];
+/** The steps photographed in a two-pane run. */
 const WIDE_SHOTS = ["overview", "tree-with-file"];
 
 /** The screenshots a run takes, by step name. */
@@ -676,13 +702,15 @@ export interface ScreenAudit {
   small: readonly { el: string; w: number; h: number; text: string }[];
   /** Visible text under 13 px, by element and size, with how many text nodes. */
   tiny: Readonly<Record<string, number>>;
+  /** Visible controls that stick out of the window or of a box that clips them, by how many pixels. */
+  clipped: readonly { el: string; cut: number; text: string }[];
   /** Elements with the hidden attribute that are displayed anyway. */
   hiddenShown: readonly string[];
 }
 
 const LISTED = 5;
 
-/** The audits of the screens a run visited as checks: overflow, tap-targets, text-size, and in the plain run hidden-attr. */
+/** The audits of the screens a run visited as checks: overflow, tap-targets, text-size, clipped-controls, and in the plain run hidden-attr. */
 export function auditChecks(audits: readonly ScreenAudit[], plain: boolean): Check[] {
   const names = audits.map((a) => a.screen).join(", ");
   const summarize = (id: string, problems: readonly string[], good: string): Check => {
@@ -713,10 +741,20 @@ export function auditChecks(audits: readonly ScreenAudit[], plain: boolean): Che
           .map(([key, n]) => `${key} x${n}`)
           .join(", ")}`,
     );
+  const cut = audits
+    .filter((a) => a.clipped.length > 0)
+    .map(
+      (a) =>
+        `${a.screen}: ${a.clipped.length} cut off: ${a.clipped
+          .slice(0, LISTED)
+          .map((c) => `${c.el} ${c.cut}px${c.text === "" ? "" : ` "${c.text}"`}`)
+          .join(", ")}`,
+    );
   const checks = [
     summarize("overflow", overflow, `${names} fit the width`),
     summarize("tap-targets", taps, `${names} have no target under 44px`),
     summarize("text-size", text, `${names} have no text under 13px`),
+    summarize("clipped-controls", cut, `${names} have no control cut off`),
   ];
   if (!plain) return checks;
   const hidden = audits
@@ -753,7 +791,7 @@ export interface ScreenFacts {
   tab: string | null;
 }
 
-/** On a phone exactly one screen is shown, and #app says which. */
+/** Under WIDE_FROM exactly one screen is shown, and #app says which. */
 export function treeVisibleVerdict(f: ScreenFacts): Verdict {
   const shown = (["overview", "tree", "order", "file"] as const).filter((name) => f[name]);
   const ok = shown.length === 1 && shown[0] === "tree" && f.screen === "tree" && f.tab === "tree";
@@ -835,7 +873,7 @@ export interface FileFacts {
   fname: string | null;
 }
 
-/** A file opened from the tree on a phone: the file screen alone, its content or a note, its name. */
+/** A file opened from the tree under WIDE_FROM: the file screen alone, its content or a note, its name. */
 export function openFileVerdict(f: FileFacts, expectedName: string): Verdict {
   const notLoaded = /did not load/iu.test(f.status);
   const content = f.rows > 0 || (f.status !== "" && !notLoaded);
@@ -969,6 +1007,50 @@ export function sidewaysVerdict(f: BoxFacts): Verdict {
     : fail("the code is wider than its box but the box did not scroll");
 }
 
+/** The Wrap button and the code rows at one moment. */
+export interface WrapState {
+  /** The button's aria-pressed. */
+  pressed: string | null;
+  /** The rows carry the class that wraps long lines. */
+  wrapped: boolean;
+  /** The code box is wider inside than it is on screen, so it scrolls sideways. */
+  boxScrolls: boolean;
+  pageScrollWidth: number;
+  innerWidth: number;
+}
+
+/**
+ * Wrap flips the lines with each tap and the second tap puts them back; lines that are wrapped fit
+ * their box; the page is never wider than the window, wrapped or not. Which of the two states the
+ * page starts in is its own choice.
+ */
+export function wrapVerdict(first: WrapState, tapped: WrapState, again: WrapState): Verdict {
+  const states = [first, tapped, again];
+  const problems = [
+    ...(tapped.wrapped !== first.wrapped && tapped.pressed !== first.pressed
+      ? []
+      : ["a tap on Wrap did not change the lines and the button together"]),
+    ...(again.wrapped === first.wrapped && again.pressed === first.pressed
+      ? []
+      : ["a second tap on Wrap did not bring the first state back"]),
+    ...(states.every((s) => s.pressed === String(s.wrapped))
+      ? []
+      : ["the button says one thing and the lines show another"]),
+    ...(states.some((s) => s.wrapped && s.boxScrolls)
+      ? ["wrapped lines still scroll sideways in their box"]
+      : []),
+    ...states
+      .filter((s) => s.pageScrollWidth > s.innerWidth)
+      .slice(0, 1)
+      .map((s) => `the page is ${s.pageScrollWidth}px wide in a ${s.innerWidth}px window`),
+  ];
+  return problems.length === 0
+    ? pass(
+        `Wrap flips the lines and back, wrapped lines fit their box, the page stays ${first.innerWidth}px wide`,
+      )
+    : fail(problems.join("; "));
+}
+
 /** The file list opens, narrows to the matches, and closes. */
 export function findVerdict(
   review: ReviewInfo,
@@ -1013,7 +1095,7 @@ export interface SplitFacts {
   backShown: boolean;
 }
 
-/** From 700 px the tree is a left pane with the file beside it, and Back is gone. */
+/** From WIDE_FROM (1200 px) the tree is a left pane with the file beside it, and Back is gone. */
 export function splitVerdict(f: SplitFacts): Verdict {
   const problems = [
     ...(f.treeShown && f.fileShown ? [] : ["the tree and the file are not both on screen"]),
@@ -1113,6 +1195,7 @@ export const GATE_FUNCTIONS = [
   "scrollTo",
   "visibleFile",
   "panes",
+  "wrapState",
 ] as const;
 
 type GateFunction = (typeof GATE_FUNCTIONS)[number];
@@ -1154,6 +1237,20 @@ window.__gate = (() => {
   });
   const header = () => ({ tabs: shown($("#hdr-tabs")), back: shown($("#back")) });
 
+  // How many pixels of a control stick out of the window, or out of a box that clips what is
+  // inside it, counted on both sides. A control inside a table that scrolls by design is left out.
+  const cutOff = (e, r) => {
+    let left = 0;
+    let right = vw();
+    for (let a = e.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      if (getComputedStyle(a).overflowX === "visible") continue;
+      const b = a.getBoundingClientRect();
+      left = Math.max(left, b.left);
+      right = Math.min(right, b.right);
+    }
+    return Math.max(0, left - r.left) + Math.max(0, r.right - right);
+  };
+
   const audit = (rootSel) => {
     const root = rootSel ? $(rootSel) : document.body;
     const docHeight = Math.max(document.documentElement.scrollHeight, innerHeight);
@@ -1161,10 +1258,16 @@ window.__gate = (() => {
       || r.bottom + window.scrollY <= 0 || r.top + window.scrollY >= docHeight;
     const small = [];
     const tiny = {};
+    const clipped = [];
     if (root) {
       for (const e of all(TARGETS, root)) {
         if (e.closest(".r") || !shown(e)) continue;
         const r = e.getBoundingClientRect();
+        const cut = e.closest(".tablewrap") ? 0 : cutOff(e, r);
+        if (cut > 1) {
+          clipped.push({ el: label(e), cut: Math.round(cut),
+            text: (e.textContent || e.getAttribute("aria-label") || "").trim().slice(0, 30) });
+        }
         if (offscreen(r)) continue;
         if (r.width < 43.5 || r.height < 43.5) {
           small.push({ el: label(e), w: Math.round(r.width), h: Math.round(r.height),
@@ -1185,7 +1288,7 @@ window.__gate = (() => {
       .filter((e) => e.getAttribute("hidden") !== "until-found" && getComputedStyle(e).display !== "none")
       .map((e) => label(e) + " (" + getComputedStyle(e).display + ")");
     return { scrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth,
-      innerWidth: vw(), small, tiny, hiddenShown };
+      innerWidth: vw(), small, tiny, clipped, hiddenShown };
   };
 
   const fonts = async () => {
@@ -1252,6 +1355,17 @@ window.__gate = (() => {
       pageScrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth), innerWidth: vw() };
   };
 
+  const wrapState = () => {
+    const b = $("#wrap");
+    const rows = $("#file-code .rows");
+    const c = $("#file-code");
+    return { pressed: b ? b.getAttribute("aria-pressed") : null,
+      wrapped: !!(rows && rows.classList.contains("wrap")),
+      boxScrolls: !!c && c.scrollWidth > c.clientWidth,
+      pageScrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+      innerWidth: vw() };
+  };
+
   const composer = () => {
     const c = $("#composer");
     const code = $("#file-code");
@@ -1309,7 +1423,7 @@ window.__gate = (() => {
   };
 
   return { screens, header, audit, fonts, edges, rows, tree, collapsed, fileFacts, fileReady, box, composer,
-    progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes };
+    progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes, wrapState };
 })();
 `;
 
@@ -1431,7 +1545,7 @@ async function audit(ctx: Ctx, screen: string, root = ""): Promise<void> {
 
 type Tab = "overview" | "tree" | "order";
 
-/** Show a tab's screen; the file list is closed first, and on a phone with a file open, Back is pressed, so the tabs are there. */
+/** Show a tab's screen; the file list is closed first, and under WIDE_FROM with a file open, Back is pressed, so the tabs are there. */
 async function gotoTab(page: PwPage, tab: Tab): Promise<void> {
   if ((await gate<{ opened: boolean }>(page, "find")).opened) await tap(page, "#find-close");
   const head = await gate<{ tabs: boolean; back: boolean }>(page, "header");
@@ -1701,19 +1815,44 @@ async function widestOfChunks({ origin, review }: Ctx): Promise<number | null> {
   return widestFile(loaded.flat());
 }
 
-/** The code box of the file with the longest line, so that a box wider than its screen is really tried. */
-async function checkSideways(ctx: Ctx): Promise<Verdict> {
-  const { page, review } = ctx;
+/**
+ * Open the file with the longest code line, so that a box wider than its screen is really tried.
+ * Its path; or undefined when the chunks hold no code, and the screen is left as it is.
+ */
+async function openWidest(ctx: Ctx): Promise<string | undefined> {
   const widest = await widestOfChunks(ctx);
-  if (widest !== null) {
-    await gotoTab(page, "tree");
-    await tap(page, "#tree-expand");
-    await tap(page, rowSelector(widest));
-    await waitFileReady(page);
-  }
-  const verdict = sidewaysVerdict(await gate<BoxFacts>(page, "box", 200));
-  const name = widest === null ? undefined : review.files[widest]?.path;
+  if (widest === null) return undefined;
+  const { page, review } = ctx;
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  await tap(page, rowSelector(widest));
+  await waitFileReady(page);
+  return review.files[widest]?.path;
+}
+
+/** The code box of the file with the longest line scrolls by itself, and the page does not. */
+async function checkSideways(ctx: Ctx): Promise<Verdict> {
+  const name = await openWidest(ctx);
+  const verdict = sidewaysVerdict(await gate<BoxFacts>(ctx.page, "box", 200));
   return name === undefined ? verdict : { ...verdict, detail: `${name}: ${verdict.detail}` };
+}
+
+/**
+ * On the file with the longest line: nothing in its head or the bars is cut off, Wrap flips the
+ * lines and back, and the wrapped lines fit the box. A diff that fits the width, either way.
+ */
+async function checkWrap(ctx: Ctx): Promise<Verdict> {
+  const { page } = ctx;
+  if ((await openWidest(ctx)) === undefined && (await openFileWithRows(ctx, 1)) === null) {
+    return fail("no file in the tree opened with a diff");
+  }
+  await audit(ctx, "file with the widest code");
+  const first = await gate<WrapState>(page, "wrapState");
+  await tap(page, "#wrap");
+  const tapped = await gate<WrapState>(page, "wrapState");
+  await tap(page, "#wrap");
+  const again = await gate<WrapState>(page, "wrapState");
+  return wrapVerdict(first, tapped, again);
 }
 
 async function checkFind(ctx: Ctx): Promise<Verdict> {
@@ -1761,6 +1900,7 @@ const PHONE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
   ["tick", checkTick],
   ["comment-box", checkComposer],
   ["sideways", checkSideways],
+  ["wrap-toggle", checkWrap],
   ["find-sheet", checkFind],
   ["ruling-links", checkRulings],
 ];
@@ -1769,7 +1909,7 @@ async function checkFonts({ page, failed }: Ctx): Promise<Verdict> {
   return fontsVerdict(await gate<string[]>(page, "fonts"), failed);
 }
 
-/** Wide screens: the tree is a left pane and the file opens beside it. */
+/** Two-pane widths (WIDE_FROM and up): the tree is a left pane and the file opens beside it. */
 async function checkSplit(ctx: Ctx): Promise<Verdict> {
   const { page } = ctx;
   await gotoTab(page, "tree");
@@ -1796,20 +1936,20 @@ async function checkSplit(ctx: Ctx): Promise<Verdict> {
   });
 }
 
-/** Every check of a run, by kind of run; the audits of the screens it visited are added by the caller. */
+/** Every check of a run, by its width (single pane under WIDE_FROM, two panes from it); the audits of the screens it visited are added by the caller. */
 async function runChecks(ctx: Ctx): Promise<Check[]> {
-  const phone = ctx.run.width < WIDE_FROM;
+  const single = ctx.run.width < WIDE_FROM;
   const plain = isPlain(ctx.run);
   const walk = [
     ...(await visit(ctx, "overview")),
     ...(await visit(ctx, "tree")),
     ...(await visit(ctx, "order")),
-    ...(phone ? await visitFile(ctx) : []),
+    ...(single ? await visitFile(ctx) : []),
   ];
-  const split = phone ? [] : [await attempt("split", () => checkSplit(ctx))];
+  const split = single ? [] : [await attempt("split", () => checkSplit(ctx))];
   const fonts = plain ? [] : [await attempt("fonts", () => checkFonts(ctx))];
   const driven: Check[] = [];
-  if (phone && !plain) {
+  if (single && !plain) {
     for (const [id, check] of PHONE_CHECKS) driven.push(await attempt(id, () => check(ctx)));
   }
   return [...walk, ...split, ...fonts, ...driven];

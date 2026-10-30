@@ -1,5 +1,6 @@
-/* The overview: title, the reviewer's progress, the summary, the rulings, the ticket. */
-.ov { box-sizing: border-box; padding: 14px 16px 72px; }
+/* The overview: title, the reviewer's progress, the summary, the rulings, the ticket. It is one
+   column that fills a phone and keeps to a reading width, centered, on anything wider. */
+.ov { box-sizing: border-box; max-width: 880px; margin-inline: auto; padding: 14px 16px 72px; }
 .ov-top { display: grid; gap: 4px; margin-bottom: 12px; }
 .eyebrow { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ex-ink); }
 .ov h1 { margin: 0; font-family: var(--font-display); font-size: 22px; line-height: 1.25; text-wrap: balance; }

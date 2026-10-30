@@ -40,6 +40,7 @@ import {
   openFileVerdict,
   parseArgs,
   type Playwright,
+  type PwBrowser,
   pickSearchWord,
   type ReviewInfo,
   type Run,
@@ -61,8 +62,11 @@ import {
   treeSearchVerdict,
   treeVisibleVerdict,
   USAGE,
+  WIDE_FROM,
+  type WrapState,
   widestFile,
   wrapSkeleton,
+  wrapVerdict,
 } from "./review-page-gate.ts";
 
 const HEAD =
@@ -98,14 +102,26 @@ describe("content types", () => {
   });
 });
 
+/** The run of the full matrix with this name. */
+const runNamed = (name: string): Run => {
+  const found = matrix(false).find((r) => r.name === name);
+  if (found === undefined) throw new Error(`no run ${name}`);
+  return found;
+};
+
 describe("the run matrix", () => {
-  test("the full matrix is three widths in light and dark, then one plain run", () => {
+  test("the full matrix walks the single-pane widths up to 1199, the two-pane widths from 1200, then one plain run", () => {
     const runs = matrix(false);
     expect(runs.map((r) => r.name)).toEqual([
       "phone-light",
       "phone-dark",
-      "tablet-light",
-      "tablet-dark",
+      "w755-light",
+      "w823-light",
+      "w823-dark",
+      "w904-light",
+      "w1024-light",
+      "w1199-light",
+      "w1200-light",
       "desk-light",
       "desk-dark",
       "phone-plain",
@@ -113,19 +129,25 @@ describe("the run matrix", () => {
     expect(runs.map((r) => [r.width, r.height, r.scheme, r.url])).toEqual([
       [390, 844, "light", "/index.html"],
       [390, 844, "dark", "/index.html"],
-      [820, 1180, "light", "/index.html"],
-      [820, 1180, "dark", "/index.html"],
-      [1280, 900, "light", "/index.html"],
-      [1280, 900, "dark", "/index.html"],
+      [755, 904, "light", "/index.html"],
+      [823, 1000, "light", "/index.html"],
+      [823, 1000, "dark", "/index.html"],
+      [904, 755, "light", "/index.html"],
+      [1024, 768, "light", "/index.html"],
+      [1199, 800, "light", "/index.html"],
+      [1200, 800, "light", "/index.html"],
+      [1440, 900, "light", "/index.html"],
+      [1440, 900, "dark", "/index.html"],
       [390, 844, "light", "/plain.html"],
     ]);
   });
 
-  test("the quick matrix is 390 light and dark, 1280 light and the plain run", () => {
+  test("the quick matrix is 390 light and dark, the two sides of the split, and the plain run", () => {
     expect(matrix(true).map((r) => [r.name, r.width, r.scheme, r.url])).toEqual([
       ["phone-light", 390, "light", "/index.html"],
       ["phone-dark", 390, "dark", "/index.html"],
-      ["desk-light", 1280, "light", "/index.html"],
+      ["w1199-light", 1199, "light", "/index.html"],
+      ["w1200-light", 1200, "light", "/index.html"],
       ["phone-plain", 390, "light", "/plain.html"],
     ]);
   });
@@ -136,35 +158,69 @@ describe("the run matrix", () => {
     }
   });
 
-  test("touch emulation is on under 700 px except in the plain run", () => {
-    const byName = (name: string): Run => {
-      const found = matrix(false).find((r) => r.name === name);
-      if (found === undefined) throw new Error(`no run ${name}`);
-      return found;
-    };
-    expect(contextOptions(byName("phone-dark"))).toEqual({
+  test("the page splits in two at 1200 px, so 1199 is the last single-pane width", () => {
+    expect(WIDE_FROM).toBe(1200);
+    const widths = matrix(false)
+      .filter((r) => r.url === "/index.html")
+      .map((r) => r.width);
+    for (const width of [390, 755, 823, 904, 1024, WIDE_FROM - 1, WIDE_FROM, 1440]) {
+      expect(widths).toContain(width);
+    }
+  });
+
+  test("touch emulation is on under 1200 px except in the plain run", () => {
+    expect(contextOptions(runNamed("phone-dark"))).toEqual({
       viewport: { width: 390, height: 844 },
       deviceScaleFactor: 2,
       hasTouch: true,
       isMobile: true,
       colorScheme: "dark",
     });
-    expect(contextOptions(byName("tablet-light")).isMobile).toBe(false);
-    expect(contextOptions(byName("tablet-light")).hasTouch).toBe(false);
-    expect(contextOptions(byName("desk-dark")).viewport).toEqual({ width: 1280, height: 900 });
-    const plain = contextOptions(byName("phone-plain"));
+    for (const name of ["w755-light", "w823-dark", "w904-light", "w1024-light", "w1199-light"]) {
+      const options = contextOptions(runNamed(name));
+      expect([name, options.hasTouch, options.isMobile]).toEqual([name, true, true]);
+    }
+    for (const name of ["w1200-light", "desk-light", "desk-dark"]) {
+      const options = contextOptions(runNamed(name));
+      expect([name, options.hasTouch, options.isMobile]).toEqual([name, false, false]);
+    }
+    expect(contextOptions(runNamed("desk-dark")).viewport).toEqual({ width: 1440, height: 900 });
+    const plain = contextOptions(runNamed("phone-plain"));
     expect([plain.hasTouch, plain.isMobile, plain.colorScheme]).toEqual([false, false, "light"]);
   });
 
-  test("screenshots: seven on a phone, two on wide runs, one in the plain run", () => {
-    const [phone, , tablet, , desk, , plain] = matrix(false);
-    expect([...screenshotSteps(phone as Run)].sort()).toEqual(
-      ["composer", "file", "find", "order", "overview", "tree", "tree-search"].sort(),
-    );
-    expect([...screenshotSteps(tablet as Run)].sort()).toEqual(["overview", "tree-with-file"]);
-    expect([...screenshotSteps(desk as Run)].sort()).toEqual(["overview", "tree-with-file"]);
-    expect([...screenshotSteps(plain as Run)]).toEqual(["overview"]);
+  test("screenshots: seven on every single-pane run, two on two-pane runs, one in the plain run", () => {
+    const single = ["composer", "file", "find", "order", "overview", "tree", "tree-search"].sort();
+    for (const name of ["phone-light", "w755-light", "w823-dark", "w904-light", "w1199-light"]) {
+      expect([...screenshotSteps(runNamed(name))].sort()).toEqual(single);
+    }
+    for (const name of ["w1200-light", "desk-light", "desk-dark"]) {
+      expect([...screenshotSteps(runNamed(name))].sort()).toEqual(["overview", "tree-with-file"]);
+    }
+    expect([...screenshotSteps(runNamed("phone-plain"))]).toEqual(["overview"]);
     expect(shotPath("/out", "phone-dark", "tree-search")).toBe("/out/phone-dark-tree-search.png");
+  });
+});
+
+describe("the width where the page splits", () => {
+  const page = join(import.meta.dir, "..", "skills", "review-pages", "page");
+  const manifest = JSON.parse(readFileSync(join(page, "assets.json"), "utf8")) as {
+    css: string[];
+    js: string[];
+  };
+  // A width condition of a media query, in a stylesheet or in matchMedia("...").
+  const QUERY = /\((?:min|max)-width:\s*([0-9.]+)px\)/gu;
+  const widthsIn = (files: readonly string[]): number[] =>
+    files.flatMap((file) =>
+      [...readFileSync(join(page, file), "utf8").matchAll(QUERY)].map((m) => Number(m[1])),
+    );
+
+  test("the stylesheets have one width query and it is WIDE_FROM", () => {
+    expect(widthsIn(manifest.css)).toEqual([WIDE_FROM]);
+  });
+
+  test("the scripts have one width query and it is WIDE_FROM", () => {
+    expect(widthsIn(manifest.js)).toEqual([WIDE_FROM]);
   });
 });
 
@@ -730,16 +786,23 @@ const audit = (screen: string, over: Partial<ScreenAudit> = {}): ScreenAudit => 
   innerWidth: 390,
   small: [],
   tiny: {},
+  clipped: [],
   hiddenShown: [],
   ...over,
 });
 
 describe("the audits of every screen", () => {
-  test("clean screens give three passing checks that name the screens", () => {
+  test("clean screens give four passing checks that name the screens", () => {
     const checks = auditChecks([audit("overview"), audit("tree")], false);
-    expect(checks.map((c) => c.id)).toEqual(["overflow", "tap-targets", "text-size"]);
+    expect(checks.map((c) => c.id)).toEqual([
+      "overflow",
+      "tap-targets",
+      "text-size",
+      "clipped-controls",
+    ]);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(checks[0]?.detail).toContain("overview, tree");
+    expect(checks[3]?.detail).toContain("overview, tree");
   });
 
   test("the plain run adds hidden-attr", () => {
@@ -748,6 +811,7 @@ describe("the audits of every screen", () => {
       "overflow",
       "tap-targets",
       "text-size",
+      "clipped-controls",
       "hidden-attr",
     ]);
     expect(checks.every((c) => c.ok)).toBe(true);
@@ -783,12 +847,33 @@ describe("the audits of every screen", () => {
     expect(check?.detail).toContain("file: span.n 11px x120");
   });
 
+  test("a control cut off by the window or a box around it fails clipped-controls, with the size of the cut", () => {
+    const clipped = [{ el: "button#wrap.wrapbtn", cut: 14, text: "Wrap" }];
+    const check = auditChecks([audit("overview"), audit("file", { clipped })], false)[3];
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('file: 1 cut off: button#wrap.wrapbtn 14px "Wrap"');
+    expect(check?.detail).not.toContain("overview");
+  });
+
+  test("clipped controls list the offenders a few at a time, and a control with no text is named by its element", () => {
+    const clipped = Array.from({ length: 9 }, (_, i) => ({
+      el: `button#c${i}`,
+      cut: 3 + i,
+      text: i === 0 ? "" : "x",
+    }));
+    const check = auditChecks([audit("tree", { clipped })], false)[3];
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("tree: 9 cut off: button#c0 3px,");
+    expect(check?.detail).toContain('button#c1 4px "x"');
+    expect(check?.detail).not.toContain("button#c8");
+  });
+
   test("a hidden element that is displayed fails hidden-attr in the plain run", () => {
     const hidden = ["div#find (flex)"];
-    const check = auditChecks([audit("overview", { hiddenShown: hidden })], true)[3];
+    const check = auditChecks([audit("overview", { hiddenShown: hidden })], true)[4];
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("overview: div#find (flex)");
-    expect(auditChecks([audit("overview", { hiddenShown: hidden })], false)).toHaveLength(3);
+    expect(auditChecks([audit("overview", { hiddenShown: hidden })], false)).toHaveLength(4);
   });
 });
 
@@ -990,6 +1075,35 @@ describe("verdicts on a phone", () => {
     expect(sidewaysVerdict({ ...box, pageScrollWidth: 520 }).ok).toBe(false);
     expect(sidewaysVerdict({ ...box, overflowX: "hidden" }).ok).toBe(false);
     expect(sidewaysVerdict({ ...box, scrollLeft: 0 }).ok).toBe(false);
+  });
+
+  test("wrap flips with each tap, the wrapped lines fit their box, and the page never scrolls sideways", () => {
+    const off: WrapState = {
+      pressed: "false",
+      wrapped: false,
+      boxScrolls: true,
+      pageScrollWidth: 390,
+      innerWidth: 390,
+    };
+    const on: WrapState = { ...off, pressed: "true", wrapped: true, boxScrolls: false };
+    expect(wrapVerdict(off, on, off).ok).toBe(true);
+    // A page that starts with the lines wrapped is as good: the taps flip it the other way first.
+    expect(wrapVerdict(on, off, on).ok).toBe(true);
+    // A tap that changes nothing, or a button and lines that disagree about it.
+    expect(wrapVerdict(off, off, off).ok).toBe(false);
+    expect(wrapVerdict(off, { ...on, wrapped: false }, off).ok).toBe(false);
+    expect(wrapVerdict(off, { ...on, pressed: "false" }, off).ok).toBe(false);
+    // A second tap that does not bring the first state back.
+    expect(wrapVerdict(off, on, on).ok).toBe(false);
+    // Lines that are wrapped and still scroll in their box.
+    const still = wrapVerdict(off, { ...on, boxScrolls: true }, off);
+    expect(still.ok).toBe(false);
+    expect(still.detail).toContain("still scroll");
+    // The page wider than the window in any of the three states.
+    const wide = wrapVerdict(off, { ...on, pageScrollWidth: 520 }, off);
+    expect(wide.ok).toBe(false);
+    expect(wide.detail).toContain("520");
+    expect(wrapVerdict({ ...off, pageScrollWidth: 391 }, on, off).ok).toBe(false);
   });
 
   test("find-sheet wants it shown, narrowed to the matches, then closed", () => {
@@ -1265,9 +1379,26 @@ describe("the real gate", () => {
           review: parsed.review,
         });
         const verdict = judge(report);
-        expect(report.runs).toHaveLength(7);
+        expect(report.runs).toHaveLength(12);
         expect(verdict.problems).toEqual([]);
         expect(verdict.ok).toBe(true);
+        // Every width below 1200 ran the single-pane checks, every width from 1200 the split check.
+        const idsOf = (name: string): string[] =>
+          report.runs.find((r) => r.name === name)?.checks.map((c) => c.id) ?? [];
+        for (const name of ["phone-light", "w755-light", "w823-light", "w904-light"]) {
+          for (const id of ["tree-visible", "open-file", "wrap-toggle", "clipped-controls"]) {
+            expect(idsOf(name)).toContain(id);
+          }
+          expect(idsOf(name)).not.toContain("split");
+        }
+        for (const name of ["w1024-light", "w1199-light"]) {
+          expect(idsOf(name)).toContain("tree-visible");
+          expect(idsOf(name)).not.toContain("split");
+        }
+        for (const name of ["w1200-light", "desk-light", "desk-dark"]) {
+          expect(idsOf(name)).toContain("split");
+          expect(idsOf(name)).not.toContain("tree-visible");
+        }
         expect(await lingering()).toEqual([]);
       } catch (e) {
         if (!(e instanceof BrowserUnavailable)) throw e;
@@ -1276,4 +1407,83 @@ describe("the real gate", () => {
       }
     });
   }, 600_000);
+
+  // The control for the clipped-controls audit: silent on the page as built, loud on the same page
+  // made wrong, through the one command (window.__gate.audit) the gate uses.
+  test("the clipped-controls audit is silent on the built page and names a Wrap button pushed out or cut off", async () => {
+    const playwright = await loadPlaywright(process.env);
+    if (playwright === null) {
+      expect(describeMissing(process.env)).toContain("PLAYWRIGHT_CORE");
+      return;
+    }
+    await withTempDir(async (tmp) => {
+      const pageDir = join(tmp, "page");
+      const built = run(
+        process.execPath,
+        ["--no-env-file", join(import.meta.dir, "review-page.ts"), "demo", pageDir],
+        { cwd: join(import.meta.dir, "..") },
+      );
+      if (built.code !== 0) {
+        // The builder has no demo mode (yet), so there is no page to try the audit on.
+        expect(built.code).toBeGreaterThan(0);
+        return;
+      }
+      const server = startServer(pageDir);
+      let browser: PwBrowser | undefined;
+      try {
+        try {
+          browser = await playwright.chromium.launch({
+            headless: true,
+            executablePath: chromiumPath(process.env),
+          });
+        } catch (e) {
+          // Playwright loads but no Chromium starts here: the real gate's test says why.
+          expect(failure(e).length).toBeGreaterThan(0);
+          return;
+        }
+        const context = await browser.newContext(contextOptions(runNamed("w755-light")));
+        await context.addInitScript(KIT);
+        const page = await context.newPage();
+        await page.goto(`${server.origin}/index.html`, { waitUntil: "load", timeout: 45_000 });
+        const wait = (expression: string): Promise<unknown> =>
+          page.waitForFunction(expression, undefined, { timeout: 30_000, polling: 50 });
+        await wait('document.querySelectorAll("#tree .trow.file").length > 0');
+        await page.click("#tab-tree");
+        await wait("window.__gate.screens().tree");
+        await page.click("#tree li.trow.file button.tgo");
+        await wait("window.__gate.fileReady()");
+        // The probe's style goes at the very end of the body, after the page's own style element
+        // (the publisher puts the page inside the body), so that it wins a tie.
+        const clipped = async (css: string): Promise<{ el: string; cut: number }[]> => {
+          await page.evaluate(
+            `document.getElementById("probe")?.remove(); const s = document.createElement("style"); s.id = "probe"; s.textContent = ${JSON.stringify(css)}; document.body.append(s)`,
+          );
+          const found = (await page.evaluate("window.__gate.audit()")) as {
+            clipped: { el: string; cut: number }[];
+          };
+          return found.clipped;
+        };
+        // The page as built has nothing cut off at 755 px, with the Wrap button in view.
+        expect(await clipped("")).toEqual([]);
+        // The button pushed 60 px past the right edge of the window, and past the left edge.
+        const pushedRight = await clipped("#wrap { position: relative; left: 60px }");
+        expect(pushedRight.map((c) => c.el)).toEqual(["button#wrap.wrapbtn"]);
+        expect(pushedRight[0]?.cut).toBeGreaterThanOrEqual(50);
+        const pushedLeft = await clipped("#wrap { position: relative; left: -900px }");
+        expect(pushedLeft.map((c) => c.el)).toEqual(["button#wrap.wrapbtn"]);
+        // The button inside a head that clips what is wider than itself.
+        const boxed = await clipped(
+          ".file-head { overflow: hidden; width: 200px } .file-head .ftext { flex: none; width: 300px }",
+        );
+        expect(boxed.map((c) => c.el)).toContain("button#wrap.wrapbtn");
+        // The probe taken away, the page is clean again.
+        expect(await clipped("")).toEqual([]);
+        await context.close();
+      } finally {
+        await browser?.close().catch(() => undefined);
+        server.stop();
+      }
+      expect(await lingering()).toEqual([]);
+    });
+  });
 });

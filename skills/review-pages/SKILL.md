@@ -14,10 +14,11 @@ repository the change belongs to.
 ## A review page for a change
 
 A phone-first page: an overview, a Tree tab with the file tree of the whole change (folders with
-their file and line counts, a search box, full width on a phone), an Order tab with the files by
+their file and line counts, a search box, full width below 1200 px), an Order tab with the files by
 importance and a plain purpose each, and a diff screen reached by tapping a file, with Back, previous
-and next, reviewed ticks and a comment box under a tapped line. What the reader gets, and where the
-detail is: [the review page](../../docs/review-page.md).
+and next, reviewed ticks and a comment box under a tapped line. It shows one screen at a time below
+1200 px, a folded-out phone and a tablet included, and a tree pane beside the file from 1200 px.
+What the reader gets, and where the detail is: [the review page](../../docs/review-page.md).
 
 1. Write the summary in a Markdown file in your scratchpad: what the change does, how the files are
    grouped, where to look first, then the questions for the reader as a numbered list under a
@@ -37,9 +38,10 @@ detail is: [the review page](../../docs/review-page.md).
    purposes came from the heuristics (write the rest in the layout) and how many files are withheld.
    The builder fails, naming the text, when a ruling's link no longer finds its line.
 4. Look at it before publishing: `<tool>/scripts/run review-page-gate <dir>` serves the page and
-   checks it in a headless browser at phone, tablet and desktop widths in both themes, then writes
-   screenshots. Read what it prints, look at the phone screenshots, and fix what it names. The
-   browser it needs and its checks are in
+   checks it in a headless browser at widths from 390 to 1440 px (one screen at a time below
+   1200 px, two panes from it), in light and dark, then writes screenshots. Read what it prints,
+   look at the 390 px and the 904 px screenshots, and fix what it names. The browser it needs and
+   its checks are in
    [Check, publish and rebuild](../../docs/review-page/check-publish-rebuild.md).
 5. Before the first publish, read `review.json` and search the chunks for home paths, host
    names, private addresses and anything private. The builder removes email addresses and

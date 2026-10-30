@@ -50,8 +50,13 @@ inlines a transpiled copy with its `export` keywords removed, so it is written o
   `scripts/review-page-gate.ts`.
 - Add a grouping rule: a group in the layout, or a pattern in a group's `match`; add a case to
   `scripts/lib/review-layout.test.ts`. Add a heuristic purpose in `defaultPurpose` with its test.
-- Keep the rules the gate holds: 44 px targets, 13 px text, no horizontal page scroll, both themes,
-  only the allowed external loads.
+- Keep the rules the gate holds: 44 px targets, 13 px text, no horizontal page scroll, no control cut
+  off by the window or by a box around it, both themes, only the allowed external loads.
+- Keep the one width that matters, 1200 px: below it the page shows one screen at a time, from it the
+  tree is a left pane. It is written in `css/80-wide.css`, in `js/09-nav.js` and as `WIDE_FROM` in
+  `scripts/review-page-gate.ts`, and a test in `scripts/review-page-gate.test.ts` fails when the
+  three differ or a second width query appears. The gate walks 1199 and 1200 px so a change of the
+  number in one place only is caught by the browser as well.
 - Fixtures are invented. A test builds its sample repository in a temporary folder
   (`scripts/lib/review-sample.ts`); no file in this repository holds content from a real project.
 
