@@ -16,9 +16,9 @@ run at 390 px without the publisher's wrapper. It fails on: console errors, a fa
 the fonts and highlight.js hosts, page-level horizontal overflow, a tap target under 44 px, text
 under 13 px, fonts not loaded, a hidden element that is shown, the tree not edge to edge on a phone,
 a file tap that does not open its diff, Back that does not restore the tree's open folders and
-scroll position, the browser's back gesture that does not either, previous and next, ticks that do
-not survive a reload, the comment box, search, expand and collapse, the ruling links, and the split
-layout on a wide screen.
+scroll position, a file tapped right after Back that does not stay open, the browser's back gesture
+that does not restore them either, previous and next, ticks that do not survive a reload, the
+comment box, search, expand and collapse, the ruling links, and the split layout on a wide screen.
 
 Screenshots and `report.json` go to `--out` (default: a new temporary folder). `--quick` keeps 390
 px light, 390 px dark, 1280 px light and the plain run. Exit 0 means every check passed, 1 means a

@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { snapshotDescendants } from "./lib/processes.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import {
   asPlaywright,
@@ -21,6 +22,7 @@ import {
   describeMissing,
   edgeVerdict,
   expandVerdict,
+  failure,
   findChromium,
   findVerdict,
   firstDistinctPair,
@@ -34,6 +36,7 @@ import {
   loadPlaywright,
   matrix,
   navVerdict,
+  openAfterBackVerdict,
   openFileVerdict,
   parseArgs,
   type Playwright,
@@ -257,6 +260,24 @@ describe("judging a report", () => {
     expect(judge(report).problems[0]).toBe("phone-light: console: first line at stack more");
   });
 
+  test("an error or request that repeats within a run is one line with its count", () => {
+    const report: GateReport = {
+      runs: [
+        runReport({
+          errors: ["boom", "other", "boom", "boom"],
+          failed: ["http://x.example/a 404", "http://x.example/a 404"],
+        }),
+        runReport({ name: "desk-dark", errors: ["boom"] }),
+      ],
+    };
+    expect(judge(report).problems).toEqual([
+      "phone-light: console: boom (x3)",
+      "phone-light: console: other",
+      "phone-light: request: http://x.example/a 404 (x2)",
+      "desk-dark: console: boom",
+    ]);
+  });
+
   test("problems keep run order, errors then requests then checks", () => {
     const report: GateReport = {
       runs: [
@@ -436,6 +457,28 @@ describe("what to say when the browser cannot be found", () => {
     const text = describeMissing({ PLAYWRIGHT_CORE: "/opt/pw/playwright-core", CHROMIUM_PATH: "" });
     expect(text).toContain("set to /opt/pw/playwright-core");
     expect(text).toContain("not set");
+  });
+});
+
+describe("failure messages", () => {
+  test("a Playwright timeout keeps its first line and the reason the click did not land", () => {
+    const message = [
+      "locator.click: Timeout 10000ms exceeded.",
+      "Call log:",
+      "  - waiting for locator('#back')",
+      "  -   element is visible, enabled and stable",
+      '  -   <div id="find" class="find"></div> intercepts pointer events',
+      "  - retrying click action",
+    ].join("\n");
+    expect(failure(new Error(message))).toBe(
+      'locator.click: Timeout 10000ms exceeded. (<div id="find" class="find"></div> intercepts pointer events)',
+    );
+  });
+
+  test("any other error is its first line, cut at 300 characters, and a string is its own text", () => {
+    expect(failure(new Error("first\nsecond"))).toBe("first");
+    expect(failure(new Error("x".repeat(1000))).length).toBe(300);
+    expect(failure("plain text")).toBe("plain text");
   });
 });
 
@@ -655,12 +698,27 @@ describe("the file with the widest code", () => {
   });
 
   test("the lowest index wins a tie, whatever the order of the chunk", () => {
-    expect(widestFile([{ i: 3, diff: diff("+abc") }, { i: 1, diff: diff("-abc") }])).toBe(1);
+    expect(
+      widestFile([
+        { i: 3, diff: diff("+abc") },
+        { i: 1, diff: diff("-abc") },
+      ]),
+    ).toBe(1);
   });
 
   test("a deleted line counts as code, and a diff with only headers is no code", () => {
-    expect(widestFile([{ i: 0, diff: diff("+a") }, { i: 1, diff: diff("-aaaa") }])).toBe(1);
-    expect(widestFile([{ i: 0, diff: diff() }, { i: 1, diff: "" }])).toBeNull();
+    expect(
+      widestFile([
+        { i: 0, diff: diff("+a") },
+        { i: 1, diff: diff("-aaaa") },
+      ]),
+    ).toBe(1);
+    expect(
+      widestFile([
+        { i: 0, diff: diff() },
+        { i: 1, diff: "" },
+      ]),
+    ).toBeNull();
     expect(widestFile([])).toBeNull();
   });
 });
@@ -715,7 +773,7 @@ describe("the audits of every screen", () => {
     const check = auditChecks([audit("tree", { small })], false)[1];
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("tree: 9 under 44px");
-    expect(check?.detail).toContain("button#b0 40x44");
+    expect(check?.detail).toContain('button#b0 40x44 "x"');
     expect(check?.detail).not.toContain("button#b8");
   });
 
@@ -744,6 +802,8 @@ describe("fonts", () => {
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("Red Hat Mono");
     expect(fontsVerdict([], []).detail).toContain("none");
+    const repeated = fontsVerdict(["Red Hat Text", "Red Hat Text", "Red Hat Display"], []);
+    expect(repeated.detail).toContain("loaded: Red Hat Text, Red Hat Display");
   });
 
   test("an unreachable font host is no verdict on the page", () => {
@@ -820,7 +880,6 @@ describe("verdicts on a phone", () => {
       rows: 30,
       status: "",
       fname: "cart.ts",
-      pos: "1/5",
     };
     expect(openFileVerdict(opened, "cart.ts").ok).toBe(true);
     expect(
@@ -840,6 +899,27 @@ describe("verdicts on a phone", () => {
     const wrong = openFileVerdict({ ...opened, fname: "price.ts" }, "cart.ts");
     expect(wrong.ok).toBe(false);
     expect(wrong.detail).toContain("price.ts");
+  });
+
+  test("open-after-back wants the file still on screen after a tap right after Back", () => {
+    const opened = {
+      screen: "file",
+      tab: "tree",
+      fileShown: true,
+      treeShown: false,
+      rows: 30,
+      status: "",
+      fname: "cart.ts",
+    };
+    expect(openAfterBackVerdict(opened, "cart.ts").ok).toBe(true);
+    const closed = openAfterBackVerdict(
+      { ...opened, screen: "tree", fileShown: false, treeShown: true, rows: 0, fname: null },
+      "cart.ts",
+    );
+    expect(closed.ok).toBe(false);
+    expect(closed.detail).toContain("right after Back");
+    expect(closed.detail).toContain("not alone on screen");
+    expect(openAfterBackVerdict({ ...opened, fname: "price.ts" }, "cart.ts").ok).toBe(false);
   });
 
   test("back-restores wants the tree, the same open folders and the scroll within 2 px", () => {
@@ -888,9 +968,9 @@ describe("verdicts on a phone", () => {
   });
 
   test("comment-box wants the box shown inside the code", () => {
-    expect(composerVerdict({ shown: true, inside: true, rows: 40 }).ok).toBe(true);
-    expect(composerVerdict({ shown: false, inside: true, rows: 40 }).ok).toBe(false);
-    const outside = composerVerdict({ shown: true, inside: false, rows: 40 });
+    expect(composerVerdict({ shown: true, inside: true }).ok).toBe(true);
+    expect(composerVerdict({ shown: false, inside: true }).ok).toBe(false);
+    const outside = composerVerdict({ shown: true, inside: false });
     expect(outside.ok).toBe(false);
     expect(outside.detail).toContain("inside");
   });
@@ -1130,6 +1210,25 @@ describe("the command, run against fakes", () => {
   });
 });
 
+/**
+ * What this process still has running, once the browser has had a moment to go. The test preload looks
+ * for children every 500 ms, so the wait also lets it see that none are left.
+ */
+async function lingering(): Promise<string[]> {
+  await Bun.sleep(700);
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const live = [...(await snapshotDescendants(process.pid)).values()].filter(
+      (p) => !p.stat.startsWith("Z"),
+    );
+    if (live.length === 0) return [];
+    await Bun.sleep(200);
+  }
+  const rest = await snapshotDescendants(process.pid);
+  return [...rest.values()]
+    .filter((p) => !p.stat.startsWith("Z"))
+    .map((p) => p.command.slice(0, 120));
+}
+
 describe("the real gate", () => {
   test("it passes a built demo page when Playwright can be loaded, and is unavailable otherwise", async () => {
     const message = describeMissing(process.env);
@@ -1169,6 +1268,7 @@ describe("the real gate", () => {
         expect(report.runs).toHaveLength(7);
         expect(verdict.problems).toEqual([]);
         expect(verdict.ok).toBe(true);
+        expect(await lingering()).toEqual([]);
       } catch (e) {
         if (!(e instanceof BrowserUnavailable)) throw e;
         // Playwright loads but no Chromium starts here: the gate is unavailable, and says why.

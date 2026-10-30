@@ -11,9 +11,9 @@
 // The matrix is three widths (390, 820, 1280) in light and dark, then one plain run at 390.
 // --quick keeps 390 light, 390 dark, 1280 light and the plain run. Every run audits the overview,
 // the tree, the order and the file screen for sideways scroll, tap targets under 44 px, text
-// under 13 px and the fonts. Phone runs also drive the tree, Back, the browser's back, Next and
-// Previous, ticks, the comment box, the file list and the ruling links; wide runs check the split
-// view; the plain run checks that nothing hidden is displayed.
+// under 13 px and the fonts. Phone runs also drive the tree, Back, a tap right after Back, the
+// browser's back, Next and Previous, ticks, the comment box, the file list and the ruling links;
+// wide runs check the split view; the plain run checks that nothing hidden is displayed.
 //
 // Screenshots and report.json go into --out (default: a new temporary folder).
 //
@@ -83,7 +83,8 @@ const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : S
 
 const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
-const WHY_NOT_CLICKED = /intercepts|not visible|not stable|not enabled|disabled|detached|outside of the viewport/iu;
+const WHY_NOT_CLICKED =
+  /intercepts|not visible|not stable|not enabled|disabled|detached|outside of the viewport/iu;
 
 /** An error as one short line: the first line of its message and, from a Playwright call log, why a click did not land. */
 export function failure(e: unknown): string {
@@ -240,13 +241,20 @@ export function isAllowedHost(entry: string): boolean {
   return host !== null && ALLOWED_HOSTS.includes(host);
 }
 
+/** The lines in first-seen order, a line that repeats once with its count. */
+function counted(lines: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const line of lines) counts.set(line, (counts.get(line) ?? 0) + 1);
+  return [...counts].map(([line, n]) => (n === 1 ? line : `${line} (x${n})`));
+}
+
 /** Every problem of a report as one plain line, "<run name>: <id>: <detail>". */
 export function judge(report: GateReport): { ok: boolean; problems: string[] } {
   const problems = report.runs.flatMap((run) => [
-    ...run.errors.map((e) => `${run.name}: console: ${oneLine(e)}`),
-    ...run.failed
-      .filter((f) => !isAllowedHost(f))
-      .map((f) => `${run.name}: request: ${oneLine(f)}`),
+    ...counted(run.errors.map((e) => `${run.name}: console: ${oneLine(e)}`)),
+    ...counted(
+      run.failed.filter((f) => !isAllowedHost(f)).map((f) => `${run.name}: request: ${oneLine(f)}`),
+    ),
     ...run.checks.filter((c) => !c.ok).map((c) => `${run.name}: ${c.id}: ${oneLine(c.detail)}`),
   ]);
   return { ok: problems.length === 0, problems };
@@ -684,7 +692,7 @@ export function auditChecks(audits: readonly ScreenAudit[], plain: boolean): Che
       (a) =>
         `${a.screen}: ${a.small.length} under 44px: ${a.small
           .slice(0, LISTED)
-          .map((s) => `${s.el} ${s.w}x${s.h}`)
+          .map((s) => `${s.el} ${s.w}x${s.h}${s.text === "" ? "" : ` "${s.text}"`}`)
           .join(", ")}`,
     );
   const text = audits
@@ -720,7 +728,8 @@ export function fontsVerdict(loaded: readonly string[], failed: readonly string[
   const unreachable = failed.some((entry) => FONT_HOSTS.includes(hostOf(entry) ?? ""));
   if (unreachable)
     return pass(`skipped: the font host could not be reached (${missing.join(", ")} not loaded)`);
-  return fail(`not loaded: ${missing.join(", ")}; loaded: ${loaded.join(", ") || "none"}`);
+  const seen = [...new Set(loaded)];
+  return fail(`not loaded: ${missing.join(", ")}; loaded: ${seen.join(", ") || "none"}`);
 }
 
 // ---------- verdicts on the facts the page gives ----------
@@ -815,7 +824,6 @@ export interface FileFacts {
   /** The first note in #file-code that is not "Loading", or "". */
   status: string;
   fname: string | null;
-  pos: string | null;
 }
 
 /** A file opened from the tree on a phone: the file screen alone, its content or a note, its name. */
@@ -833,6 +841,14 @@ export function openFileVerdict(f: FileFacts, expectedName: string): Verdict {
   return problems.length === 0
     ? pass(`${expectedName}: ${f.rows > 0 ? plural(f.rows, "row", "rows") : f.status}`)
     : fail(problems.join("; "));
+}
+
+/** A file tapped right after Back is the file on screen once the page's own fallback for Back has run. */
+export function openAfterBackVerdict(f: FileFacts, expectedName: string): Verdict {
+  const opened = openFileVerdict(f, expectedName);
+  return opened.ok
+    ? pass(`${expectedName} stayed open after a tap right after Back`)
+    : fail(`a tap right after Back did not leave the file open: ${opened.detail}`);
 }
 
 export interface Leave {
@@ -913,7 +929,6 @@ export function tickVerdict(f: TickFacts): Verdict {
 export interface ComposerFacts {
   shown: boolean;
   inside: boolean;
-  rows: number;
 }
 
 export function composerVerdict(f: ComposerFacts): Verdict {
@@ -1036,7 +1051,7 @@ function readBytes(path: string): Uint8Array | null {
 export function startServer(dir: string): PageServer {
   const root = resolve(dir);
   const html = (text: string): Response =>
-    new Response(text, { headers: { "content-type": contentType("x.html"), ...NO_STORE } });
+    new Response(text, { headers: { "content-type": contentType("index.html"), ...NO_STORE } });
   const missing = (): Response =>
     new Response("not found", {
       status: 404,
@@ -1115,6 +1130,9 @@ window.__gate = (() => {
   const attr = (sel, name) => { const e = $(sel); return e ? e.getAttribute(name) : null; };
   const count = (sel, root) => all(sel, root).length;
   const number = (sel) => Number((text(sel) || "").replace(/\D/g, "")) || 0;
+  // The width the page must fit. In mobile emulation innerWidth grows with an over-wide page, so
+  // the narrower of it and the root's client width is the viewport.
+  const vw = () => Math.min(innerWidth, document.documentElement.clientWidth);
   const rowName = (li) => { const n = $(".tname", li); return n ? n.textContent.trim() : label(li); };
   const openIds = () => all('#tree li.trow.dir[aria-expanded="true"]').map((li) => li.dataset.id);
   const TARGETS = "button, a[href], input, select, summary, textarea, [role=checkbox], [role=tab]";
@@ -1124,12 +1142,12 @@ window.__gate = (() => {
     order: shown($("#screen-order")), file: shown($("#screen-file")),
     screen: attr("#app", "data-screen"), tab: attr("#app", "data-tab"),
   });
-  const header = () => ({ tabs: shown($("#hdr-tabs")), file: shown($("#hdr-file")), back: shown($("#back")) });
+  const header = () => ({ tabs: shown($("#hdr-tabs")), back: shown($("#back")) });
 
   const audit = (rootSel) => {
     const root = rootSel ? $(rootSel) : document.body;
     const docHeight = Math.max(document.documentElement.scrollHeight, innerHeight);
-    const offscreen = (r) => r.right <= 0 || r.left >= innerWidth
+    const offscreen = (r) => r.right <= 0 || r.left >= vw()
       || r.bottom + window.scrollY <= 0 || r.top + window.scrollY >= docHeight;
     const small = [];
     const tiny = {};
@@ -1157,7 +1175,7 @@ window.__gate = (() => {
       .filter((e) => e.getAttribute("hidden") !== "until-found" && getComputedStyle(e).display !== "none")
       .map((e) => label(e) + " (" + getComputedStyle(e).display + ")");
     return { scrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth,
-      innerWidth, small, tiny, hiddenShown };
+      innerWidth: vw(), small, tiny, hiddenShown };
   };
 
   const fonts = async () => {
@@ -1171,9 +1189,9 @@ window.__gate = (() => {
     const r = t ? t.getBoundingClientRect() : null;
     const outside = all("#tree .trow").filter((li) => {
       const b = li.getBoundingClientRect();
-      return b.left < -0.5 || b.right > innerWidth + 0.5;
+      return b.left < -0.5 || b.right > vw() + 0.5;
     }).length;
-    return { left: r ? r.left : 0, right: r ? r.right : 0, innerWidth, outside };
+    return { left: r ? r.left : 0, right: r ? r.right : 0, innerWidth: vw(), outside };
   };
 
   const rows = () => {
@@ -1189,7 +1207,7 @@ window.__gate = (() => {
   };
 
   const tree = () => ({
-    rows: count("#tree .trow"), dirs: count("#tree li.trow.dir"), open: openIds(),
+    rows: count("#tree .trow"), open: openIds(),
     files: all("#tree li.trow.file").map((li) => ({ fi: Number(li.dataset.fi), name: rowName(li) })),
   });
   const collapsed = () => all('#tree li.trow.dir[aria-expanded="false"]').map((li) => ({
@@ -1204,7 +1222,7 @@ window.__gate = (() => {
       screen: attr("#app", "data-screen"), tab: attr("#app", "data-tab"),
       fileShown: shown($("#screen-file")), treeShown: shown($("#screen-tree")),
       rows: code ? count(".r", code) : 0, status: notes.find((t) => !/^loading/i.test(t)) || "",
-      fname: text("#fname"), pos: text("#pos"),
+      fname: text("#fname"),
     };
   };
   const fileReady = () => { const f = fileFacts(); return f.fileShown && (f.rows > 0 || f.status !== ""); };
@@ -1212,7 +1230,7 @@ window.__gate = (() => {
   const box = (left) => {
     const c = $("#file-code");
     const page = document.documentElement.scrollWidth;
-    if (!c) return { boxScrolls: false, overflowX: "", scrollLeft: 0, pageScrollWidth: page, innerWidth };
+    if (!c) return { boxScrolls: false, overflowX: "", scrollLeft: 0, pageScrollWidth: page, innerWidth: vw() };
     const boxScrolls = c.scrollWidth > c.clientWidth;
     if (boxScrolls && typeof left === "number") {
       const was = c.style.scrollBehavior;
@@ -1221,15 +1239,15 @@ window.__gate = (() => {
       c.style.scrollBehavior = was;
     }
     return { boxScrolls, overflowX: getComputedStyle(c).overflowX, scrollLeft: c.scrollLeft,
-      pageScrollWidth: document.documentElement.scrollWidth, innerWidth };
+      pageScrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth), innerWidth: vw() };
   };
 
   const composer = () => {
     const c = $("#composer");
     const code = $("#file-code");
-    return { shown: shown(c), inside: !!(c && code && code.contains(c)), rows: code ? count(".r", code) : 0 };
+    return { shown: shown(c), inside: !!(c && code && code.contains(c)) };
   };
-  const progress = () => ({ n: number("#prog-n"), t: number("#prog-t") });
+  const progress = () => ({ n: number("#prog-n") });
   const tick = (fi) => attr('#tree li.trow.file[data-fi="' + fi + '"] .tick', "aria-checked");
   const unticked = () => {
     const b = $('#tree li.trow.file .tick[aria-checked="false"]');
@@ -1244,7 +1262,7 @@ window.__gate = (() => {
       const v = own !== null ? own : inner ? inner.getAttribute("data-fi") : null;
       return v === null ? -1 : Number(v);
     };
-    return { opened: shown($("#find")), fis: list.filter(shown).map(fiOf), total: list.length };
+    return { opened: shown($("#find")), fis: list.filter(shown).map(fiOf) };
   };
   const rulings = () => ({ cards: count("#ov-rulings .ruling"), links: count("#ov-rulings .lnk") });
   const flagged = () => count("#file-code .r.flag");
@@ -1301,7 +1319,6 @@ interface Ctx {
 
 interface TreeFacts {
   rows: number;
-  dirs: number;
   open: string[];
   files: { fi: number; name: string }[];
 }
@@ -1315,9 +1332,9 @@ const POLL_MS = 50;
 const FILES_TRIED = 12;
 const SCROLL_TARGET = 300;
 /**
- * The page's Back handler shows the list itself if the history step has not done so within 400 ms,
- * and a file opened inside that window is closed again. A person cannot tap that fast; the gate
- * can, so it waits the window out after every press of Back.
+ * Back goes through the browser's history, and the page shows the list itself if the step has not
+ * arrived within 400 ms. The helpers that move around the page wait that window out after every
+ * press of Back, so a tap never meets a half-finished Back; open-after-back taps inside it on purpose.
  */
 const BACK_SETTLE_MS = 450;
 
@@ -1520,7 +1537,7 @@ async function checkOpenFile({ page }: Ctx): Promise<Verdict> {
 }
 
 /** Collapse everything, then open the largest folders on screen until two are open and the page can scroll. */
-async function openFolders(page: PwPage): Promise<number> {
+async function openFolders(page: PwPage): Promise<void> {
   await tap(page, "#tree-collapse");
   let opened = 0;
   for (let step = 0; step < FILES_TRIED; step++) {
@@ -1533,7 +1550,6 @@ async function openFolders(page: PwPage): Promise<number> {
     await tap(page, `#tree li.trow.dir[data-id=${JSON.stringify(biggest.id)}] button.tgo`);
     opened++;
   }
-  return opened;
 }
 
 async function checkBack({ page }: Ctx): Promise<Verdict> {
@@ -1566,10 +1582,32 @@ async function checkHistory({ page }: Ctx): Promise<Verdict> {
   if (target === undefined) return fail("the tree has no file row");
   await tap(page, rowSelector(target));
   await waitFileReady(page);
+  // Without an entry of its own the browser's back would leave the page altogether.
+  if (!(await page.evaluate("history.state !== null"))) {
+    return fail(
+      "opening a file added no history entry, so the browser's back would leave the page",
+    );
+  }
   await page.goBack({ waitUntil: "load", timeout: WAIT_MS });
   await tryUntil(page, "window.__gate.screens().tree", 5000);
   const facts = await gate<ScreenFacts>(page, "screens");
   return historyVerdict(before, { open: (await treeOf(page)).open, treeShown: facts.tree });
+}
+
+/** Back, then a tap on a file before the page's fallback for Back has run: the file stays open. */
+async function checkOpenAfterBack({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const first = (await treeOf(page)).files[0];
+  if (first === undefined) return fail("the tree has no file row");
+  await tap(page, rowSelector(first.fi));
+  await waitFileReady(page);
+  await tap(page, "#back");
+  await until(page, "window.__gate.screens().tree", "the tree after Back");
+  await tap(page, rowSelector(first.fi));
+  await Bun.sleep(BACK_SETTLE_MS + 150);
+  await tryUntil(page, "window.__gate.fileReady()", 2000);
+  return openAfterBackVerdict(await gate<FileFacts>(page, "fileFacts"), first.name);
 }
 
 async function checkPrevNext({ page }: Ctx): Promise<Verdict> {
@@ -1588,6 +1626,7 @@ async function checkPrevNext({ page }: Ctx): Promise<Verdict> {
   await tap(page, "#next");
   await tryUntil(page, named(second.name));
   const afterNext = (await gate<FileFacts>(page, "fileFacts")).fname;
+  if (afterNext !== second.name) return navVerdict(first.name, second.name, afterNext, null);
   await tap(page, "#prev");
   await tryUntil(page, named(first.name));
   const afterPrev = (await gate<FileFacts>(page, "fileFacts")).fname;
@@ -1635,7 +1674,9 @@ async function checkComposer(ctx: Ctx): Promise<Verdict> {
 
 /** The file with the longest code line, from the diff chunks the page itself loads; null when they cannot be read. */
 async function widestOfChunks({ origin, review }: Ctx): Promise<number | null> {
-  const chunks = new Set(review.files.flatMap((f) => (typeof f["chunk"] === "number" ? [f["chunk"]] : [])));
+  const chunks = new Set(
+    review.files.flatMap((f) => (typeof f["chunk"] === "number" ? [f["chunk"]] : [])),
+  );
   const loaded = await Promise.all(
     [...chunks].map(async (k): Promise<DiffItem[]> => {
       try {
@@ -1705,6 +1746,7 @@ const PHONE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
   ["open-file", checkOpenFile],
   ["back-restores", checkBack],
   ["history-back", checkHistory],
+  ["open-after-back", checkOpenAfterBack],
   ["prev-next", checkPrevNext],
   ["tick", checkTick],
   ["comment-box", checkComposer],
