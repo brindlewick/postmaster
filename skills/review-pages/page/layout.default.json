@@ -1,0 +1,76 @@
+{
+  "areaRoots": [
+    "apps",
+    "packages",
+    "libs",
+    "services",
+    "crates",
+    "modules",
+    "plugins"
+  ],
+  "groups": [
+    {
+      "id": "source",
+      "num": "2",
+      "title": "Source",
+      "sub": "production code",
+      "collapsed": false,
+      "by": "area"
+    },
+    {
+      "id": "config",
+      "num": "3",
+      "title": "Config and docs",
+      "sub": "settings, CI and documentation",
+      "collapsed": false,
+      "priority": 10,
+      "match": [
+        "(^|/)(package\\.json|tsconfig[^/]*\\.json|Cargo\\.toml|go\\.mod|pyproject\\.toml|Dockerfile|Makefile|biome\\.json|\\.gitignore)$",
+        "(^|/)\\.env[^/]*$",
+        "^\\.github/",
+        "\\.(md|mdx|rst)$",
+        "(^|/)docs?/",
+        "\\.(ya?ml|toml|ini)$"
+      ]
+    },
+    {
+      "id": "tests",
+      "num": "4",
+      "title": "Tests",
+      "sub": "unit tests, browser checks and test helpers",
+      "collapsed": true,
+      "priority": 20,
+      "match": [
+        "\\.(test|spec)\\.[A-Za-z0-9]+$",
+        "(^|/)(tests?|__tests__|e2e|testing|specs?|__mocks__|fixtures?)/",
+        "_test\\.(go|py|rs)$",
+        "(^|/)test_[^/]*\\.py$"
+      ]
+    },
+    {
+      "id": "generated",
+      "num": "",
+      "title": "Generated files and lockfiles",
+      "sub": "written by tools, not by hand",
+      "note": "Written by tools, not by hand. Skim them only if a dependency change worries you.",
+      "collapsed": true,
+      "priority": 30,
+      "match": [
+        "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|npm-shrinkwrap\\.json|yarn\\.lock|bun\\.lockb?|Cargo\\.lock|go\\.sum|poetry\\.lock|Gemfile\\.lock|composer\\.lock|Pipfile\\.lock)$",
+        "\\.(gen|generated)\\.[A-Za-z0-9]+$",
+        "(^|/)(dist|build|out|__generated__|generated)/",
+        "\\.min\\.(js|css)$",
+        "\\.snap$"
+      ]
+    }
+  ],
+  "withheld": [
+    {
+      "match": "(^|/)\\.env[^/]*$",
+      "text": "Environment files are not shown on review pages. Only their name and size of change are listed."
+    }
+  ],
+  "first": [],
+  "purposes": {},
+  "rulings": []
+}
