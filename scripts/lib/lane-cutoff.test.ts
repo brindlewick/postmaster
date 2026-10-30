@@ -1,8 +1,9 @@
 // Paired controls for the lane cut-off reading (#607): a Claude stream whose helpers the harness
-// stopped while they ran reads as cut off, and every stream that merely ends in a short status
-// line, finishes its helpers, or stops something that is not a helper reads as whole. A harness
-// whose end this tool has no recorded shape for is never read. The marker the reading leaves
-// beside a stream is written for a cut-off lane and removed for a whole one.
+// stopped while they ran, or whose last result the harness followed by stopping a task a helper
+// left running, reads as cut off; every stream that merely ends in a short status line, finishes
+// its helpers, or has the lane stop its own shell before it ends reads as whole. A harness whose
+// end this tool has no recorded shape for is never read. The marker the reading leaves beside a
+// stream is written for a cut-off lane and removed for a whole one.
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,6 +117,76 @@ describe("readCutoff on a Claude stream", () => {
     expect(readCutoff("claude", tail)).toEqual({ state: "whole" });
   });
 
+  test("a shell a helper left running, swept after the last result and counted nowhere, reads as cut off", () => {
+    const tail = stream(
+      init,
+      started("h1"),
+      started("b1", "local_bash"),
+      notified("h1", "completed"),
+      result(stats({ spawned: 1, completed: 0 })),
+      notified("b1", "stopped"),
+    );
+    expect(readCutoff("claude", tail)).toEqual({ state: "cut-off", stopped: 1 });
+  });
+
+  test("a stop after the last result counts for any task, even one the tail never saw start", () => {
+    const tail = stream(
+      init,
+      result(stats({ spawned: 0, completed: 0 })),
+      notified("b9", "stopped"),
+    );
+    expect(readCutoff("claude", tail)).toEqual({ state: "cut-off", stopped: 1 });
+  });
+
+  test("a stop between two results is not after the last one", () => {
+    const tail = stream(
+      init,
+      started("b1", "local_bash"),
+      result(stats({ spawned: 0, completed: 0 })),
+      notified("b1", "stopped"),
+      result(stats({ spawned: 0, completed: 0 })),
+    );
+    expect(readCutoff("claude", tail)).toEqual({ state: "whole" });
+  });
+
+  test("a notice after the last result that is not a stop does not count", () => {
+    const tail = stream(
+      init,
+      started("b1", "local_bash"),
+      result(stats({ spawned: 0, completed: 0 })),
+      notified("b1", "completed"),
+      notified("b2", "failed"),
+    );
+    expect(readCutoff("claude", tail)).toEqual({ state: "whole" });
+  });
+
+  test("a stop with no result in the tail is not read as a sweep: the lane never ended", () => {
+    const tail = stream(init, started("b1", "local_bash"), notified("b1", "stopped"));
+    expect(readCutoff("claude", tail)).toEqual({ state: "whole" });
+  });
+
+  test("a helper stopped after the last result is counted once, not once for each signal", () => {
+    const tail = stream(
+      init,
+      started("h1"),
+      result(stats({ spawned: 1, completed: 0 })),
+      notified("h1", "stopped"),
+    );
+    expect(readCutoff("claude", tail)).toEqual({ state: "cut-off", stopped: 1 });
+  });
+
+  test("the tasks stopped before and after the last result are counted together", () => {
+    const tail = stream(
+      init,
+      started("h1"),
+      started("b1", "local_bash"),
+      notified("h1", "stopped"),
+      result(stats({ spawned: 1, completed: 0, system: 1 })),
+      notified("b1", "stopped"),
+    );
+    expect(readCutoff("claude", tail)).toEqual({ state: "cut-off", stopped: 2 });
+  });
+
   test("a helper that failed, with nothing stopped, reads as whole", () => {
     const tail = stream(
       init,
@@ -186,8 +257,8 @@ describe("the marker", () => {
         stopped: 1,
       });
       const marker = cutoffMarkerPath(streamPath);
-      expect(readFileSync(marker, "utf8")).toBe("1 helper stopped before it reported\n");
-      expect(readCutoffMarker(marker)).toBe("1 helper stopped before it reported");
+      expect(readFileSync(marker, "utf8")).toBe("1 task stopped before it finished\n");
+      expect(readCutoffMarker(marker)).toBe("1 task stopped before it finished");
     });
   });
 
@@ -197,7 +268,7 @@ describe("the marker", () => {
       const many = stream(init, result(stats({ spawned: 5, completed: 0, system: 5 })));
       recordCutoff({ stream: streamPath, harness: "claude", tail: many });
       expect(readCutoffMarker(cutoffMarkerPath(streamPath))).toBe(
-        "5 helpers stopped before they reported",
+        "5 tasks stopped before they finished",
       );
     });
   });
@@ -206,7 +277,7 @@ describe("the marker", () => {
     withTemp((dir) => {
       const streamPath = join(dir, "s.jsonl");
       const marker = cutoffMarkerPath(streamPath);
-      writeFileSync(marker, "1 helper stopped before it reported\n");
+      writeFileSync(marker, "1 task stopped before it finished\n");
       expect(recordCutoff({ stream: streamPath, harness: "claude", tail: whole })).toEqual({
         state: "whole",
       });

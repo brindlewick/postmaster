@@ -1193,13 +1193,13 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    reset.
 
    **A reviewer cut off with its helpers still running moves the round on without it, too.**
-   A Claude reviewer may start helpers; when the harness stopped the ones it still had running as
-   it ended its turn, what it returned is a status line, not a review, and its launch left
-   `<dispatch>/logs/review-r<round>-<lens>-<lane>.cutoff` beside its stream. The wait records it
-   as `<lane> <lens>: DEGRADED, cut off with helpers still running` in `run-log.md` with its
-   `degrade` line, and reports the reviewer finished: its verdict counts for nothing and it is
-   launched again in the next round, as for a wall. A reviewer that walled is recorded for the
-   wall alone.
+   A Claude reviewer may start helpers. When the harness stopped the ones it still had running
+   as it ended its turn, or a shell they left running, what it returned is a status line, not a
+   review, and its launch left `<dispatch>/logs/review-r<round>-<lens>-<lane>.cutoff` beside its
+   stream. The wait records it as `<lane> <lens>: DEGRADED, cut off with helpers still running`
+   in `run-log.md` with its `degrade` line, and reports the reviewer finished: its verdict counts
+   for nothing and it is launched again in the next round, as for a wall. A reviewer that walled
+   is recorded for the wall alone.
 
    **At harvest, classify every lane under every lens REVIEWED or DEGRADED.** A lane that
    never launched, died and was not recovered, had not finished by the round's deadline, was cut

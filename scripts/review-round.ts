@@ -13,9 +13,9 @@
 // run project-notes bundle), launch cuts them into batches, writes each style lane its own
 // prompt file naming its batches, and starts the lane with it.
 // A reviewer whose launch left a cut-off marker beside its stream (the harness stopped helpers it
-// still had running as it ended, lib/lane-cutoff.ts) is collected as finished and recorded
-// DEGRADED, as a provider wall is: what it returned is a status line, not a review. A reviewer
-// that walled is recorded for the wall alone.
+// still had running as it ended, or a shell they left, lib/lane-cutoff.ts) is collected as
+// finished and recorded DEGRADED, as a provider wall is: what it returned is a status line, not
+// a review. A reviewer that walled is recorded for the wall alone.
 //
 //   run review-round start    <dispatch> <round> [<lens>:<lane>...]
 //   run review-round cut      <dispatch> <round> <repo> <synthesis-wt>

@@ -85,6 +85,20 @@ export function cutOffEvents(session: string): string[] {
   ];
 }
 
+/** The second way a lane is cut off: its helper started a background shell and finished while
+ * the shell ran. The lane's last result is reported with no helper counted as stopped, and the
+ * harness sweeps the shell shortly after, past that result. */
+export function sweptShellEvents(session: string): string[] {
+  return [
+    claudeInit(session),
+    helperStarted("h1"),
+    helperStarted("b1", "local_bash"),
+    helperNotice("h1", "completed"),
+    claudeResult({ text: "Review under way.", spawned: 1 }),
+    helperNotice("b1", "stopped"),
+  ];
+}
+
 /** The same lane when its helper reported before the lane ended: a whole review. */
 export function finishedEvents(session: string): string[] {
   return [

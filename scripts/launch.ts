@@ -45,10 +45,12 @@
 // CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0, placed in front of the command with env as the muse
 // and mimo forms carry XDG_DATA_HOME, so it shows in `form`. Headless Claude Code stops a
 // lane's background helpers 10 minutes after the lane's last turn and drops their results; 0
-// waits for them, and the round's time limit ends a lane that runs long. As a lane or reviewer
-// inside a run ends, its stream is read for helpers the harness stopped while they ran
-// (lib/lane-cutoff.ts), and `<stream>.cutoff` is written beside it when it shows any, so the
-// round and the surveyor can tell a cut-off lane from a finished one. Claude streams only.
+// waits for them, and the round's time limit ends a lane that runs long. A shell a helper left
+// running is swept after the lane's last result whatever the wait. As a lane or reviewer inside
+// a run ends, its stream is read for helpers, or what they left running, that the harness
+// stopped while they ran (lib/lane-cutoff.ts), and `<stream>.cutoff` is written beside it when
+// it shows any, so the round and the surveyor can tell a cut-off lane from a finished one.
+// Claude streams only.
 //
 // POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:
 // `refused` before a launch or resume runs its preflight, `started` once the env

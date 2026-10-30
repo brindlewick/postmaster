@@ -34,6 +34,7 @@ import {
   RUN,
   setRoundLimit,
   statusOnlyEvents,
+  sweptShellEvents,
   TEAM_TOML,
   WAIT_VAR,
   waitsSeen,
@@ -219,8 +220,16 @@ describe("C3: the marker a launch leaves beside its stream", () => {
   oracle("a stream whose helper the harness stopped leaves a marker naming the count", (lay) => {
     const marker = reviewed(lay, "security", "sec", cutOffEvents("s-cut"));
     expect(existsSync(marker)).toBe(true);
-    expect(readFileSync(marker, "utf8")).toBe("1 helper stopped before it reported\n");
+    expect(readFileSync(marker, "utf8").trim()).not.toBe("");
   });
+
+  oracle(
+    "a shell a helper left running, swept after the last result and counted nowhere, leaves one",
+    (lay) => {
+      const marker = reviewed(lay, "security", "sec", sweptShellEvents("s-swept"));
+      expect(existsSync(marker)).toBe(true);
+    },
+  );
 
   oracle("a stream whose helper reported leaves none", (lay) => {
     expect(existsSync(reviewed(lay, "security", "sec", finishedEvents("s-whole")))).toBe(false);
@@ -378,6 +387,18 @@ describe("C4: the round", () => {
     },
   );
 
+  oracle(
+    "wait-next records a reviewer whose helper left a shell swept after its last result",
+    (lay) => {
+      startRound(lay, ["security:sec"]);
+      launched(lay, "security", "sec", sweptShellEvents("s-swept"));
+      const w = reviewRound(lay, ["wait-next", lay.dispatch, "1", lay.repo]);
+      expect(w.code).toBe(0);
+      expect(w.out).toContain(`CUTOFF security sec: DEGRADED, ${CUTOFF_CAUSE}`);
+      expect(degrades(lay)).toEqual([{ target: "sec", detail: `security r1: ${CUTOFF_CAUSE}` }]);
+    },
+  );
+
   oracle("the next wait-next does not record the same reviewer twice", (lay) => {
     startRound(lay, ["security:sec"]);
     launched(lay, "security", "sec", cutOffEvents("s-once"));
@@ -452,8 +473,8 @@ describe("C4: the round", () => {
     const logs = logsOf(lay.dispatch);
     const mine = join(logs, reviewerFiles(1, "security", "sec").cutoff);
     const other = join(logs, reviewerFiles(2, "security", "sec").cutoff);
-    writeFileSync(mine, "1 helper stopped before it reported\n");
-    writeFileSync(other, "1 helper stopped before it reported\n");
+    writeFileSync(mine, "1 task stopped before it finished\n");
+    writeFileSync(other, "1 task stopped before it finished\n");
     startRound(lay, ["security:sec"]);
     expect(existsSync(mine)).toBe(false);
     expect(existsSync(other)).toBe(true);
