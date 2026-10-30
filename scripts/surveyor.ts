@@ -42,7 +42,9 @@
 //           used, an unknown snapshot, a missing or forbidden path naming it,
 //           a lane that does not resolve, or a harness with no recorded shape
 //   exit 3  the lane gave no answer: a non-zero exit, a provider wall, the
-//           deadline, or no final message in the stream; the reason kept,
+//           deadline, a harness that stopped the helpers the lane still had
+//           running as it ended (its launch leaves a cut-off marker beside
+//           the stream), or no final message in the stream; the reason kept,
 //           a degrade line logged
 import { spawnSync } from "node:child_process";
 import {
@@ -57,6 +59,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { tryJsonFile } from "./lib/data.ts";
+import { CUTOFF_CAUSE, cutoffMarkerPath, readCutoffMarker } from "./lib/lane-cutoff.ts";
 import { scriptsDir } from "./lib/paths.ts";
 import { run, signalExitCode } from "./lib/proc.ts";
 
@@ -143,12 +146,18 @@ function field(e: unknown, k: string): unknown {
   return isTable(e) ? e[k] : undefined;
 }
 
-/** finalMessage <harness> <events> <last>: the surveyor's last message, per harness. */
+/**
+ * finalMessage <harness> <events> <last> <cut off>: the surveyor's last message, per harness. A
+ * lane carrying the cut-off marker (lib/lane-cutoff.ts) gave no answer whatever its last message
+ * says: the harness stopped the helpers it still had running, so the message is a status line.
+ */
 export function finalMessage(
   harness: string,
   eventsText: string,
   lastText: string | null,
+  cutOff = false,
 ): { message: string } | { error: string } {
+  if (cutOff) return { error: CUTOFF_CAUSE };
   const events = parsedEvents(eventsText);
   if (harness === "codex") {
     // The -o file is trusted only when the turn completed: codex writes it
@@ -548,6 +557,7 @@ function callCmd(argv: string[]): never {
   for (const f of [
     `survey-${a.name}.done`,
     `survey-${a.name}-events.jsonl`,
+    basename(cutoffMarkerPath(`survey-${a.name}-events.jsonl`)),
     `survey-${a.name}.err`,
     `survey-${a.name}-last.md`,
     `survey-${a.name}.exit`,
@@ -737,7 +747,8 @@ function callCmd(argv: string[]): never {
       lastText = null;
     }
   }
-  const answer = finalMessage(harness, eventsText, lastText);
+  const cutOff = readCutoffMarker(cutoffMarkerPath(events)) !== null;
+  const answer = finalMessage(harness, eventsText, lastText, cutOff);
   if ("error" in answer) {
     const reason = `No answer: ${answer.error}.\n`;
     runLog(a.dispatch, `survey ${a.name}: ${lane} gave no answer (${answer.error})`);
