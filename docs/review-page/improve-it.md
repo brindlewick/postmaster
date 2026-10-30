@@ -38,7 +38,9 @@ inlines a transpiled copy with its `export` keywords removed, so it is written o
 - Run the gate on a demo build: build with `scripts/run review-page demo <dir>`, then
   `scripts/run review-page-gate <dir>`, and look at the screenshots.
 - Change the look or behaviour in the asset files; each file has one job and a comment at its top.
-  Colours come from the tokens in `css/10-tokens.css`; add a token there with its dark value.
+  Colours come from the tokens in `css/10-tokens.css`; add a token there with its dark value. The
+  files in `js/` are one script cut into pieces that share a scope, so Oxlint's unused-name rule is
+  off for that folder in `.oxlintrc.json`; the tests parse the assembled script.
 - Add a tab: a button in `page.html`'s `.tabs`, a `<section class="screen" id="screen-<name>">`, a
   render function in a new `js/` file listed in `assets.json`, and the name in `applyScreens` and
   `selectTab` in `js/09-nav.js`; add its checks to `scripts/review-page-gate.ts`.
