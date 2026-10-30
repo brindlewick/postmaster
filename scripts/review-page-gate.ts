@@ -1,0 +1,1941 @@
+// Render gate for a built review page: the page is opened in a real headless Chromium, the way a
+// phone, a tablet and a desktop see it, and checked.
+//
+//   scripts/run review-page-gate <page-dir> [--out <dir>] [--quick]
+//
+// <page-dir> holds what scripts/review-page.ts writes: index.html, review.json and chunks/*.json.
+// The folder is served from loopback. /index.html is the page wrapped the way the Artifact
+// publisher wraps it (a skeleton with a viewport and a style reset); /plain.html is the bare
+// file, a plain browser with no reset. Everything else is served as it is.
+//
+// The matrix is three widths (390, 820, 1280) in light and dark, then one plain run at 390.
+// --quick keeps 390 light, 390 dark, 1280 light and the plain run. Every run audits the overview,
+// the tree, the order and the file screen for sideways scroll, tap targets under 44 px, text
+// under 13 px and the fonts. Phone runs also drive the tree, Back, the browser's back, Next and
+// Previous, ticks, the comment box, the file list and the ruling links; wide runs check the split
+// view; the plain run checks that nothing hidden is displayed.
+//
+// Screenshots and report.json go into --out (default: a new temporary folder).
+//
+// Playwright is not a dependency of this repository: it is found at run time, in this order.
+//   1. PLAYWRIGHT_CORE, the folder of a playwright-core or playwright package, imported by path
+//   2. a plain import of "playwright-core"
+//   3. a plain import of "playwright"
+// Chromium is CHROMIUM_PATH, else the newest Chromium in the Playwright cache
+// (~/Library/Caches/ms-playwright on macOS, ~/.cache/ms-playwright on Linux), else Playwright's
+// own default.
+//
+//   exit 0  every check passed on every run
+//   exit 1  a check failed (the problems are printed), or the arguments or the folder are wrong
+//   exit 2  Playwright or Chromium cannot be found, so nothing was checked
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { extname, isAbsolute, join, posix, relative, resolve } from "node:path";
+
+export const USAGE = [
+  "usage: review-page-gate.ts <page-dir> [--out <dir>] [--quick]",
+  "  <page-dir>   a built review page: index.html, review.json and chunks/*.json",
+  "  --out <dir>  where screenshots and report.json go (default: a new temporary folder)",
+  "  --quick      390 light, 390 dark, 1280 light and the plain run only",
+].join("\n");
+
+export type Env = Readonly<Record<string, string | undefined>>;
+
+/** What a check found: whether the page is right, and one plain line saying so. */
+export interface Verdict {
+  ok: boolean;
+  detail: string;
+}
+
+export interface Check extends Verdict {
+  id: string;
+}
+
+export interface RunReport {
+  name: string;
+  width: number;
+  /** Console errors and page errors of the run. */
+  errors: string[];
+  /** Failed requests of the run, each "<url> <reason>". */
+  failed: string[];
+  checks: Check[];
+}
+
+export interface GateReport {
+  runs: RunReport[];
+}
+
+const pass = (detail: string): Verdict => ({ ok: true, detail });
+const fail = (detail: string): Verdict => ({ ok: false, detail });
+
+const isRecord = (x: unknown): x is Record<string, unknown> =>
+  typeof x === "object" && x !== null && !Array.isArray(x);
+
+const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
+
+const WHY_NOT_CLICKED = /intercepts|not visible|not stable|not enabled|disabled|detached|outside of the viewport/iu;
+
+/** An error as one short line: the first line of its message and, from a Playwright call log, why a click did not land. */
+export function failure(e: unknown): string {
+  const lines = errorMessage(e).split("\n");
+  const why = lines.findLast((line) => WHY_NOT_CLICKED.test(line));
+  const reason = why === undefined ? "" : ` (${why.replace(/^\s*-\s*/u, "")})`;
+  return oneLine(`${lines[0] ?? ""}${reason}`).slice(0, 300);
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+// ---------- the publisher skeleton and the content types ----------
+
+const SKELETON_HEAD =
+  '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>';
+const SKELETON_TAIL = "</body></html>";
+
+/** The page file inside the skeleton the Artifact publisher puts around it. */
+export function wrapSkeleton(html: string): string {
+  return SKELETON_HEAD + html + SKELETON_TAIL;
+}
+
+const CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+export function contentType(path: string): string {
+  return CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
+}
+
+/** The file a request path names inside `root`, or null when it names none or leaves the folder. */
+export function servedPath(root: string, pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  if (decoded.includes("\0")) return null;
+  const full = resolve(root, `.${decoded.startsWith("/") ? decoded : `/${decoded}`}`);
+  const rel = relative(root, full);
+  return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? null : full;
+}
+
+// ---------- the runs ----------
+
+export interface Run {
+  name: string;
+  width: number;
+  height: number;
+  scheme: "light" | "dark";
+  /** "/index.html" (wrapped) or "/plain.html" (bare). */
+  url: string;
+}
+
+const PLAIN_URL = "/plain.html";
+/** From this width the tree is a left pane with the file beside it. */
+const WIDE_FROM = 700;
+
+const isPlain = (run: Run): boolean => run.url === PLAIN_URL;
+
+export function matrix(quick: boolean): Run[] {
+  const at = (label: string, width: number, height: number, scheme: Run["scheme"]): Run => ({
+    name: `${label}-${scheme}`,
+    width,
+    height,
+    scheme,
+    url: "/index.html",
+  });
+  const plain: Run = {
+    name: "phone-plain",
+    width: 390,
+    height: 844,
+    scheme: "light",
+    url: PLAIN_URL,
+  };
+  return quick
+    ? [
+        at("phone", 390, 844, "light"),
+        at("phone", 390, 844, "dark"),
+        at("desk", 1280, 900, "light"),
+        plain,
+      ]
+    : [
+        at("phone", 390, 844, "light"),
+        at("phone", 390, 844, "dark"),
+        at("tablet", 820, 1180, "light"),
+        at("tablet", 820, 1180, "dark"),
+        at("desk", 1280, 900, "light"),
+        at("desk", 1280, 900, "dark"),
+        plain,
+      ];
+}
+
+/** The browser context of a run: a phone gets touch and the mobile viewport, a plain run never. */
+export function contextOptions(run: Run) {
+  const touch = run.width < WIDE_FROM && !isPlain(run);
+  return {
+    viewport: { width: run.width, height: run.height },
+    deviceScaleFactor: 2,
+    hasTouch: touch,
+    isMobile: touch,
+    colorScheme: run.scheme,
+  };
+}
+
+const PHONE_SHOTS = ["overview", "tree", "tree-search", "file", "composer", "order", "find"];
+const WIDE_SHOTS = ["overview", "tree-with-file"];
+
+/** The screenshots a run takes, by step name. */
+export function screenshotSteps(run: Run): ReadonlySet<string> {
+  if (isPlain(run)) return new Set(["overview"]);
+  return new Set(run.width < WIDE_FROM ? PHONE_SHOTS : WIDE_SHOTS);
+}
+
+export const shotPath = (out: string, runName: string, step: string): string =>
+  join(out, `${runName}-${step}.png`);
+
+// ---------- judging a report ----------
+
+const ALLOWED_HOSTS: readonly string[] = [
+  "fonts.googleapis.com",
+  "fonts.gstatic.com",
+  "cdnjs.cloudflare.com",
+];
+const FONT_HOSTS: readonly string[] = ["fonts.googleapis.com", "fonts.gstatic.com"];
+
+/** The host of a failed-request entry ("<url> <reason>") or of a bare URL. */
+function hostOf(entry: string): string | null {
+  try {
+    return new URL(entry.trim().split(/\s+/u)[0] ?? "").hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** True for the hosts whose failures are no fault of the page: the font hosts and the CDN. */
+export function isAllowedHost(entry: string): boolean {
+  const host = hostOf(entry);
+  return host !== null && ALLOWED_HOSTS.includes(host);
+}
+
+/** Every problem of a report as one plain line, "<run name>: <id>: <detail>". */
+export function judge(report: GateReport): { ok: boolean; problems: string[] } {
+  const problems = report.runs.flatMap((run) => [
+    ...run.errors.map((e) => `${run.name}: console: ${oneLine(e)}`),
+    ...run.failed
+      .filter((f) => !isAllowedHost(f))
+      .map((f) => `${run.name}: request: ${oneLine(f)}`),
+    ...run.checks.filter((c) => !c.ok).map((c) => `${run.name}: ${c.id}: ${oneLine(c.detail)}`),
+  ]);
+  return { ok: problems.length === 0, problems };
+}
+
+const LINE_CLIP = 400;
+const clip = (line: string): string =>
+  line.length > LINE_CLIP ? `${line.slice(0, LINE_CLIP)}...` : line;
+
+/** One line per run with its passed checks, then the problems. */
+export function shortReport(report: GateReport): string {
+  const runs = report.runs.map(
+    (r) => `${r.name}: ${r.checks.filter((c) => c.ok).length} of ${r.checks.length} checks passed`,
+  );
+  const { problems } = judge(report);
+  const tail =
+    problems.length === 0
+      ? ["no problems"]
+      : [
+          `${plural(problems.length, "problem", "problems")}:`,
+          ...problems.map((p) => `- ${clip(p)}`),
+        ];
+  return [...runs, ...tail].join("\n");
+}
+
+// ---------- finding Playwright and Chromium ----------
+
+const FULL_MAC = [
+  "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+  "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+  "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+  "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
+];
+const FULL_OTHER = ["chrome-linux64/chrome", "chrome-linux/chrome"];
+const SHELL_MAC = [
+  "chrome-headless-shell-mac-arm64/chrome-headless-shell",
+  "chrome-headless-shell-mac-x64/chrome-headless-shell",
+];
+const SHELL_OTHER = [
+  "chrome-headless-shell-linux64/chrome-headless-shell",
+  "chrome-linux/headless_shell",
+];
+const BROWSER_FOLDER = /^(chromium|chromium_headless_shell)-(\d+)$/u;
+
+function cacheFolder(env: Env, platform: string, home: string): string {
+  const custom = env["PLAYWRIGHT_BROWSERS_PATH"];
+  if (custom !== undefined && custom !== "" && custom !== "0") return custom;
+  return platform === "darwin"
+    ? posix.join(home, "Library", "Caches", "ms-playwright")
+    : posix.join(home, ".cache", "ms-playwright");
+}
+
+/**
+ * CHROMIUM_PATH if set, else the executable of the newest Chromium in the Playwright cache (a full
+ * Chromium before a headless shell of the same revision), else null. The disk is reached only
+ * through `listDir` and `exists`.
+ */
+export function findChromium(
+  env: Env,
+  platform: string,
+  home: string,
+  listDir: (dir: string) => readonly string[],
+  exists: (path: string) => boolean,
+): string | null {
+  const override = env["CHROMIUM_PATH"];
+  if (override !== undefined && override !== "") return override;
+  const cache = cacheFolder(env, platform, home);
+  const mac = platform === "darwin";
+  const folders = listDir(cache)
+    .flatMap((name) => {
+      const m = BROWSER_FOLDER.exec(name);
+      return m ? [{ name, shell: m[1] === "chromium_headless_shell", revision: Number(m[2]) }] : [];
+    })
+    .sort((a, b) => b.revision - a.revision || Number(a.shell) - Number(b.shell));
+  for (const folder of folders) {
+    const executables = folder.shell
+      ? mac
+        ? SHELL_MAC
+        : SHELL_OTHER
+      : mac
+        ? FULL_MAC
+        : FULL_OTHER;
+    for (const relativePath of executables) {
+      const path = posix.join(cache, folder.name, relativePath);
+      if (exists(path)) return path;
+    }
+  }
+  return null;
+}
+
+function listDirSafe(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** findChromium over this machine's disk; undefined lets Playwright use its own default. */
+export function chromiumPath(env: Env): string | undefined {
+  return findChromium(env, process.platform, homedir(), listDirSafe, existsSync) ?? undefined;
+}
+
+/** The message printed when Playwright or Chromium cannot be found. */
+export function describeMissing(env: Env): string {
+  const state = (name: string): string => {
+    const value = env[name];
+    return value === undefined || value === "" ? "not set" : `set to ${value}`;
+  };
+  return [
+    "review-page-gate: Playwright or Chromium could not be loaded, so nothing was checked.",
+    "Playwright is found at run time; it is not a dependency of this repository. Set:",
+    `  PLAYWRIGHT_CORE  the folder of a playwright-core or playwright package (${state("PLAYWRIGHT_CORE")})`,
+    `  CHROMIUM_PATH    the path of a Chromium or Chrome executable (${state("CHROMIUM_PATH")})`,
+    "Without CHROMIUM_PATH the newest Chromium in the Playwright cache is used, then Playwright's own default.",
+  ].join("\n");
+}
+
+// ---------- the Playwright surface the gate uses ----------
+
+export interface PwConsoleMessage {
+  type(): string;
+  text(): string;
+  location(): { url: string };
+}
+export interface PwRequest {
+  url(): string;
+  failure(): { errorText: string } | null;
+}
+export interface PwResponse {
+  url(): string;
+  status(): number;
+}
+export interface PwLocator {
+  nth(index: number): PwLocator;
+  click(): Promise<void>;
+}
+export interface PwPage {
+  on(event: "console", listener: (message: PwConsoleMessage) => void): unknown;
+  on(event: "pageerror", listener: (error: Error) => void): unknown;
+  on(event: "requestfailed", listener: (request: PwRequest) => void): unknown;
+  on(event: "response", listener: (response: PwResponse) => void): unknown;
+  goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
+  reload(options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
+  goBack(options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
+  evaluate(expression: string): Promise<unknown>;
+  waitForFunction(
+    expression: string,
+    arg: undefined,
+    options: { timeout: number; polling: number },
+  ): Promise<unknown>;
+  click(selector: string): Promise<void>;
+  fill(selector: string, value: string): Promise<void>;
+  locator(selector: string): PwLocator;
+  screenshot(options: { path: string }): Promise<unknown>;
+}
+export interface PwContext {
+  newPage(): Promise<PwPage>;
+  addInitScript(script: string): Promise<void>;
+  setDefaultTimeout(timeout: number): void;
+  close(): Promise<void>;
+}
+export interface PwBrowser {
+  newContext(options: ReturnType<typeof contextOptions>): Promise<PwContext>;
+  close(): Promise<void>;
+}
+export interface Playwright {
+  chromium: {
+    launch(options: { headless: boolean; executablePath?: string }): Promise<PwBrowser>;
+  };
+}
+
+/** A module as Playwright's `chromium`, taken from a named export or from `default`; else null. */
+export function asPlaywright(mod: unknown): Playwright | null {
+  const holders = isRecord(mod) ? [mod, mod["default"]] : [];
+  for (const holder of holders) {
+    if (!isRecord(holder)) continue;
+    const chromium = holder["chromium"];
+    if (isRecord(chromium) && typeof chromium["launch"] === "function") {
+      return { chromium } as unknown as Playwright;
+    }
+  }
+  return null;
+}
+
+/** Playwright from PLAYWRIGHT_CORE (by path), then "playwright-core", then "playwright"; else null. */
+export async function loadPlaywright(env: Env): Promise<Playwright | null> {
+  const core = env["PLAYWRIGHT_CORE"];
+  const places = [
+    ...(core === undefined || core === "" ? [] : [resolve(core)]),
+    "playwright-core",
+    "playwright",
+  ];
+  for (const place of places) {
+    try {
+      const found = asPlaywright(await import(place));
+      if (found !== null) return found;
+    } catch {
+      // not there: try the next place
+    }
+  }
+  return null;
+}
+
+/** Playwright loaded but no Chromium could be started. */
+export class BrowserUnavailable extends Error {}
+
+// ---------- reading review.json ----------
+
+export interface ReviewFile extends Record<string, unknown> {
+  path: string;
+}
+
+/** The parts of review.json the gate reads. */
+export interface ReviewInfo {
+  changedFiles: number;
+  files: ReviewFile[];
+  groups: Record<string, unknown>[];
+  /** How many rulings review.json lists, or null where it has no such list. */
+  rulings: number | null;
+}
+
+const isReviewFile = (x: unknown): x is ReviewFile => isRecord(x) && typeof x["path"] === "string";
+
+export function readReview(
+  text: string,
+): { ok: true; review: ReviewInfo } | { ok: false; error: string } {
+  const refuse = (why: string) => ({ ok: false as const, error: `review.json ${why}` });
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return refuse(`is not valid JSON (${failure(e)})`);
+  }
+  if (!isRecord(data)) return refuse("is not an object");
+  const { changedFiles, files, groups, rulings } = data;
+  if (typeof changedFiles !== "number") return refuse("has no changedFiles number");
+  if (!Array.isArray(files)) return refuse("has no files list");
+  const bad = files.findIndex((f) => !isReviewFile(f));
+  if (bad >= 0) return refuse(`file ${bad} has no path`);
+  return {
+    ok: true,
+    review: {
+      changedFiles,
+      files: files as ReviewFile[],
+      groups: Array.isArray(groups) ? groups.filter(isRecord) : [],
+      rulings: Array.isArray(rulings) ? rulings.length : null,
+    },
+  };
+}
+
+// ---------- the command line ----------
+
+export type ParsedArgs =
+  | { ok: true; dir: string; out: string | undefined; quick: boolean }
+  | { ok: false; error: string };
+
+export function parseArgs(args: readonly string[]): ParsedArgs {
+  let dir: string | undefined;
+  let out: string | undefined;
+  let quick = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--quick") {
+      quick = true;
+    } else if (arg === "--out") {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith("--"))
+        return { ok: false, error: "--out needs a folder" };
+      out = value;
+      i++;
+    } else if (arg.startsWith("--")) {
+      return { ok: false, error: `unknown option ${arg}` };
+    } else if (dir !== undefined) {
+      return { ok: false, error: `unexpected argument ${arg}` };
+    } else {
+      dir = arg;
+    }
+  }
+  return dir === undefined
+    ? { ok: false, error: "the page folder is missing" }
+    : { ok: true, dir, out, quick };
+}
+
+// ---------- choosing what to search for ----------
+
+const stemTokens = (path: string): string[] =>
+  (path.split("/").pop() ?? path)
+    .replace(/\.[^.]*$/u, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter(Boolean);
+
+/**
+ * A word taken from the name of one file: of the words that keep some files out, the one that
+ * keeps most out (then the longest, then the first in order), preferring four letters or more.
+ * Null when there are no files.
+ */
+export function pickSearchWord(review: ReviewInfo): string | null {
+  const paths = review.files.map((f) => f.path.toLowerCase());
+  const words = [...new Set(review.files.flatMap((f) => stemTokens(f.path)))].map((word) => ({
+    word,
+    n: paths.filter((p) => p.includes(word)).length,
+  }));
+  const selective = words.filter((w) => w.n < paths.length || paths.length < 2);
+  const best = (list: typeof words): string | undefined =>
+    [...list].sort(
+      (a, b) => a.n - b.n || b.word.length - a.word.length || (a.word < b.word ? -1 : 1),
+    )[0]?.word;
+  return (
+    best(selective.filter((w) => w.word.length >= 4)) ?? best(selective) ?? best(words) ?? null
+  );
+}
+
+/** Everything the page's search can reach for a file: its own text and its group's, and the status words. */
+function reachableText(review: ReviewInfo, file: ReviewFile): string {
+  const index = file["group"];
+  const group = typeof index === "number" ? review.groups[index] : undefined;
+  const strings = [...Object.values(file), ...Object.values(group ?? {})].filter(
+    (v): v is string => typeof v === "string",
+  );
+  return [...strings, "new", "deleted", "renamed", "read closely"].join(" ").toLowerCase();
+}
+
+/**
+ * The files shown for a search word must include every file whose path holds the word and stay
+ * within the files whose text the word can reach (the page also searches purposes and group names).
+ */
+export function searchVerdict(review: ReviewInfo, word: string, shown: readonly number[]): Verdict {
+  const words = word.toLowerCase().split(/\s+/u).filter(Boolean);
+  const holds = (text: string): boolean => words.every((w) => text.includes(w));
+  const indexes = review.files.map((_f, fi) => fi);
+  const must = indexes.filter((fi) => holds((review.files[fi]?.path ?? "").toLowerCase()));
+  const may = indexes.filter((fi) => holds(reachableText(review, review.files[fi] as ReviewFile)));
+  const named = (list: readonly number[]): string =>
+    list
+      .slice(0, 4)
+      .map((fi) => review.files[fi]?.path ?? `#${fi}`)
+      .join(", ");
+  if (shown.length === 0)
+    return fail(`no rows for "${word}" (${must.length} files hold it in their path)`);
+  const missing = must.filter((fi) => !shown.includes(fi));
+  if (missing.length > 0)
+    return fail(`"${word}" hides ${missing.length} matching: ${named(missing)}`);
+  const strangers = shown.filter((fi) => !may.includes(fi));
+  if (strangers.length > 0) {
+    return fail(`"${word}" shows ${strangers.length} that do not match: ${named(strangers)}`);
+  }
+  return pass(`${shown.length} of ${review.files.length} rows for "${word}"`);
+}
+
+/** The tree search: the right rows while the word is typed, and the original rows once it is cleared. */
+export function treeSearchVerdict(
+  review: ReviewInfo,
+  word: string,
+  shown: readonly number[],
+  before: number,
+  after: number,
+): Verdict {
+  const found = searchVerdict(review, word, shown);
+  if (!found.ok) return found;
+  return after === before
+    ? pass(`${found.detail}; the original ${before} rows return when it is cleared`)
+    : fail(
+        `${found.detail}, but after clearing the box ${after} rows show, not the original ${before}`,
+      );
+}
+
+/** The first index whose name differs from the next one's, or -1. */
+export function firstDistinctPair(names: readonly string[]): number {
+  return names.findIndex((name, i) => i + 1 < names.length && name !== names[i + 1]);
+}
+
+/** One file's diff as the page's data chunks hold it: the file's index and its unified diff. */
+export interface DiffItem {
+  i: number;
+  diff: string;
+}
+
+const isDiffItem = (x: unknown): x is DiffItem =>
+  isRecord(x) && typeof x["i"] === "number" && typeof x["diff"] === "string";
+
+/** The lines of a diff that the page draws as code: everything after the first hunk header, bar the headers. */
+function codeLines(diff: string): string[] {
+  const lines = diff.split("\n");
+  const first = lines.findIndex((line) => line.startsWith("@@"));
+  return first < 0 ? [] : lines.slice(first).filter((line) => /^[ +-]/u.test(line));
+}
+
+/** The index of the file with the longest code line (the lowest index on a tie), or null when no file has code. */
+export function widestFile(items: readonly DiffItem[]): number | null {
+  const widest = items
+    .map((item) => ({
+      i: item.i,
+      width: codeLines(item.diff).reduce((most, line) => Math.max(most, line.length - 1), 0),
+    }))
+    .filter((w) => w.width > 0)
+    .sort((a, b) => b.width - a.width || a.i - b.i)[0];
+  return widest === undefined ? null : widest.i;
+}
+
+// ---------- the audits of every screen ----------
+
+export interface ScreenAudit {
+  screen: string;
+  scrollWidth: number;
+  bodyScrollWidth: number;
+  innerWidth: number;
+  /** Visible targets under 44 px high or wide. */
+  small: readonly { el: string; w: number; h: number; text: string }[];
+  /** Visible text under 13 px, by element and size, with how many text nodes. */
+  tiny: Readonly<Record<string, number>>;
+  /** Elements with the hidden attribute that are displayed anyway. */
+  hiddenShown: readonly string[];
+}
+
+const LISTED = 5;
+
+/** The audits of the screens a run visited as checks: overflow, tap-targets, text-size, and in the plain run hidden-attr. */
+export function auditChecks(audits: readonly ScreenAudit[], plain: boolean): Check[] {
+  const names = audits.map((a) => a.screen).join(", ");
+  const summarize = (id: string, problems: readonly string[], good: string): Check => {
+    if (audits.length === 0) return { id, ...fail("no screen was audited") };
+    return { id, ...(problems.length === 0 ? pass(good) : fail(problems.join("; "))) };
+  };
+  const overflow = audits
+    .filter((a) => a.scrollWidth > a.innerWidth || a.bodyScrollWidth > a.innerWidth)
+    .map(
+      (a) =>
+        `${a.screen}: the page is ${Math.max(a.scrollWidth, a.bodyScrollWidth)}px wide in a ${a.innerWidth}px window`,
+    );
+  const taps = audits
+    .filter((a) => a.small.length > 0)
+    .map(
+      (a) =>
+        `${a.screen}: ${a.small.length} under 44px: ${a.small
+          .slice(0, LISTED)
+          .map((s) => `${s.el} ${s.w}x${s.h}`)
+          .join(", ")}`,
+    );
+  const text = audits
+    .filter((a) => Object.keys(a.tiny).length > 0)
+    .map(
+      (a) =>
+        `${a.screen}: ${Object.entries(a.tiny)
+          .slice(0, LISTED)
+          .map(([key, n]) => `${key} x${n}`)
+          .join(", ")}`,
+    );
+  const checks = [
+    summarize("overflow", overflow, `${names} fit the width`),
+    summarize("tap-targets", taps, `${names} have no target under 44px`),
+    summarize("text-size", text, `${names} have no text under 13px`),
+  ];
+  if (!plain) return checks;
+  const hidden = audits
+    .filter((a) => a.hiddenShown.length > 0)
+    .map((a) => `${a.screen}: ${a.hiddenShown.slice(0, LISTED).join(", ")}`);
+  return [
+    ...checks,
+    summarize("hidden-attr", hidden, `${names}: every hidden element is not displayed`),
+  ];
+}
+
+const FONTS_NEEDED = ["Red Hat Text", "Red Hat Mono"];
+
+/** Both Red Hat faces loaded; an unreachable font host says nothing about the page. */
+export function fontsVerdict(loaded: readonly string[], failed: readonly string[]): Verdict {
+  const missing = FONTS_NEEDED.filter((f) => !loaded.includes(f));
+  if (missing.length === 0) return pass(`${FONTS_NEEDED.join(" and ")} loaded`);
+  const unreachable = failed.some((entry) => FONT_HOSTS.includes(hostOf(entry) ?? ""));
+  if (unreachable)
+    return pass(`skipped: the font host could not be reached (${missing.join(", ")} not loaded)`);
+  return fail(`not loaded: ${missing.join(", ")}; loaded: ${loaded.join(", ") || "none"}`);
+}
+
+// ---------- verdicts on the facts the page gives ----------
+
+export interface ScreenFacts {
+  overview: boolean;
+  tree: boolean;
+  order: boolean;
+  file: boolean;
+  /** #app's data-screen and data-tab. */
+  screen: string | null;
+  tab: string | null;
+}
+
+/** On a phone exactly one screen is shown, and #app says which. */
+export function treeVisibleVerdict(f: ScreenFacts): Verdict {
+  const shown = (["overview", "tree", "order", "file"] as const).filter((name) => f[name]);
+  const ok = shown.length === 1 && shown[0] === "tree" && f.screen === "tree" && f.tab === "tree";
+  return ok
+    ? pass("only the tree screen is shown")
+    : fail(`shown: ${shown.join(", ") || "none"}; data-screen=${f.screen}, data-tab=${f.tab}`);
+}
+
+export interface EdgeFacts {
+  left: number;
+  right: number;
+  innerWidth: number;
+  /** Rows that run outside the window. */
+  outside: number;
+}
+
+const ONE_PIXEL = 1;
+
+export function edgeVerdict(f: EdgeFacts): Verdict {
+  const ok =
+    Math.abs(f.left) <= ONE_PIXEL &&
+    Math.abs(f.right - f.innerWidth) <= ONE_PIXEL &&
+    f.outside === 0;
+  const span = `the list runs from ${Math.round(f.left)} to ${Math.round(f.right)} in a ${f.innerWidth}px window`;
+  return ok
+    ? pass(span)
+    : fail(f.outside > 0 ? `${span}; ${plural(f.outside, "row", "rows")} outside it` : span);
+}
+
+export interface RowsFacts {
+  dirs: number;
+  files: number;
+  /** Folders without a file count, files without a badge or a tick, by name. */
+  noCount: string[];
+  noBadge: string[];
+  /** Folder rows that stand for a chain of folders. */
+  compacted: number;
+}
+
+export function rowsVerdict(f: RowsFacts): Verdict {
+  if (f.dirs + f.files === 0) return fail("the tree has no rows");
+  const problems = [
+    ...(f.noCount.length > 0 ? [`no file count on ${f.noCount.slice(0, LISTED).join(", ")}`] : []),
+    ...(f.noBadge.length > 0
+      ? [`no badge or tick on ${f.noBadge.slice(0, LISTED).join(", ")}`]
+      : []),
+  ];
+  return problems.length > 0
+    ? fail(problems.join("; "))
+    : pass(
+        `${plural(f.dirs, "folder", "folders")}, ${plural(f.files, "file", "files")}, ${f.compacted} compacted`,
+      );
+}
+
+/** Collapse keeps only files that sit at the root; expand shows every changed file. */
+export function expandVerdict(
+  collapsed: number,
+  expanded: number,
+  rootFiles: number,
+  changed: number,
+): Verdict {
+  const ok = collapsed === rootFiles && expanded === changed;
+  return ok
+    ? pass(`collapse left ${collapsed} root file rows, expand shows all ${changed} files`)
+    : fail(
+        `after collapse ${collapsed} file rows (${rootFiles} expected), after expand ${expanded} (${changed} expected)`,
+      );
+}
+
+export interface FileFacts {
+  screen: string | null;
+  tab: string | null;
+  fileShown: boolean;
+  treeShown: boolean;
+  /** Diff rows in #file-code. */
+  rows: number;
+  /** The first note in #file-code that is not "Loading", or "". */
+  status: string;
+  fname: string | null;
+  pos: string | null;
+}
+
+/** A file opened from the tree on a phone: the file screen alone, its content or a note, its name. */
+export function openFileVerdict(f: FileFacts, expectedName: string): Verdict {
+  const notLoaded = /did not load/iu.test(f.status);
+  const content = f.rows > 0 || (f.status !== "" && !notLoaded);
+  const problems = [
+    ...(f.fileShown && !f.treeShown ? [] : ["the file screen is not alone on screen"]),
+    ...(f.screen === "file" && f.tab === "tree"
+      ? []
+      : [`data-screen=${f.screen}, data-tab=${f.tab}`]),
+    ...(content ? [] : [f.status === "" ? "no diff rows and no note" : f.status]),
+    ...(f.fname === expectedName ? [] : [`the file bar names ${f.fname}, not ${expectedName}`]),
+  ];
+  return problems.length === 0
+    ? pass(`${expectedName}: ${f.rows > 0 ? plural(f.rows, "row", "rows") : f.status}`)
+    : fail(problems.join("; "));
+}
+
+export interface Leave {
+  y: number;
+  open: string[];
+}
+
+const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((x) => b.includes(x));
+
+const SCROLL_SLACK = 2;
+
+/** Back returns to the tree with the same open folders and the scroll where it was. */
+export function backVerdict(
+  left: Leave,
+  after: { y: number; open: string[]; treeShown: boolean; screen: string | null },
+): Verdict {
+  const problems = [
+    ...(after.treeShown && after.screen === "tree" ? [] : ["the tree is not on screen"]),
+    ...(sameSet(left.open, after.open)
+      ? []
+      : [`open folders changed from ${left.open.length} to ${after.open.length}`]),
+    ...(Math.abs(after.y - left.y) <= SCROLL_SLACK
+      ? []
+      : [`scroll is ${Math.round(after.y)}px, was ${Math.round(left.y)}px`]),
+  ];
+  if (problems.length > 0) return fail(problems.join("; "));
+  const scrolled =
+    left.y > 0 ? `scroll ${Math.round(left.y)}px restored` : "the page did not scroll (too short)";
+  return pass(`${plural(left.open.length, "folder", "folders")} open, ${scrolled}`);
+}
+
+/** The browser's back returns to the tree with the same open folders. */
+export function historyVerdict(
+  before: readonly string[],
+  after: { open: string[]; treeShown: boolean },
+): Verdict {
+  if (!after.treeShown) return fail("the tree is not on screen");
+  return sameSet(before, after.open)
+    ? pass(`${plural(before.length, "folder", "folders")} still open`)
+    : fail(`open folders changed from ${before.length} to ${after.open.length}`);
+}
+
+/** Next shows the next file in tree order, Previous the first again. */
+export function navVerdict(
+  first: string,
+  second: string,
+  afterNext: string | null,
+  afterPrev: string | null,
+): Verdict {
+  const ok = afterNext === second && afterPrev === first;
+  return ok
+    ? pass(`${first}, next ${second}, back to ${first}`)
+    : fail(
+        `expected ${second} after Next and ${first} after Previous, got ${afterNext} and ${afterPrev}`,
+      );
+}
+
+export interface TickFacts {
+  before: number;
+  ticked: { checked: string | null; n: number };
+  reloaded: { checked: string | null; n: number };
+}
+
+export function tickVerdict(f: TickFacts): Verdict {
+  const problems = [
+    ...(f.ticked.checked === "true" ? [] : [`aria-checked is ${f.ticked.checked} after the tap`]),
+    ...(f.ticked.n === f.before + 1 ? [] : [`the count went from ${f.before} to ${f.ticked.n}`]),
+    ...(f.reloaded.checked === "true" && f.reloaded.n === f.before + 1
+      ? []
+      : [`after a reload aria-checked is ${f.reloaded.checked} and the count ${f.reloaded.n}`]),
+  ];
+  return problems.length === 0
+    ? pass(`ticked, ${f.ticked.n} reviewed, still ticked after a reload`)
+    : fail(problems.join("; "));
+}
+
+export interface ComposerFacts {
+  shown: boolean;
+  inside: boolean;
+  rows: number;
+}
+
+export function composerVerdict(f: ComposerFacts): Verdict {
+  if (!f.shown) return fail("the comment box did not open");
+  return f.inside
+    ? pass("the comment box opened inside the code")
+    : fail("the comment box is not inside the code");
+}
+
+export interface BoxFacts {
+  boxScrolls: boolean;
+  overflowX: string;
+  scrollLeft: number;
+  pageScrollWidth: number;
+  innerWidth: number;
+}
+
+/** The page stays still while a wide code box scrolls by itself. */
+export function sidewaysVerdict(f: BoxFacts): Verdict {
+  if (f.pageScrollWidth > f.innerWidth) {
+    return fail(`the page is ${f.pageScrollWidth}px wide in a ${f.innerWidth}px window`);
+  }
+  if (!f.boxScrolls) return pass("the code fits its box and the page does not scroll sideways");
+  if (f.overflowX !== "auto" && f.overflowX !== "scroll") {
+    return fail(`the code is wider than its box and overflow-x is ${f.overflowX}`);
+  }
+  return f.scrollLeft > 0
+    ? pass(`the code box scrolls by itself (${Math.round(f.scrollLeft)}px), the page does not`)
+    : fail("the code is wider than its box but the box did not scroll");
+}
+
+/** The file list opens, narrows to the matches, and closes. */
+export function findVerdict(
+  review: ReviewInfo,
+  word: string,
+  f: { opened: boolean; fis: readonly number[]; closedHidden: boolean },
+): Verdict {
+  if (!f.opened) return fail("the file list did not open");
+  const found = searchVerdict(review, word, f.fis);
+  if (!found.ok) return found;
+  return f.closedHidden
+    ? pass(`${found.detail}; Close hides it`)
+    : fail(`${found.detail}, but Close did not hide the list`);
+}
+
+/** A ruling link opens the file with its lines flagged; with no rulings there is nothing to follow. */
+export function rulingVerdict(
+  f: { expected: number | null; cards: number; links: number },
+  after: { fileShown: boolean; flagged: number } | null,
+): Verdict {
+  if (f.cards === 0 && (f.expected ?? 0) === 0) return pass("no rulings");
+  if (f.cards === 0)
+    return fail(`review.json lists ${f.expected} rulings but the overview shows none`);
+  if (f.links === 0) return pass(`${f.cards} rulings shown, none with a link to follow`);
+  if (after === null) return fail("the first ruling link was not followed");
+  return after.fileShown && after.flagged > 0
+    ? pass(
+        `the first of ${f.links} links opened a file with ${plural(after.flagged, "flagged line", "flagged lines")}`,
+      )
+    : fail(
+        `the first ruling link left the file shown: ${after.fileShown}, flagged lines: ${after.flagged}`,
+      );
+}
+
+export interface SplitFacts {
+  treeShown: boolean;
+  fileShown: boolean;
+  treeRight: number;
+  fileLeft: number;
+  /** Diff rows once a file is opened. */
+  rows: number;
+  treeStillShown: boolean;
+  backShown: boolean;
+}
+
+/** From 700 px the tree is a left pane with the file beside it, and Back is gone. */
+export function splitVerdict(f: SplitFacts): Verdict {
+  const problems = [
+    ...(f.treeShown && f.fileShown ? [] : ["the tree and the file are not both on screen"]),
+    ...(f.treeRight <= f.fileLeft + ONE_PIXEL
+      ? []
+      : [
+          `the tree ends at ${Math.round(f.treeRight)}px, the file starts at ${Math.round(f.fileLeft)}px`,
+        ]),
+    ...(f.rows > 0 ? [] : ["opening a file showed no diff rows"]),
+    ...(f.treeStillShown ? [] : ["the tree went away when a file opened"]),
+    ...(f.backShown ? ["the back button is displayed"] : []),
+  ];
+  return problems.length === 0
+    ? pass(`tree at the left (to ${Math.round(f.treeRight)}px), file beside it, no back button`)
+    : fail(problems.join("; "));
+}
+
+// ---------- the page server ----------
+
+export interface PageServer {
+  origin: string;
+  stop(): void;
+}
+
+const NO_STORE = { "cache-control": "no-store" };
+
+function readText(path: string): string | null {
+  try {
+    return statSync(path).isFile() ? readFileSync(path, "utf8") : null;
+  } catch {
+    return null;
+  }
+}
+
+function readBytes(path: string): Uint8Array | null {
+  try {
+    return statSync(path).isFile() ? readFileSync(path) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Serve `dir` on loopback: /index.html wrapped, /plain.html bare, anything else as the file it names. */
+export function startServer(dir: string): PageServer {
+  const root = resolve(dir);
+  const html = (text: string): Response =>
+    new Response(text, { headers: { "content-type": contentType("x.html"), ...NO_STORE } });
+  const missing = (): Response =>
+    new Response("not found", {
+      status: 404,
+      headers: { "content-type": "text/plain", ...NO_STORE },
+    });
+  const handler = (req: ServeRequest): Response => {
+    const pathname = new URL(req.url).pathname;
+    if (pathname === "/favicon.ico") return new Response(null, { status: 204 });
+    const wrapped = pathname === "/" || pathname === "/index.html";
+    if (wrapped || pathname === PLAIN_URL) {
+      const text = readText(join(root, "index.html"));
+      if (text === null) return missing();
+      return html(wrapped ? wrapSkeleton(text) : text);
+    }
+    const file = servedPath(root, pathname);
+    const bytes = file === null ? null : readBytes(file);
+    if (file === null || bytes === null) return missing();
+    return new Response(bytes, { headers: { "content-type": contentType(file), ...NO_STORE } });
+  };
+  // Bun.serve's declared options have no hostname, so the options are built first.
+  const options = { hostname: "127.0.0.1", port: 0, fetch: handler };
+  const server = Bun.serve(options);
+  return { origin: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
+}
+
+// ---------- the helpers that run inside the page ----------
+
+/** Names of the functions on window.__gate; the calls below are checked against this list. */
+export const GATE_FUNCTIONS = [
+  "screens",
+  "header",
+  "audit",
+  "fonts",
+  "edges",
+  "rows",
+  "tree",
+  "collapsed",
+  "fileFacts",
+  "fileReady",
+  "box",
+  "composer",
+  "progress",
+  "tick",
+  "unticked",
+  "find",
+  "rulings",
+  "flagged",
+  "arm",
+  "left",
+  "scrollTo",
+  "visibleFile",
+  "panes",
+] as const;
+
+type GateFunction = (typeof GATE_FUNCTIONS)[number];
+
+/**
+ * Plain JavaScript, injected into every page before its own scripts run. Each function gathers
+ * facts about the page and decides nothing; the verdicts are made above, where they are tested.
+ * No backticks and no dollar-brace here: the text sits in a template literal.
+ */
+export const KIT = String.raw`
+window.__gate = (() => {
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const all = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const shown = (e) => {
+    if (!e) return false;
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
+  };
+  const label = (e) => e.tagName.toLowerCase()
+    + (e.id ? "#" + e.id : "")
+    + (typeof e.className === "string" && e.className.trim() ? "." + e.className.trim().split(/\s+/).join(".") : "");
+  const text = (sel) => { const e = $(sel); return e ? e.textContent.trim() : null; };
+  const attr = (sel, name) => { const e = $(sel); return e ? e.getAttribute(name) : null; };
+  const count = (sel, root) => all(sel, root).length;
+  const number = (sel) => Number((text(sel) || "").replace(/\D/g, "")) || 0;
+  const rowName = (li) => { const n = $(".tname", li); return n ? n.textContent.trim() : label(li); };
+  const openIds = () => all('#tree li.trow.dir[aria-expanded="true"]').map((li) => li.dataset.id);
+  const TARGETS = "button, a[href], input, select, summary, textarea, [role=checkbox], [role=tab]";
+
+  const screens = () => ({
+    overview: shown($("#screen-overview")), tree: shown($("#screen-tree")),
+    order: shown($("#screen-order")), file: shown($("#screen-file")),
+    screen: attr("#app", "data-screen"), tab: attr("#app", "data-tab"),
+  });
+  const header = () => ({ tabs: shown($("#hdr-tabs")), file: shown($("#hdr-file")), back: shown($("#back")) });
+
+  const audit = (rootSel) => {
+    const root = rootSel ? $(rootSel) : document.body;
+    const docHeight = Math.max(document.documentElement.scrollHeight, innerHeight);
+    const offscreen = (r) => r.right <= 0 || r.left >= innerWidth
+      || r.bottom + window.scrollY <= 0 || r.top + window.scrollY >= docHeight;
+    const small = [];
+    const tiny = {};
+    if (root) {
+      for (const e of all(TARGETS, root)) {
+        if (e.closest(".r") || !shown(e)) continue;
+        const r = e.getBoundingClientRect();
+        if (offscreen(r)) continue;
+        if (r.width < 43.5 || r.height < 43.5) {
+          small.push({ el: label(e), w: Math.round(r.width), h: Math.round(r.height),
+            text: (e.textContent || e.getAttribute("aria-label") || "").trim().slice(0, 30) });
+        }
+      }
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const t = walker.currentNode;
+        if (!t.nodeValue.trim()) continue;
+        const e = t.parentElement;
+        if (!e || !shown(e)) continue;
+        const px = parseFloat(getComputedStyle(e).fontSize);
+        if (px < 13) { const k = label(e) + " " + px + "px"; tiny[k] = (tiny[k] || 0) + 1; }
+      }
+    }
+    const hiddenShown = all("[hidden]")
+      .filter((e) => e.getAttribute("hidden") !== "until-found" && getComputedStyle(e).display !== "none")
+      .map((e) => label(e) + " (" + getComputedStyle(e).display + ")");
+    return { scrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth,
+      innerWidth, small, tiny, hiddenShown };
+  };
+
+  const fonts = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await document.fonts.ready;
+    return Array.from(document.fonts).filter((f) => f.status === "loaded").map((f) => f.family.replace(/["']/g, ""));
+  };
+
+  const edges = () => {
+    const t = $("#tree");
+    const r = t ? t.getBoundingClientRect() : null;
+    const outside = all("#tree .trow").filter((li) => {
+      const b = li.getBoundingClientRect();
+      return b.left < -0.5 || b.right > innerWidth + 0.5;
+    }).length;
+    return { left: r ? r.left : 0, right: r ? r.right : 0, innerWidth, outside };
+  };
+
+  const rows = () => {
+    const lis = all("#tree .trow");
+    const dirs = lis.filter((li) => li.classList.contains("dir"));
+    const files = lis.filter((li) => li.classList.contains("file"));
+    return {
+      dirs: dirs.length, files: files.length,
+      noCount: dirs.filter((li) => !/\d+ files?/.test((($(".tmeta", li) || {}).textContent) || "")).map(rowName),
+      noBadge: files.filter((li) => !$(".badge", li) || !$(".tick", li)).map(rowName),
+      compacted: dirs.filter((li) => rowName(li).includes("/")).length,
+    };
+  };
+
+  const tree = () => ({
+    rows: count("#tree .trow"), dirs: count("#tree li.trow.dir"), open: openIds(),
+    files: all("#tree li.trow.file").map((li) => ({ fi: Number(li.dataset.fi), name: rowName(li) })),
+  });
+  const collapsed = () => all('#tree li.trow.dir[aria-expanded="false"]').map((li) => ({
+    id: li.dataset.id,
+    files: Number((/([\d,]+) files?/.exec((($(".tmeta", li) || {}).textContent) || "") || [0, "0"])[1].replace(/,/g, "")),
+  }));
+
+  const fileFacts = () => {
+    const code = $("#file-code");
+    const notes = code ? all(".status", code).map((e) => e.textContent.trim()) : [];
+    return {
+      screen: attr("#app", "data-screen"), tab: attr("#app", "data-tab"),
+      fileShown: shown($("#screen-file")), treeShown: shown($("#screen-tree")),
+      rows: code ? count(".r", code) : 0, status: notes.find((t) => !/^loading/i.test(t)) || "",
+      fname: text("#fname"), pos: text("#pos"),
+    };
+  };
+  const fileReady = () => { const f = fileFacts(); return f.fileShown && (f.rows > 0 || f.status !== ""); };
+
+  const box = (left) => {
+    const c = $("#file-code");
+    const page = document.documentElement.scrollWidth;
+    if (!c) return { boxScrolls: false, overflowX: "", scrollLeft: 0, pageScrollWidth: page, innerWidth };
+    const boxScrolls = c.scrollWidth > c.clientWidth;
+    if (boxScrolls && typeof left === "number") {
+      const was = c.style.scrollBehavior;
+      c.style.scrollBehavior = "auto";
+      c.scrollLeft = left;
+      c.style.scrollBehavior = was;
+    }
+    return { boxScrolls, overflowX: getComputedStyle(c).overflowX, scrollLeft: c.scrollLeft,
+      pageScrollWidth: document.documentElement.scrollWidth, innerWidth };
+  };
+
+  const composer = () => {
+    const c = $("#composer");
+    const code = $("#file-code");
+    return { shown: shown(c), inside: !!(c && code && code.contains(c)), rows: code ? count(".r", code) : 0 };
+  };
+  const progress = () => ({ n: number("#prog-n"), t: number("#prog-t") });
+  const tick = (fi) => attr('#tree li.trow.file[data-fi="' + fi + '"] .tick', "aria-checked");
+  const unticked = () => {
+    const b = $('#tree li.trow.file .tick[aria-checked="false"]');
+    return b ? Number(b.dataset.fi) : -1;
+  };
+
+  const find = () => {
+    const list = all("#find-list .orow");
+    const fiOf = (row) => {
+      const own = row.getAttribute("data-fi");
+      const inner = $(".tick[data-fi]", row);
+      const v = own !== null ? own : inner ? inner.getAttribute("data-fi") : null;
+      return v === null ? -1 : Number(v);
+    };
+    return { opened: shown($("#find")), fis: list.filter(shown).map(fiOf), total: list.length };
+  };
+  const rulings = () => ({ cards: count("#ov-rulings .ruling"), links: count("#ov-rulings .lnk") });
+  const flagged = () => count("#file-code .r.flag");
+
+  const arm = () => {
+    window.__left = null;
+    document.addEventListener("click", () => { window.__left = { y: window.scrollY, open: openIds() }; },
+      { capture: true, once: true });
+    return true;
+  };
+  const left = () => window.__left || null;
+  const scrollTo = (y) => {
+    const root = document.documentElement;
+    const was = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    window.scrollTo(0, y);
+    root.style.scrollBehavior = was;
+    return { y: window.scrollY, max: Math.max(0, root.scrollHeight - innerHeight) };
+  };
+  const visibleFile = () => {
+    const h = $("#hdr");
+    const top = h ? h.getBoundingClientRect().bottom : 0;
+    const li = all("#tree li.trow.file").find((e) => {
+      const r = e.getBoundingClientRect();
+      return r.top >= top && r.bottom <= innerHeight;
+    });
+    return li ? Number(li.dataset.fi) : -1;
+  };
+  const panes = () => {
+    const t = $("#screen-tree");
+    const f = $("#screen-file");
+    return { treeShown: shown(t), fileShown: shown(f), treeRight: t ? t.getBoundingClientRect().right : 0,
+      fileLeft: f ? f.getBoundingClientRect().left : 0, backShown: shown($("#back")) };
+  };
+
+  return { screens, header, audit, fonts, edges, rows, tree, collapsed, fileFacts, fileReady, box, composer,
+    progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes };
+})();
+`;
+
+// ---------- driving the page ----------
+
+interface Ctx {
+  page: PwPage;
+  run: Run;
+  review: ReviewInfo;
+  /** The page server's origin, for the data files the page itself fetches. */
+  origin: string;
+  out: string;
+  steps: ReadonlySet<string>;
+  audits: ScreenAudit[];
+  failed: string[];
+}
+
+interface TreeFacts {
+  rows: number;
+  dirs: number;
+  open: string[];
+  files: { fi: number; name: string }[];
+}
+
+const ACTION_TIMEOUT_MS = 10_000;
+const NAVIGATION_TIMEOUT_MS = 45_000;
+const READY_TIMEOUT_MS = 30_000;
+const WAIT_MS = 10_000;
+const POLL_MS = 50;
+/** How many files from the top of the tree are tried when a check needs a file with enough lines. */
+const FILES_TRIED = 12;
+const SCROLL_TARGET = 300;
+/**
+ * The page's Back handler shows the list itself if the history step has not done so within 400 ms,
+ * and a file opened inside that window is closed again. A person cannot tap that fast; the gate
+ * can, so it waits the window out after every press of Back.
+ */
+const BACK_SETTLE_MS = 450;
+
+/** Call window.__gate.<fn>(...args) in the page. */
+function gate<T>(page: PwPage, fn: GateFunction, ...args: readonly unknown[]): Promise<T> {
+  const call = `window.__gate.${fn}(${args.map((a) => JSON.stringify(a)).join(",")})`;
+  return page.evaluate(call) as Promise<T>;
+}
+
+async function until(
+  page: PwPage,
+  expression: string,
+  what: string,
+  timeout = WAIT_MS,
+): Promise<void> {
+  try {
+    await page.waitForFunction(expression, undefined, { timeout, polling: POLL_MS });
+  } catch {
+    throw new Error(`timed out waiting for ${what}`);
+  }
+}
+
+/** Wait, and carry on if it never happens: the verdict reports what the page shows. */
+async function tryUntil(page: PwPage, expression: string, timeout = WAIT_MS): Promise<void> {
+  try {
+    await page.waitForFunction(expression, undefined, { timeout, polling: POLL_MS });
+  } catch {
+    // the verdict that follows reads the page as it is
+  }
+}
+
+async function tap(page: PwPage, selector: string): Promise<void> {
+  try {
+    await page.click(selector);
+  } catch (e) {
+    throw new Error(`click ${selector}: ${failure(e)}`);
+  }
+}
+
+async function typeInto(page: PwPage, selector: string, value: string): Promise<void> {
+  try {
+    await page.fill(selector, value);
+  } catch (e) {
+    throw new Error(`fill ${selector}: ${failure(e)}`);
+  }
+}
+
+async function attempt(id: string, fn: () => Promise<Verdict>): Promise<Check> {
+  try {
+    return { id, ...(await fn()) };
+  } catch (e) {
+    return { id, ...fail(failure(e)) };
+  }
+}
+
+const waitFileReady = (page: PwPage): Promise<void> =>
+  until(page, "window.__gate.fileReady()", "the file to load");
+
+const rowSelector = (fi: number): string => `#tree li.trow.file[data-fi="${fi}"] button.tgo`;
+
+const stamp = (page: PwPage, scheme: string): Promise<unknown> =>
+  page.evaluate(`document.documentElement.setAttribute("data-theme", ${JSON.stringify(scheme)})`);
+
+/** The page is ready once its tree has rows. */
+async function whenReady(page: PwPage, scheme: string): Promise<void> {
+  await stamp(page, scheme);
+  await until(
+    page,
+    'document.querySelectorAll("#tree .trow").length > 0',
+    "the page to build its tree",
+    READY_TIMEOUT_MS,
+  );
+}
+
+async function shot(ctx: Ctx, step: string): Promise<void> {
+  if (ctx.steps.has(step))
+    await ctx.page.screenshot({ path: shotPath(ctx.out, ctx.run.name, step) });
+}
+
+async function audit(ctx: Ctx, screen: string, root = ""): Promise<void> {
+  const facts = await gate<Omit<ScreenAudit, "screen">>(ctx.page, "audit", root);
+  ctx.audits.push({ screen, ...facts });
+}
+
+type Tab = "overview" | "tree" | "order";
+
+/** Show a tab's screen; the file list is closed first, and on a phone with a file open, Back is pressed, so the tabs are there. */
+async function gotoTab(page: PwPage, tab: Tab): Promise<void> {
+  if ((await gate<{ opened: boolean }>(page, "find")).opened) await tap(page, "#find-close");
+  const head = await gate<{ tabs: boolean; back: boolean }>(page, "header");
+  if (!head.tabs && head.back) {
+    await tap(page, "#back");
+    await until(page, "window.__gate.header().tabs", "the tabs to return after Back");
+    await Bun.sleep(BACK_SETTLE_MS);
+  }
+  await tap(page, `#tab-${tab}`);
+  await until(page, `window.__gate.screens().${tab}`, `the ${tab} screen`);
+}
+
+/** Open files from the top of the tree until one has at least `min` diff lines; its index, or null. */
+async function openFileWithRows(ctx: Ctx, min: number): Promise<number | null> {
+  const { page } = ctx;
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const { files } = await gate<TreeFacts>(page, "tree");
+  for (const file of files.slice(0, FILES_TRIED)) {
+    await tap(page, rowSelector(file.fi));
+    await waitFileReady(page);
+    if ((await gate<FileFacts>(page, "fileFacts")).rows >= min) return file.fi;
+    await gotoTab(page, "tree");
+  }
+  return null;
+}
+
+async function visit(ctx: Ctx, tab: Tab): Promise<Check[]> {
+  try {
+    await gotoTab(ctx.page, tab);
+    if (tab === "order") {
+      await until(
+        ctx.page,
+        'document.querySelectorAll("#order-list .orow").length > 0',
+        "the order rows",
+      );
+    }
+    await audit(ctx, tab);
+    await shot(ctx, tab);
+    return [];
+  } catch (e) {
+    return [{ id: `screen-${tab}`, ...fail(failure(e)) }];
+  }
+}
+
+async function visitFile(ctx: Ctx): Promise<Check[]> {
+  try {
+    if ((await openFileWithRows(ctx, 1)) === null)
+      throw new Error("no file in the tree opened with a diff");
+    await audit(ctx, "file");
+    await shot(ctx, "file");
+    return [];
+  } catch (e) {
+    return [{ id: "screen-file", ...fail(failure(e)) }];
+  }
+}
+
+// ---------- the checks ----------
+
+type PhoneCheck = (ctx: Ctx) => Promise<Verdict>;
+
+const treeOf = (page: PwPage): Promise<TreeFacts> => gate<TreeFacts>(page, "tree");
+
+async function checkTreeVisible({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  return treeVisibleVerdict(await gate<ScreenFacts>(page, "screens"));
+}
+
+async function checkEdges({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  return edgeVerdict(await gate<EdgeFacts>(page, "edges"));
+}
+
+async function checkRows({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  return rowsVerdict(await gate<RowsFacts>(page, "rows"));
+}
+
+async function checkSearch(ctx: Ctx): Promise<Verdict> {
+  const { page, review } = ctx;
+  const word = pickSearchWord(review);
+  if (word === null) return fail("review.json lists no file to search for");
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const before = (await treeOf(page)).rows;
+  await typeInto(page, "#tree-q", word);
+  const shownFiles = (await treeOf(page)).files.map((f) => f.fi);
+  await shot(ctx, "tree-search");
+  await typeInto(page, "#tree-q", "");
+  const after = (await treeOf(page)).rows;
+  return treeSearchVerdict(review, word, shownFiles, before, after);
+}
+
+async function checkExpandCollapse({ page, review }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-collapse");
+  const collapsed = (await treeOf(page)).files.length;
+  await tap(page, "#tree-expand");
+  const expanded = (await treeOf(page)).files.length;
+  const rootFiles = review.files.filter((f) => !f.path.includes("/")).length;
+  return expandVerdict(collapsed, expanded, rootFiles, review.changedFiles);
+}
+
+async function checkOpenFile({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const first = (await treeOf(page)).files[0];
+  if (first === undefined) return fail("the tree has no file row");
+  await tap(page, rowSelector(first.fi));
+  await waitFileReady(page);
+  return openFileVerdict(await gate<FileFacts>(page, "fileFacts"), first.name);
+}
+
+/** Collapse everything, then open the largest folders on screen until two are open and the page can scroll. */
+async function openFolders(page: PwPage): Promise<number> {
+  await tap(page, "#tree-collapse");
+  let opened = 0;
+  for (let step = 0; step < FILES_TRIED; step++) {
+    const scroll = await gate<{ max: number }>(page, "scrollTo", 0);
+    const shownFiles = (await treeOf(page)).files.length;
+    if (opened >= 2 && scroll.max >= SCROLL_TARGET && shownFiles > 0) break;
+    const dirs = await gate<{ id: string; files: number }[]>(page, "collapsed");
+    const biggest = [...dirs].sort((a, b) => b.files - a.files)[0];
+    if (biggest === undefined) break;
+    await tap(page, `#tree li.trow.dir[data-id=${JSON.stringify(biggest.id)}] button.tgo`);
+    opened++;
+  }
+  return opened;
+}
+
+async function checkBack({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  await openFolders(page);
+  await gate(page, "scrollTo", SCROLL_TARGET);
+  const onScreen = await gate<number>(page, "visibleFile");
+  const target = onScreen >= 0 ? onScreen : (await treeOf(page)).files[0]?.fi;
+  if (target === undefined) return fail("no file row to open after opening folders");
+  await gate(page, "arm");
+  await tap(page, rowSelector(target));
+  await waitFileReady(page);
+  const left = await gate<Leave | null>(page, "left");
+  if (left === null) throw new Error("the tap on the file row was not seen");
+  await tap(page, "#back");
+  await until(page, "window.__gate.screens().tree", "the tree after Back");
+  await tryUntil(page, `Math.abs(window.scrollY - ${left.y}) <= ${SCROLL_SLACK}`, 3000);
+  await Bun.sleep(BACK_SETTLE_MS);
+  const tree = await treeOf(page);
+  const facts = await gate<ScreenFacts>(page, "screens");
+  const y = (await page.evaluate("window.scrollY")) as number;
+  return backVerdict(left, { y, open: tree.open, treeShown: facts.tree, screen: facts.screen });
+}
+
+async function checkHistory({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  const before = (await treeOf(page)).open;
+  const onScreen = await gate<number>(page, "visibleFile");
+  const target = onScreen >= 0 ? onScreen : (await treeOf(page)).files[0]?.fi;
+  if (target === undefined) return fail("the tree has no file row");
+  await tap(page, rowSelector(target));
+  await waitFileReady(page);
+  await page.goBack({ waitUntil: "load", timeout: WAIT_MS });
+  await tryUntil(page, "window.__gate.screens().tree", 5000);
+  const facts = await gate<ScreenFacts>(page, "screens");
+  return historyVerdict(before, { open: (await treeOf(page)).open, treeShown: facts.tree });
+}
+
+async function checkPrevNext({ page }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const { files } = await treeOf(page);
+  const k = firstDistinctPair(files.map((f) => f.name));
+  const first = files[k];
+  const second = files[k + 1];
+  if (first === undefined || second === undefined)
+    return pass("fewer than two differently named files, nothing to step between");
+  await tap(page, rowSelector(first.fi));
+  await waitFileReady(page);
+  const named = (name: string): string =>
+    `window.__gate.fileFacts().fname === ${JSON.stringify(name)}`;
+  await tap(page, "#next");
+  await tryUntil(page, named(second.name));
+  const afterNext = (await gate<FileFacts>(page, "fileFacts")).fname;
+  await tap(page, "#prev");
+  await tryUntil(page, named(first.name));
+  const afterPrev = (await gate<FileFacts>(page, "fileFacts")).fname;
+  return navVerdict(first.name, second.name, afterNext, afterPrev);
+}
+
+async function reload(ctx: Ctx): Promise<void> {
+  await ctx.page.reload({ waitUntil: "load", timeout: NAVIGATION_TIMEOUT_MS });
+  await whenReady(ctx.page, ctx.run.scheme);
+}
+
+async function checkTick(ctx: Ctx): Promise<Verdict> {
+  const { page } = ctx;
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const fi = await gate<number>(page, "unticked");
+  if (fi < 0) return fail("every file is already ticked, so there is nothing to tick");
+  const before = (await gate<{ n: number }>(page, "progress")).n;
+  await tap(page, `#tree li.trow.file[data-fi="${fi}"] .tick`);
+  const ticked = {
+    checked: await gate<string | null>(page, "tick", fi),
+    n: (await gate<{ n: number }>(page, "progress")).n,
+  };
+  await reload(ctx);
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  const reloaded = {
+    checked: await gate<string | null>(page, "tick", fi),
+    n: (await gate<{ n: number }>(page, "progress")).n,
+  };
+  return tickVerdict({ before, ticked, reloaded });
+}
+
+async function checkComposer(ctx: Ctx): Promise<Verdict> {
+  const { page } = ctx;
+  if ((await openFileWithRows(ctx, 5)) === null)
+    return fail("no file in the tree has five lines to tap");
+  await page.locator("#file-code .r").nth(4).click();
+  await until(page, "window.__gate.composer().shown", "the comment box");
+  const facts = await gate<ComposerFacts>(page, "composer");
+  await shot(ctx, "composer");
+  await audit(ctx, "composer", "#composer");
+  return composerVerdict(facts);
+}
+
+/** The file with the longest code line, from the diff chunks the page itself loads; null when they cannot be read. */
+async function widestOfChunks({ origin, review }: Ctx): Promise<number | null> {
+  const chunks = new Set(review.files.flatMap((f) => (typeof f["chunk"] === "number" ? [f["chunk"]] : [])));
+  const loaded = await Promise.all(
+    [...chunks].map(async (k): Promise<DiffItem[]> => {
+      try {
+        const res = await fetch(`${origin}/chunks/${k}.json`);
+        const items = res.ok ? await res.json() : [];
+        return Array.isArray(items) ? items.filter(isDiffItem) : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
+  return widestFile(loaded.flat());
+}
+
+/** The code box of the file with the longest line, so that a box wider than its screen is really tried. */
+async function checkSideways(ctx: Ctx): Promise<Verdict> {
+  const { page, review } = ctx;
+  const widest = await widestOfChunks(ctx);
+  if (widest !== null) {
+    await gotoTab(page, "tree");
+    await tap(page, "#tree-expand");
+    await tap(page, rowSelector(widest));
+    await waitFileReady(page);
+  }
+  const verdict = sidewaysVerdict(await gate<BoxFacts>(page, "box", 200));
+  const name = widest === null ? undefined : review.files[widest]?.path;
+  return name === undefined ? verdict : { ...verdict, detail: `${name}: ${verdict.detail}` };
+}
+
+async function checkFind(ctx: Ctx): Promise<Verdict> {
+  const { page, review } = ctx;
+  const word = pickSearchWord(review);
+  if (word === null) return fail("review.json lists no file to search for");
+  await gotoTab(page, "tree");
+  await tap(page, "#prog");
+  await until(page, "window.__gate.find().opened", "the file list");
+  await shot(ctx, "find");
+  await audit(ctx, "find", "#find");
+  await typeInto(page, "#find-q", word);
+  const found = await gate<{ fis: number[] }>(page, "find");
+  await tap(page, "#find-close");
+  await tryUntil(page, "!window.__gate.find().opened", 3000);
+  const closedHidden = !(await gate<{ opened: boolean }>(page, "find")).opened;
+  return findVerdict(review, word, { opened: true, fis: found.fis, closedHidden });
+}
+
+async function checkRulings({ page, review }: Ctx): Promise<Verdict> {
+  await gotoTab(page, "overview");
+  const cards = await gate<{ cards: number; links: number }>(page, "rulings");
+  const facts = { expected: review.rulings, ...cards };
+  if (cards.links === 0) return rulingVerdict(facts, null);
+  await tap(page, "#ov-rulings .lnk");
+  await tryUntil(page, "window.__gate.fileFacts().fileShown && window.__gate.flagged() > 0");
+  const after = {
+    fileShown: (await gate<FileFacts>(page, "fileFacts")).fileShown,
+    flagged: await gate<number>(page, "flagged"),
+  };
+  return rulingVerdict(facts, after);
+}
+
+const PHONE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
+  ["tree-visible", checkTreeVisible],
+  ["tree-edge-to-edge", checkEdges],
+  ["tree-rows", checkRows],
+  ["tree-search", checkSearch],
+  ["tree-expand-collapse", checkExpandCollapse],
+  ["open-file", checkOpenFile],
+  ["back-restores", checkBack],
+  ["history-back", checkHistory],
+  ["prev-next", checkPrevNext],
+  ["tick", checkTick],
+  ["comment-box", checkComposer],
+  ["sideways", checkSideways],
+  ["find-sheet", checkFind],
+  ["ruling-links", checkRulings],
+];
+
+async function checkFonts({ page, failed }: Ctx): Promise<Verdict> {
+  return fontsVerdict(await gate<string[]>(page, "fonts"), failed);
+}
+
+/** Wide screens: the tree is a left pane and the file opens beside it. */
+async function checkSplit(ctx: Ctx): Promise<Verdict> {
+  const { page } = ctx;
+  await gotoTab(page, "tree");
+  const before = await gate<{
+    treeShown: boolean;
+    fileShown: boolean;
+    treeRight: number;
+    fileLeft: number;
+  }>(page, "panes");
+  if ((await openFileWithRows(ctx, 1)) === null)
+    throw new Error("no file in the tree opened with a diff");
+  const after = await gate<{ treeShown: boolean; backShown: boolean }>(page, "panes");
+  const { rows } = await gate<FileFacts>(page, "fileFacts");
+  await shot(ctx, "tree-with-file");
+  await audit(ctx, "file");
+  return splitVerdict({
+    treeShown: before.treeShown,
+    fileShown: before.fileShown,
+    treeRight: before.treeRight,
+    fileLeft: before.fileLeft,
+    rows,
+    treeStillShown: after.treeShown,
+    backShown: after.backShown,
+  });
+}
+
+/** Every check of a run, by kind of run; the audits of the screens it visited are added by the caller. */
+async function runChecks(ctx: Ctx): Promise<Check[]> {
+  const phone = ctx.run.width < WIDE_FROM;
+  const plain = isPlain(ctx.run);
+  const walk = [
+    ...(await visit(ctx, "overview")),
+    ...(await visit(ctx, "tree")),
+    ...(await visit(ctx, "order")),
+    ...(phone ? await visitFile(ctx) : []),
+  ];
+  const split = phone ? [] : [await attempt("split", () => checkSplit(ctx))];
+  const fonts = plain ? [] : [await attempt("fonts", () => checkFonts(ctx))];
+  const driven: Check[] = [];
+  if (phone && !plain) {
+    for (const [id, check] of PHONE_CHECKS) driven.push(await attempt(id, () => check(ctx)));
+  }
+  return [...walk, ...split, ...fonts, ...driven];
+}
+
+function watch(page: PwPage, errors: string[], failed: string[]): void {
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    // A resource that failed to load is also in `failed`; for the hosts that may fail it is no error here.
+    if (
+      message.text().startsWith("Failed to load resource") &&
+      isAllowedHost(message.location().url)
+    )
+      return;
+    errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("requestfailed", (request) =>
+    failed.push(`${request.url()} ${request.failure()?.errorText ?? "failed"}`),
+  );
+  page.on("response", (response) => {
+    if (response.status() >= 400) failed.push(`${response.url()} ${response.status()}`);
+  });
+}
+
+async function runOne(
+  browser: PwBrowser,
+  run: Run,
+  review: ReviewInfo,
+  origin: string,
+  out: string,
+): Promise<RunReport> {
+  const errors: string[] = [];
+  const failed: string[] = [];
+  let context: PwContext | undefined;
+  let checks: Check[];
+  try {
+    context = await browser.newContext(contextOptions(run));
+    context.setDefaultTimeout(ACTION_TIMEOUT_MS);
+    await context.addInitScript(KIT);
+    const page = await context.newPage();
+    watch(page, errors, failed);
+    const ctx: Ctx = {
+      page,
+      run,
+      review,
+      origin,
+      out,
+      steps: screenshotSteps(run),
+      audits: [],
+      failed,
+    };
+    const ready = await attempt("ready", async () => {
+      await page.goto(`${origin}${run.url}`, { waitUntil: "load", timeout: NAVIGATION_TIMEOUT_MS });
+      await whenReady(page, run.scheme);
+      return pass("the tree was built");
+    });
+    if (ready.ok) {
+      const driven = await runChecks(ctx);
+      checks = [...auditChecks(ctx.audits, isPlain(run)), ...driven];
+    } else {
+      checks = [ready];
+    }
+  } catch (e) {
+    // A browser that died mid-run: the run reports it and the next run gets its own context.
+    checks = [{ id: "run", ...fail(failure(e)) }];
+  } finally {
+    await context?.close().catch(() => undefined);
+  }
+  return { name: run.name, width: run.width, errors, failed, checks };
+}
+
+// ---------- the gate and the command ----------
+
+export interface GateOptions {
+  /** The built page folder. */
+  dir: string;
+  /** Where the screenshots and report.json go. */
+  out: string;
+  quick: boolean;
+  playwright: Playwright;
+  /** A Chromium executable, or undefined for Playwright's own default. */
+  executablePath: string | undefined;
+  review: ReviewInfo;
+}
+
+/** Serve the page, run the matrix in a real Chromium, write report.json, and return the report. */
+export async function runGate(options: GateOptions): Promise<GateReport> {
+  mkdirSync(options.out, { recursive: true });
+  const server = startServer(options.dir);
+  let browser: PwBrowser | undefined;
+  try {
+    try {
+      browser = await options.playwright.chromium.launch({
+        headless: true,
+        ...(options.executablePath === undefined ? {} : { executablePath: options.executablePath }),
+      });
+    } catch (e) {
+      throw new BrowserUnavailable(failure(e));
+    }
+    const runs: RunReport[] = [];
+    for (const run of matrix(options.quick)) {
+      runs.push(await runOne(browser, run, options.review, server.origin, options.out));
+    }
+    const report: GateReport = { runs };
+    writeFileSync(join(options.out, "report.json"), JSON.stringify(report, null, 2));
+    return report;
+  } finally {
+    await browser?.close().catch(() => undefined);
+    server.stop();
+  }
+}
+
+export interface Deps {
+  env: Env;
+  loadPlaywright(env: Env): Promise<Playwright | null>;
+  chromiumPath(env: Env): string | undefined;
+  tempDir(): string;
+  gate(options: GateOptions): Promise<GateReport>;
+}
+
+const realDeps = (): Deps => ({
+  env: process.env,
+  loadPlaywright,
+  chromiumPath,
+  tempDir: () => mkdtempSync(join(tmpdir(), "review-page-gate-")),
+  gate: runGate,
+});
+
+function readPage(dir: string): { ok: true; review: ReviewInfo } | { ok: false; error: string } {
+  const index = join(dir, "index.html");
+  const reviewFile = join(dir, "review.json");
+  if (!existsSync(index))
+    return { ok: false, error: `${index} is missing, so this is not a built review page` };
+  if (!existsSync(reviewFile))
+    return { ok: false, error: `${reviewFile} is missing, so this is not a built review page` };
+  return readReview(readFileSync(reviewFile, "utf8"));
+}
+
+/** The whole command with its effects handed in: what to print, and the exit code. */
+export async function cli(
+  args: readonly string[],
+  deps: Deps = realDeps(),
+): Promise<{ code: number; out: string; err: string }> {
+  const parsed = parseArgs(args);
+  if (!parsed.ok) return { code: 1, out: "", err: `review-page-gate: ${parsed.error}\n${USAGE}\n` };
+  const page = readPage(parsed.dir);
+  if (!page.ok) return { code: 1, out: "", err: `review-page-gate: ${page.error}\n` };
+  const playwright = await deps.loadPlaywright(deps.env);
+  if (playwright === null) return { code: 2, out: "", err: `${describeMissing(deps.env)}\n` };
+  const out = parsed.out ?? deps.tempDir();
+  try {
+    const report = await deps.gate({
+      dir: parsed.dir,
+      out,
+      quick: parsed.quick,
+      playwright,
+      executablePath: deps.chromiumPath(deps.env),
+      review: page.review,
+    });
+    return {
+      code: judge(report).ok ? 0 : 1,
+      out: `${shortReport(report)}\nscreenshots and report.json: ${out}\n`,
+      err: "",
+    };
+  } catch (e) {
+    if (e instanceof BrowserUnavailable) {
+      return { code: 2, out: "", err: `${describeMissing(deps.env)}\n${e.message}\n` };
+    }
+    throw e;
+  }
+}
+
+export async function main(args: readonly string[]): Promise<number> {
+  const result = await cli(args);
+  if (result.out !== "") process.stdout.write(result.out);
+  if (result.err !== "") process.stderr.write(result.err);
+  return result.code;
+}
+
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));
