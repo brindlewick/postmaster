@@ -58,7 +58,7 @@ describe("the page assets of this checkout", () => {
   test("no asset holds an em dash or an en dash, a slot marker or a tool path", () => {
     const all = [assets.shell, ...assets.css, ...assets.modules, ...assets.js];
     for (const text of all) {
-      expect(text).not.toMatch(/[–—]/u);
+      expect(text).not.toMatch(/[\u2013\u2014]/u);
       expect(text).not.toContain("@@TITLE@@@@");
       expect(text).not.toMatch(/\/Users\/|\/home\//u);
     }
