@@ -15,6 +15,17 @@ export const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
 export const dirName = (p) => p.slice(0, p.lastIndexOf("/") + 1);
 export const KINDS = { A: "added", M: "modified", D: "deleted", R: "renamed" };
 
+// A path or file name as text with a soft break after each dot, dash, underscore and slash, so a
+// long name wraps at a separator and not in the middle of a word.
+export function softBreaks(text) {
+  const out = document.createDocumentFragment();
+  text.split(/([./_-])/).forEach((part, k) => {
+    if (part) out.append(part);
+    if (k % 2 === 1) out.append(document.createElement("wbr"));
+  });
+  return out;
+}
+
 export function hm(iso) {
   try {
     return new Date(iso).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });

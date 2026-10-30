@@ -2,7 +2,7 @@
 // under a tapped line (kept above the phone keyboard) and the comment threads.
 import {
   $, MINUS, S, baseName, dirName, el,
-  hl, hm, note, num, parseDiff, runs,
+  hl, hm, note, num, parseDiff, runs, softBreaks,
 } from "./01-core.js";
 import { fileKind, item, reviewedFile } from "./02-data.js";
 import { barOffset, openFile, scrollToEl } from "./09-nav.js";
@@ -14,8 +14,12 @@ const SLICE = 400; // rows drawn at a time in a long diff
 export function fileTextNodes(f, fi) {
   const out = [];
   const dir = dirName(f.path);
-  if (dir) out.push(el("span", "fdir", dir));
-  out.push(el("span", "fname", baseName(f.path)));
+  const dirText = el("span", "fdir");
+  dirText.append(softBreaks(dir));
+  const nameText = el("span", "fname");
+  nameText.append(softBreaks(baseName(f.path)));
+  if (dir) out.push(dirText);
+  out.push(nameText);
   if (f.purpose) out.push(el("span", "fpurpose", f.purpose));
   const meta = el("span", "fmeta");
   meta.append(el("span", "plus", `+${num(f.add)}`), el("span", "minus", `${MINUS}${num(f.del)}`), fileKind(f));
