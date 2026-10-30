@@ -2884,8 +2884,8 @@ beforeAll(() => {
     doRun("legs", "form", "one");
     printed(
       "a claude lane's form shows a resume form too",
-      "launch: cd <cwd> && claude -p ",
-      "resume: cd <cwd> && claude -p --resume <thread-id> ",
+      "launch: cd <cwd> && env CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p ",
+      "resume: cd <cwd> && env CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p --resume <thread-id> ",
     );
     doRun("phase-start", "form", "clerk");
     printed(

@@ -89,7 +89,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "leg attempt controls", count: 91 },
   {
     name: "run environment identity, Claude session and lane env file: Herdr, tmux and no host",
-    count: 42,
+    count: 45,
   },
 ];
 
