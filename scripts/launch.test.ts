@@ -2939,11 +2939,11 @@ beforeAll(() => {
     chmodSync(join(tmp, "bin/grok"), 0o755);
     doRun("grok", "form", "g");
     {
-      const formatOf = (prefix: string): string | undefined =>
-        out
-          .split("\n")
-          .find((l) => l.startsWith(prefix))
-          ?.match(/--output-format (\S+)/u)?.[1];
+      const formatOf = (prefix: string): string | undefined => {
+        const words = (out.split("\n").find((l) => l.startsWith(prefix)) ?? "").split(" ");
+        const at = words.indexOf("--output-format");
+        return at < 0 ? undefined : words[at + 1];
+      };
       const launchFormat = formatOf("launch:");
       const resumeFormat = formatOf("resume:");
       check(
