@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createStandIn, type StandInOptions } from "./lib/page-bridge-stand-in.ts";
+import { createSampleRepo } from "./lib/review-sample.ts";
 import { snapshotDescendants } from "./lib/processes.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import {
@@ -42,8 +43,10 @@ import {
   KIT,
   type GroupFacts,
   type LabelsFacts,
+  labelProblems,
   type LineFacts,
   type LinesFacts,
+  linesProblems,
   loadPlaywright,
   matrix,
   MAX_CODE_OFFSET,
@@ -2174,6 +2177,77 @@ describe("the real gate", () => {
         }
         // The faults taken away, the page is clean again.
         expect((await measure("")).ok).toBe(true);
+        await context.close();
+      } finally {
+        await browser?.close().catch(() => undefined);
+        server.stop();
+      }
+      expect(await lingering()).toEqual([]);
+    });
+  });
+
+  // The code viewer (review-page files) keeps what the page does: lines wider than the box scroll in groups on their
+  // own and so do its labels, read through the same helpers and verdicts as the page's sideways check. At 1024 px its
+  // files are a column; on a phone they are a strip that scrolls as a whole.
+  test("the code viewer: lines wider than the box and its labels scroll on their own", async () => {
+    const playwright = await loadPlaywright(process.env);
+    if (playwright === null) {
+      expect(describeMissing(process.env)).toContain("PLAYWRIGHT_CORE");
+      return;
+    }
+    await withTempDir(async (tmp) => {
+      const repo = createSampleRepo(tmp);
+      const out = join(tmp, "viewer");
+      const args = [
+        join(import.meta.dir, "review-page.ts"),
+        "files",
+        out,
+        repo.head,
+        "pnpm-lock.yaml",
+      ];
+      expect(run(process.execPath, ["--no-env-file", ...args], { cwd: repo.dir }).code).toBe(0);
+      const server = startServer(out);
+      let browser: PwBrowser | undefined;
+      try {
+        try {
+          browser = await playwright.chromium.launch({
+            headless: true,
+            executablePath: chromiumPath(process.env),
+          });
+        } catch (e) {
+          // Playwright loads but no Chromium starts here: the real gate's test says why.
+          expect(failure(e).length).toBeGreaterThan(0);
+          return;
+        }
+        const context = await browser.newContext(contextOptions(runNamed("w1024-light")));
+        await context.addInitScript(KIT);
+        const page = await context.newPage();
+        // The viewer is one complete document, with its files inside it: the gate's wrapper is not put round it.
+        await page.goto(`${server.origin}/plain.html`, { waitUntil: "load", timeout: 45_000 });
+        await page.waitForFunction('document.querySelectorAll("#code .l").length > 0', undefined, {
+          timeout: 30_000,
+          polling: 50,
+        });
+        const lines = (index: number, left?: number): Promise<LinesFacts> =>
+          page.evaluate(
+            `window.__gate.lines(${index}, ${left}, "#code .lines", ".l")`,
+          ) as Promise<LinesFacts>;
+        const rest = await lines(-1);
+        const scrolled = [];
+        for (const group of new Set(rest.lines.map((l) => l.group)))
+          if (group >= 0)
+            scrolled.push({
+              group,
+              after: await lines(
+                rest.lines.findIndex((l) => l.group === group),
+                200,
+              ),
+            });
+        expect(scrolled.length).toBeGreaterThan(0);
+        expect(linesProblems(rest, scrolled)).toEqual([]);
+        const labels = (await page.evaluate("window.__gate.labels()")) as LabelsFacts;
+        expect(labels.labels.length).toBeGreaterThan(0);
+        expect(labelProblems("viewer", labels)).toEqual([]);
         await context.close();
       } finally {
         await browser?.close().catch(() => undefined);
