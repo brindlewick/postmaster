@@ -1,6 +1,8 @@
 // Groups of lines: a run of consecutive lines of the open diff (code rows and hunk headers) wider than the code box is
 // wrapped in one scroll container, .grp, so a swipe on any line of it moves the whole run; a single wide line is a group
-// of one. A line that fits, the Show more button and a note end a run; a comment and the comment box stay in the run.
+// of one. A line that fits ends a run, but the first two below it stay in the group as .tail, pinned at the left, so that
+// a finger can sit under the text. The Show more button and a note end a run; a comment and the comment box stay in it.
+const TAIL_LINES = 2;
 
 // A group has more of itself to the left, and to the right: the layers at its edges show the shade of those.
 function edges(g) {
@@ -32,14 +34,23 @@ export function regroup() {
   const folded = rows.classList.contains("wrap");
   const plan = [];
   let run = null;
+  let tails = 0;
   for (const e of flat) {
-    if (e.matches(".r, .hunk") && !folded && e.lastElementChild.offsetWidth > room) {
-      if (run === null) {
+    const line = e.matches(".r, .hunk");
+    const wide = line && !folded && e.lastElementChild.offsetWidth > room;
+    const under = line && !wide && run !== null && tails < TAIL_LINES;
+    e.classList.toggle("tail", under);
+    if (wide) {
+      if (run === null || tails > 0) {
         run = [];
         plan.push(run);
       }
+      tails = 0;
       run.push(e);
-    } else if (run !== null && !e.matches(".r, .hunk, .more, .status")) {
+    } else if (under) {
+      tails += 1;
+      run.push(e);
+    } else if (run !== null && !line && !e.matches(".more, .status")) {
       run.push(e);
     } else {
       run = null;

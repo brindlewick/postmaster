@@ -1,7 +1,8 @@
 /* The file screen: the file's head, its unified diff, and the comment box that opens under a tapped
    line. A run of consecutive lines wider than the code box scrolls sideways together as a group, a single
-   one alone (js/04-groups.js wraps each run in one scroll container, .grp); the code box and the page never
-   scroll. A row is the code and nothing in front of it, so the code starts a few pixels from the edge of
+   one alone (js/04-groups.js wraps each run in one scroll container, .grp, with the two lines that fit below
+   it, .tail, which stay at its left edge so that a finger can sit under the text); the code box and the page
+   never scroll. A row is the code and nothing in front of it, so the code starts a few pixels from the edge of
    the screen: no sign column and no number column. The colour of a row says added or removed, with a thin
    edge in a stronger colour at the left. The row's line number is faint, left aligned a few pixels in from
    the left edge of the row, on a layer behind the code, and stays at the left edge of its group. Every row
@@ -29,6 +30,8 @@
 .grp > :is(.r, .hunk)::before { left: 0; background: linear-gradient(to right, var(--fade), transparent); }
 .grp > :is(.r, .hunk)::after { order: -1; left: calc(100cqw - 16px); background: linear-gradient(to left, var(--fade), transparent); }
 .grp[data-l] > :is(.r, .hunk)::before, .grp[data-r] > :is(.r, .hunk)::after { visibility: visible; }
+.grp > .tail { position: sticky; left: 0; width: 100cqw; }
+.grp > .tail::before, .grp > .tail::after { display: none; }
 .grp > :is(.thread, .composer) { position: sticky; left: 6px; box-sizing: border-box; width: calc(100cqw - 12px); touch-action: pan-y; }
 .r.add { background: var(--add); } .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
 .r.del { background: var(--del); } .r.del > .n { box-shadow: inset 3px 0 0 var(--del-ink); }

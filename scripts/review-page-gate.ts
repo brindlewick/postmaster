@@ -1055,7 +1055,12 @@ export interface LineFacts {
   num: number | null;
 }
 
-/** How a group scrolls: how far it is scrolled, its overflow-x, scrollbar-width, touch-action, overscroll-behavior-x and tabindex, and whether the shade shows at its left edge. */
+/**
+ * How a group scrolls: how far it is scrolled, its overflow-x, scrollbar-width, touch-action, overscroll-behavior-x and
+ * tabindex, and whether the shade shows at its left edge. `below` is read only when the group was scrolled: whether
+ * the last line below it (the end of its tail) stays at the group's left edge and is what a touch at its middle
+ * reaches; null when not read or when the group has no line below it.
+ */
 export interface GroupFacts {
   left: number;
   overflowX: string;
@@ -1064,6 +1069,7 @@ export interface GroupFacts {
   overscroll: string;
   tab: string | null;
   shade: string;
+  below: boolean | null;
 }
 
 /** The lines of the open diff and their groups, the left edge of the comment box when it is in a group and whether its text field has the focus, and the page and the code box. */
@@ -1079,19 +1085,29 @@ export interface LinesFacts {
   innerWidth: number;
 }
 
+/** The lines that fit, below a run, that stay in its group so that a finger can sit under the text (TAIL_LINES in js/04-groups.js). */
+const TAIL_LINES = 2;
+
 /**
- * The run each line belongs to: lines wider than the box, one after another, are one run, and a line that fits
- * is on none (-1) and ends the run before it. These are the groups the page must make.
+ * The run each line belongs to: lines wider than the box, one after another, are one run. A line that fits ends the
+ * run, but the first TAIL_LINES below a run are its last members; the next one is on none (-1). These are the groups
+ * the page must make.
  */
 export function runsOf(lines: readonly LineFacts[], room: number): number[] {
   let run = -1;
   let count = 0;
+  let tails = 0;
   return lines.map((l) => {
-    if (l.own <= room + ONE_PIXEL) {
+    if (l.own > room + ONE_PIXEL) {
+      if (run < 0 || tails > 0) {
+        run = count;
+        count += 1;
+      }
+      tails = 0;
+    } else if (run >= 0 && tails < TAIL_LINES) {
+      tails += 1;
+    } else {
       run = -1;
-    } else if (run < 0) {
-      run = count;
-      count += 1;
     }
     return run;
   });
@@ -1105,7 +1121,7 @@ const scrolls = (g: GroupFacts): boolean =>
   g.tab === "-1" &&
   (g.touch === "auto" || g.touch === "manipulation");
 
-/** The groups at rest are the runs of lines wider than the box, each a scroll container, and the page is no wider than the window. */
+/** The groups at rest are the runs of lines wider than the box and the lines below each, each a scroll container, and the page is no wider than the window. */
 function groupProblems(f: LinesFacts): string[] {
   const runs = runsOf(f.lines, f.room);
   const off = f.lines.findIndex((l, i) => l.group !== runs[i]);
@@ -1114,7 +1130,7 @@ function groupProblems(f: LinesFacts): string[] {
     ...(off < 0
       ? []
       : [
-          `the groups are not the runs of lines wider than the box: line ${f.lines[off]?.line} is in group ${f.lines[off]?.group}, its run is ${runs[off]} (-1 is none)`,
+          `the groups are not the runs of lines wider than the box and the ${TAIL_LINES} lines below each: line ${f.lines[off]?.line} is in group ${f.lines[off]?.group}, its run is ${runs[off]} (-1 is none)`,
         ]),
     ...(bad < 0
       ? []
@@ -1155,7 +1171,8 @@ export interface LabelsFacts {
 /**
  * What is wrong with the groups of a diff: at rest they are not the runs of lines wider than the box, or not scroll
  * containers; and after each was scrolled in turn (`scrolled`) it did not move, shows no shade at the edge it went
- * past, took its numbers with it, or another group, the page or the code box moved.
+ * past, took its numbers with it, left the lines below it moving or covered, or another group, the page or the code box
+ * moved.
  */
 export function linesProblems(
   rest: LinesFacts,
@@ -1176,6 +1193,11 @@ export function linesProblems(
       ...(after.groups[group]?.shade === "visible"
         ? []
         : [`group ${group} shows no shade at the edge it scrolled past`]),
+      ...(after.groups[group]?.below === false
+        ? [
+            `the lines below group ${group} do not stay at its left edge, or a touch on them does not reach them`,
+          ]
+        : []),
       ...(after.lines.some(
         (l, i) =>
           l.group === group &&
@@ -1217,8 +1239,9 @@ export function labelProblems(screen: string, f: LabelsFacts): string[] {
 /**
  * Lines wider than the box scroll sideways in groups and one-line labels scroll on their own, and nothing else does.
  * Lines: the groups are exactly the runs of lines wider than the box (a line that fits ends a run, a single wide line
- * is a group of one), each is a scroll container with no scrollbar that moves alone, the comment box under a line of a
- * run stays at its left edge, and the groups are made again when the window changes width. Labels, on each screen:
+ * is a group of one) with the lines below each, which stay at the left edge and take the touch, each is a scroll
+ * container with no scrollbar that moves alone, the comment box under a line of a run stays at its left edge, and the
+ * groups are made again when the window changes width. Labels, on each screen:
  * given a path's worth of text a label is wider than its place, on one row with no scrollbar, scrolling the first
  * moves it alone, and the page does not widen.
  */
@@ -1229,8 +1252,9 @@ export function sidewaysVerdict(
   const { rest, comment, resized } = f;
   if (rest.lines.length === 0) return fail("no diff lines to check");
   const runs = runsOf(rest.lines, rest.room);
+  const wide = (i: number): boolean => (rest.lines[i]?.own ?? 0) > rest.room + ONE_PIXEL;
   const sizes = [...new Set(runs.filter((r) => r >= 0))].map(
-    (r) => runs.filter((x) => x === r).length,
+    (r) => runs.filter((x, i) => x === r && wide(i)).length,
   );
   const same = JSON.stringify(runsOf(resized.lines, resized.room)) === JSON.stringify(runs);
   const [before, after] = comment;
@@ -1819,22 +1843,28 @@ window.__gate = (() => {
 
   // Every line of the open diff, a code row or a hunk header, with how wide its code is and the group it is in, how each
   // group scrolls, the comment box when it is inside a group, and the page. When "left" is a number the group of the line
-  // at "index" is first scrolled that far and every other group put back at 0. "boxSel" and "rowSel" name the box the
-  // lines are in and a line; they are those of the review page unless given.
+  // at "index" is first scrolled that far and every other group put back at 0, and the last line below that group (its
+  // tail) is read: is it at the group's left edge, and does a touch at its middle reach it. "boxSel" and "rowSel" name
+  // the box the lines are in and a line; they are those of the review page unless given.
   const lines = async (index, left, boxSel, rowSel) => {
     const box = $(boxSel || "#file-code .rows");
     const els = box ? all(rowSel || ".r, .hunk", box) : [];
     const groups = box ? all(".grp", box) : [];
     const mine = els[index] ? els[index].closest(".grp") : null;
+    const tails = mine && typeof left === "number" ? all(":scope > .tail", mine) : [];
+    const tail = tails[tails.length - 1];
     if (typeof left === "number") {
+      if (tail) tail.scrollIntoView({ block: "center" });
       groups.forEach((g) => { g.scrollLeft = g === mine ? left : 0; });
       await frames(2);
     }
+    const t = tail ? tail.getBoundingClientRect() : null;
+    const below = t === null ? null : Math.round(t.left) === Math.round(mine.getBoundingClientRect().left) && tail.contains(document.elementFromPoint(t.left + 120, (t.top + t.bottom) / 2));
     const comment = $("#composer");
     return {
       room: box ? box.clientWidth : 0,
       lines: els.map((e) => { const n = e.querySelector(".n"); return { line: e.dataset.line || e.dataset.n || "hunk", own: e.lastElementChild.offsetWidth, group: groups.indexOf(e.closest(".grp")), num: n ? Math.round(n.getBoundingClientRect().left) : null }; }),
-      groups: groups.map((g) => { const cs = getComputedStyle(g); return { left: Math.round(g.scrollLeft), overflowX: cs.overflowX, bar: cs.scrollbarWidth, touch: cs.touchAction, overscroll: cs.overscrollBehaviorX, tab: g.getAttribute("tabindex"), shade: getComputedStyle(g.firstElementChild, "::before").visibility }; }),
+      groups: groups.map((g) => { const cs = getComputedStyle(g); return { left: Math.round(g.scrollLeft), overflowX: cs.overflowX, bar: cs.scrollbarWidth, touch: cs.touchAction, overscroll: cs.overscrollBehaviorX, tab: g.getAttribute("tabindex"), shade: getComputedStyle(g.firstElementChild, "::before").visibility, below: g === mine ? below : null }; }),
       composer: comment && comment.closest(".grp") ? Math.round(comment.getBoundingClientRect().left) : null,
       focus: document.activeElement === $("#mtext"),
       pageX: window.scrollX, boxLeft: box && box.parentElement ? box.parentElement.scrollLeft : 0,
@@ -2454,9 +2484,10 @@ export function groupDiff(pattern: string = GROUP_PATTERN): string {
 
 /**
  * Serve the first file with a diff as a file of synthetic lines (GROUP_PATTERN: the hunk header and a wide line, a run
- * of three wide lines that grows by a line on a phone, a short line that ends it, a single wide line, and a run that
- * depends on the width) and look at it: the groups, each scrolled in turn, the comment box under a line of the run of
- * three with the focus in its text field, and the groups after the window was unfolded or folded. Then, on the file screen, the overview, the order and the tree, every one-line label given a path's worth of text.
+ * of three wide lines that grows by a line on a phone, a short line below it that ends it, a single wide line, and a
+ * run that depends on the width) and look at it: the groups, each scrolled in turn with the lines below it, the comment
+ * box under a line of the run of three with the focus in its text field, and the groups after the window was unfolded
+ * or folded. Then, on the file screen, the overview, the order and the tree, every one-line label given a path's worth of text.
  */
 async function checkSideways(ctx: Ctx): Promise<Verdict> {
   const { page, run, server } = ctx;

@@ -72,7 +72,8 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
 #fmeta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
 /* Lines wider than the code box scroll sideways with no scrollbar, a run of consecutive ones together as a group, a single one
-   alone; a line that fits ends a run. The script wraps each run in one scroll container, .grp, and makes the runs again when the
+   alone; a line that fits ends a run, and the first two below it stay in the group as .tail, pinned at the left, so that a
+   finger can sit under the text. The script wraps each run in one scroll container, .grp, and makes the runs again when the
    width, Fold or the fonts change; the code box and the page never scroll. The number stays at the left edge of its line, on the
    line's own colour. A group that goes on past its right edge has a faint shade there: every row of it holds a sticky layer at
    the edge, and the script shows it where the group has more behind it. Fold turns the lines into wrapped ones. */
@@ -83,6 +84,8 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
 .grp::-webkit-scrollbar { display: none; }
 .grp > .l::after { content: ""; order: -1; flex: none; position: sticky; left: calc(100cqw - 16px); width: 16px; margin-right: -16px; align-self: stretch; z-index: -1; pointer-events: none; background: linear-gradient(to left, var(--fade), transparent); visibility: hidden; }
 .grp[data-r] > .l::after { visibility: visible; }
+.grp > .tail { position: sticky; left: 0; width: 100cqw; }
+.grp > .tail::after { display: none; }
 .n { flex: none; position: sticky; left: 0; z-index: 1; box-sizing: border-box; width: calc(var(--digits, 3) * 1ch + 1.8ch); background: var(--rb); color: var(--gutter); text-align: right; padding-right: 1ch; user-select: none; -webkit-user-select: none; font-variant-numeric: tabular-nums; }
 .c { position: relative; z-index: 0; flex: none; white-space: pre; padding-right: 14px; }
 .fold .c { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -249,8 +252,9 @@ async function openFile(id, range) {
 }
 
 // Groups of lines: a run of consecutive lines wider than the code box scrolls sideways together, wrapped in one scroll
-// container (.grp), a single such line alone; a line that fits ends a run. The runs are made again when the width, Fold or
-// the fonts change. Where a group has more of itself to the right, its rows show the shade of it.
+// container (.grp), a single such line alone; a line that fits ends a run, but the first two below it stay in the group
+// as its .tail. The runs are made again when the width, Fold or the fonts change. Where a group has more of itself to the
+// right, its rows show the shade of it.
 function edges(g) { g.toggleAttribute("data-r", g.scrollLeft + g.clientWidth < g.scrollWidth - 1); }
 
 function regroup() {
@@ -260,10 +264,12 @@ function regroup() {
   const wide = rows.map((r) => !$("code").classList.contains("fold") && r.lastElementChild.offsetWidth > box.clientWidth + 1);
   box.replaceChildren(...rows);
   let run = null;
+  let tails = 0;
   rows.forEach((r, i) => {
-    if (!wide[i]) { run = null; return; }
-    if (run === null) { run = document.createElement("div"); run.className = "grp"; run.tabIndex = -1; r.before(run); }
-    run.append(r);
+    const under = !wide[i] && run !== null && tails < 2;
+    r.classList.toggle("tail", under);
+    if (wide[i] && (run === null || tails > 0)) { run = document.createElement("div"); run.className = "grp"; run.tabIndex = -1; r.before(run); }
+    if (wide[i] || under) { tails = under ? tails + 1 : 0; run.append(r); } else run = null;
   });
   for (const g of box.querySelectorAll(".grp")) edges(g);
 }

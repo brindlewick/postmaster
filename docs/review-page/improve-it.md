@@ -77,7 +77,8 @@ written once. A module may import one listed before it in `assets.json`.
   (the gate holds it to `NUMBER_INSET`, and a test fails when the two differ); the number's colour
   is the token `--lnum`, and the gate keeps its alpha between 0.15 and 0.5.
 - Keep the lines and labels that are wider than their place scrolling on their own: `js/04-groups.js` wraps
-  each run of lines wider than the code box in one scroll container (`.grp`), a row never scrolls, and
+  each run of lines wider than the code box in one scroll container (`.grp`), with the first two lines that fit
+  below it (`.tail`, pinned at the left) so that a finger can sit under the text; a row never scrolls, and
   `regroup` makes the runs again: a resize observer on the code box calls it (a width, more lines) and so
   does the loading of fonts, and drawing a file and Wrap call it themselves, since they change no size. A
   label is made with `label(cls, text)` of `js/01-core.js` (the class `ln`), and whatever holds one gives it

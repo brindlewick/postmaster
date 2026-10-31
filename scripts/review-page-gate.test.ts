@@ -1291,6 +1291,7 @@ describe("verdicts on a phone", () => {
       overscroll: "contain",
       tab: "-1",
       shade: "visible",
+      below: true,
     };
     /** The lines of a file in a box `room` px wide, in the groups the page makes unless `groups` places them. */
     const diff = (room: number, groups?: readonly number[]): LinesFacts => {
@@ -1363,7 +1364,7 @@ describe("verdicts on a phone", () => {
       const scrolled = (after: LinesFacts) => [{ group: 0, after }];
       const cases: readonly (readonly [SidewaysFacts, string])[] = [
         [{ ...good, rest: place(rest, 8, { group: -1 }) }, "the groups are not the runs"],
-        [{ ...good, rest: place(rest, 7, { group: 1 }) }, "the groups are not the runs"],
+        [{ ...good, rest: place(rest, 7, { group: -1 }) }, "the groups are not the runs"],
         [{ ...good, rest: place(rest, 5, { group: 2 }) }, "the groups are not the runs"],
         [{ ...good, rest: place(rest, 0, { group: -1 }) }, "the groups are not the runs"],
         [{ ...good, rest: group(rest, 0, { overflowX: "visible" }) }, "not a scroll container"],
@@ -1385,6 +1386,10 @@ describe("verdicts on a phone", () => {
         [
           { ...good, scrolled: scrolled(group(at(rest, 0), 0, { shade: "hidden" })) },
           "shows no shade",
+        ],
+        [
+          { ...good, scrolled: scrolled(group(at(rest, 0), 0, { below: false })) },
+          "the lines below group 0",
         ],
         [
           {

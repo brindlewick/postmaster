@@ -46,9 +46,10 @@ between 0.15 and 0.5 alpha, and still 6 px in from the left edge of its row afte
 scrolled sideways.
 
 Below 1200 px, the plain run excepted, the gate also serves the first file with a diff as a file of
-synthetic lines (a run of three wide lines, a short line that ends it, a single wide line, and a run that
+synthetic lines (a run of three wide lines, a short line below it, a single wide line, and a run that
 depends on the width) and fails unless the lines wider than the box are in groups that are exactly the runs of
-them, each a scroll container with no scrollbar that scrolls alone, with the comment box under a
+them and the two lines below each, each a scroll container with no scrollbar that scrolls alone, the lines
+below it staying at its left edge and being what a touch there reaches, with the comment box under a
 line of a run staying at its left edge and the groups made again when the window is unfolded or
 folded (`sideways`). On the file screen, the overview, the order and the tree it gives every
 one-line label a path's worth of text and fails unless each is wider than its place, on one row,
