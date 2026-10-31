@@ -67,7 +67,11 @@ describe("ticks kept and found again", () => {
   test("a Not saved line shown while the viewer keeps the ticks is named", () => {
     const v = bridgeTicksVerdict({
       ...good,
-      after: { fis: [3, 5], count: 2, notes: ["Not saved. Ticks last until you close this page."] },
+      after: {
+        fis: [3, 5],
+        count: 2,
+        notes: ["Not saved. Ticks may be lost when you close this page."],
+      },
     });
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("Not saved");
@@ -100,7 +104,7 @@ describe("a new version of the page", () => {
 });
 
 describe("no viewer answers", () => {
-  const note = [{ scope: "ticks", text: "Not saved. Ticks last until you close this page." }];
+  const note = [{ scope: "ticks", text: "Not saved. Ticks may be lost when you close this page." }];
 
   test("nothing is said while the page still waits, then Not saved, and a tick still works", () => {
     const v = notSavedVerdict({ early: [], late: note, ticked: true, written: 0 });
@@ -193,7 +197,7 @@ describe("a conflict", () => {
     expect(conflictVerdict({ ...good, ticked: false }).detail).toContain("not shown as ticked");
     const said = conflictVerdict({
       ...good,
-      notes: ["Not saved. Ticks last until you close this page."],
+      notes: ["Not saved. Ticks may be lost when you close this page."],
     });
     expect(said.ok).toBe(false);
     expect(said.detail).toContain("Not saved");
@@ -220,7 +224,7 @@ describe("a comment", () => {
       },
     ],
     settled: "kept",
-    reloaded: [{ text: "Why is this retried?", save: "kept" }],
+    reloaded: [{ text: "Why is this retried?", save: "kept", note: "" }],
   };
 
   test("it shows at once, reaches the viewer as a line anchor, settles, and is there after a reload", () => {
@@ -282,10 +286,20 @@ describe("a comment", () => {
     const gone = commentVerdict({ ...good, reloaded: [] });
     expect(gone.ok).toBe(false);
     expect(gone.detail).toContain("after a reload");
-    const twice = commentVerdict({
+    const said = commentVerdict({
       ...good,
-      reloaded: [good.reloaded[0] ?? good.atOnce, good.reloaded[0] ?? good.atOnce],
+      reloaded: [
+        {
+          text: good.typed,
+          save: "kept",
+          note: "The lines have changed since this comment was left.",
+        },
+      ],
     });
+    expect(said.ok).toBe(false);
+    expect(said.detail).toContain("The lines have changed");
+    const entry = { text: good.typed, save: "kept", note: "" };
+    const twice = commentVerdict({ ...good, reloaded: [entry, entry] });
     expect(twice.ok).toBe(false);
     expect(twice.detail).toContain("2 times");
   });

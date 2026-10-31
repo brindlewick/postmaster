@@ -36,8 +36,8 @@ const T = 1_000_000;
 const HASH = "0123456789abcdef".repeat(4);
 const KEY_A = `tick:a.ts:${HASH}`;
 const KEY_B = `tick:b.ts:${HASH}`;
-const TICKS_NOTE = "Not saved. Ticks last until you close this page.";
-const COMMENTS_NOTE = "Not saved. Comments last until you close this page.";
+const TICKS_NOTE = "Not saved. Ticks may be lost when you close this page.";
+const COMMENTS_NOTE = "Not saved. Comments are lost when you close this page.";
 
 /** A visit played by hand: the session so far, what it sent and what it asked the page to show. */
 function visit(initial: Session = NEW_SESSION) {
