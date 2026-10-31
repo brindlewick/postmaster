@@ -1,12 +1,21 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-25
+updated: 2026-10-31
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-10-31] update | the design lens's ladder keeps a library's setting first unless a plain alternative is simpler
+
+At the user's request, after the coder was told to list what exists and take the simplest way before
+writing code. The design lens in the coachman runbook and the ticket template's
+`### Existing capabilities` section both put a library's documented way first unless a plain
+alternative is simpler (fewer moving parts, then fewer lines). The ladder on
+[the page](concepts/capabilities-before-design.md) lacked that exception and carries it. The change
+touches no coachman contract file, so it needs no fixture run. No standing changed.
 
 ## [2026-10-25] update | a split's pieces carry their own tests, and a split request ends in the clerk
 

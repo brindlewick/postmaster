@@ -3,7 +3,7 @@ title: A ticket checks what the libraries already do before it picks a design
 type: concept
 standing: claimed
 sources: []
-updated: 2026-10-15
+updated: 2026-10-31
 ---
 
 # A ticket checks what the libraries already do before it picks a design
@@ -100,8 +100,9 @@ custom part and no `Searched:` part.
 
 The review loop gains a design lens, opt-in through a project's default turnpikes, that applies a
 ladder to the change: a library's setting, then a function the repository already has, then a thin
-wrapper, then new code. Its finding names a mechanism and never an identifier, and a swap for a
-library's setting goes to the user for a ruling. Only a detail is marked do-not-reopen in a hand-off,
-never an architecture. Both sit in the coachman contract, so each needs a fixture run that scores
-clean. Related: [a ticket's shape](ticket-shape.md), [the turnpikes](turnpikes.md),
-[a project's notes](project-notes.md).
+wrapper, then new code. A library's documented setting stays the first rung unless a plain
+alternative is simpler (fewer moving parts, then fewer lines). A finding names a mechanism and
+never an identifier, and a swap for a library's setting goes to the user for a ruling. Only a detail
+is marked do-not-reopen in a hand-off, never an architecture. Both sit in the coachman contract, so
+each needs a fixture run that scores clean. Related: [a ticket's shape](ticket-shape.md),
+[the turnpikes](turnpikes.md), [a project's notes](project-notes.md).
