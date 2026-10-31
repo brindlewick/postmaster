@@ -59,7 +59,7 @@ scripts/run runs-status <run-root>                                  # the postma
 scripts/run coachman-contract <base> <head>                         # whether a change touches the contract, by file
 scripts/run runs-watch <run-root> [--timeout <seconds>]              # wait until a run needs the postmaster
 scripts/run handoff-check <handoff-file>                            # a leg may end only on exit 0
-scripts/run review-page change|files …                             # the data behind a review page or code viewer
+scripts/run review-page change|files …                             # a review page or code viewer, one file each
 scripts/run wiki-lint                                             # the wiki's rules, run not remembered
 scripts/run fixture new|score|hidden …                              # a run on a fixture app, scored against a known outcome
 ```

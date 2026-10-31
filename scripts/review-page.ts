@@ -1,6 +1,6 @@
-// Build the data a review page or a code viewer page shows, for a session to publish as a
-// private artifact. skills/review-pages/SKILL.md says how a page is published and how its
-// comments are read and answered.
+// Build a review page or a code viewer page as one self-contained HTML file, for a session
+// to publish on the Artifact Shelf. skills/review-pages/SKILL.md says how a page is published
+// and how its comments are read and answered.
 //
 //   scripts/run review-page change <out-dir> --pr <number>
 //   scripts/run review-page change <out-dir> --base <ref> --head <ref> [--ticket <number>] [--title <text>]
@@ -8,23 +8,27 @@
 //   scripts/run review-page files <out-dir> <ref> <path>...
 //
 // change: diffs the head against its merge base with the base, as GitHub does, and writes
-// <out-dir>/index.html (the review page, titled for its ticket), review.json and chunks/<k>.json.
-// With --pr, the title, the summary (the pull request's text), the base and the head come from
-// `gh api` on the repository's origin. With --ticket, or a pull request titled "#<n>, <title>",
-// the ticket's text comes from that issue. --summary is a Markdown file containing the change's
-// summary. Files are grouped by their first folder, top-level files first, and the
-// page loads a file's diff and text only when it is opened.
+// <out-dir>/index.html, the review page titled for its ticket, with every file's diff and text
+// inline. With --pr, the title, the summary (the pull request's text), the base and the head
+// come from `gh api` on the repository's origin. With --ticket, or a pull request titled
+// "#<n>, <title>", the ticket's text comes from that issue. --summary is a Markdown file
+// containing the change's summary. Files are grouped by their first folder, top-level files
+// first, and the page draws a file's diff and text only when it is opened.
 //
-// files: writes the code viewer, files.json and files/<k>.txt, one per path as it stands at <ref>.
+// files: writes the code viewer with each path as it stands at <ref> inline: <out-dir>/index.html,
+// or index-1.html, index-2.html and so on when the files pass the shelf's limit together. Each
+// file keeps its id (f0, f1, ...) whichever page holds it.
 //
 // Either way, an email address outside the reserved example domains becomes <address removed>,
-// with line numbers unchanged. Run it from the repository the change belongs to.
+// with line numbers unchanged, and a page over the shelf's 10 MB limit is refused. Run it from
+// the repository the change belongs to.
 //
-//   exit 0  written; one summary line is printed
-//   exit 1  usage, or git or gh failed
+//   exit 0  written; a summary line is printed, then one line per page: its path and its
+//           shelf slug, and for the viewer the ids of the files it holds
+//   exit 1  usage, git or gh failed, or a page would pass the limit
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { langOf, scrub } from "./lib/page-text.ts";
+import { basename, dirname, join } from "node:path";
+import { dataBlock, langOf, SHELF_LIMIT, scrub, shelfSlug, withData } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
 
 export { langOf, scrub };
@@ -35,7 +39,6 @@ export const USAGE = [
   "       review-page.ts files <out-dir> <ref> <path>...",
 ].join("\n");
 
-const CHUNK_BYTES = 1_500_000;
 const TEMPLATES = join(import.meta.dir, "..", "skills", "review-pages");
 
 /** Lines in a file's text: a final newline ends the last line rather than starting one. */
@@ -110,7 +113,7 @@ export function groupChanges(changes: Change[]): {
   return { order, files };
 }
 
-/** The chunk each item goes in: a new chunk once the next item would pass the limit. */
+/** The page each item goes in: a new page once the next item would pass the limit. */
 export function packChunks(sizes: number[], limit: number): number[] {
   const out: number[] = [];
   let k = 0;
@@ -132,6 +135,15 @@ export function titled(template: string, title: string): string {
   return template.replace(/<title>[^<]*<\/title>/u, `<title>${safe}</title>`);
 }
 
+/** Refuse a page the shelf would refuse: the error names its size and the limit. */
+export function checkSize(name: string, html: string, limit: number = SHELF_LIMIT): void {
+  const bytes = Buffer.byteLength(html, "utf8");
+  if (bytes > limit) {
+    const mb = (n: number): string => (n / 1024 / 1024).toFixed(1);
+    throw new Error(`${name} is ${mb(bytes)} MB, over the shelf's ${mb(limit)} MB limit`);
+  }
+}
+
 // ---------- edges ----------
 
 function git(args: string[]): string {
@@ -151,7 +163,13 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
-function buildChange(out: string, args: string[]): string {
+/** The repository's name, for the page's slug: its main checkout's folder, from any worktree. */
+function repoName(): string {
+  const common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim();
+  return basename(common) === ".git" ? basename(dirname(common)) : basename(common, ".git");
+}
+
+function buildChange(out: string, args: string[]): string[] {
   const prArg = flag(args, "--pr");
   let base = flag(args, "--base");
   let head = flag(args, "--head");
@@ -199,18 +217,6 @@ function buildChange(out: string, args: string[]): string {
     removed += diff.removed + (text ? text.removed : 0);
     return { i, diff: diff.text, text: text ? text.text : null };
   });
-  const chunkOf = packChunks(
-    items.map((it) => JSON.stringify(it).length),
-    CHUNK_BYTES,
-  );
-  mkdirSync(join(out, "chunks"), { recursive: true });
-  const chunks = new Map<number, unknown[]>();
-  items.forEach((it, i) => {
-    const k = chunkOf[i] ?? 0;
-    chunks.set(k, [...(chunks.get(k) ?? []), it]);
-  });
-  for (const [k, list] of chunks)
-    writeFileSync(join(out, "chunks", `${k}.json`), JSON.stringify(list));
   const additions = files.reduce((n, f) => n + f.add, 0);
   const deletions = files.reduce((n, f) => n + f.del, 0);
   const review = {
@@ -230,50 +236,76 @@ function buildChange(out: string, args: string[]): string {
     files: files.map((f, i) => ({
       ...f,
       lang: langOf(f.path),
-      chunk: chunkOf[i] ?? 0,
       lines: items[i]?.text == null ? null : lineCount(items[i]?.text ?? ""),
     })),
   };
-  writeFileSync(join(out, "review.json"), JSON.stringify(review));
   const name = ticket ? `#${ticket} review` : `${head.slice(0, 7)} review`;
-  writeFileSync(
-    join(out, "index.html"),
-    titled(readFileSync(join(TEMPLATES, "review-page.html"), "utf8"), name),
-  );
-  return `review page for ${name.replace(/ review$/u, "")}: ${files.length} files, +${additions} -${deletions}, ${chunks.size} chunk(s), ${removed} address(es) removed, in ${out}`;
+  const html = withData(titled(readFileSync(join(TEMPLATES, "review-page.html"), "utf8"), name), [
+    dataBlock("review-data", review),
+    dataBlock("review-items", items),
+  ]);
+  checkSize("the review page", html);
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, "index.html"), html);
+  const mbytes = (Buffer.byteLength(html, "utf8") / 1024 / 1024).toFixed(1);
+  const slug = shelfSlug(["review", repoName(), ticket ?? head.slice(0, 7)]);
+  return [
+    `review page for ${name.replace(/ review$/u, "")}: ${files.length} files, +${additions} -${deletions}, ${mbytes} MB, ${removed} address(es) removed`,
+    `${join(out, "index.html")} ${slug}`,
+  ];
 }
 
-function buildFiles(out: string, ref: string, paths: string[]): string {
+function buildFiles(out: string, ref: string, paths: string[]): string[] {
   if (paths.length === 0) throw new Error(USAGE);
   const sha = git(["rev-parse", "--verify", `${ref}^{commit}`]).trim();
-  mkdirSync(join(out, "files"), { recursive: true });
   let removed = 0;
   const files = paths.map((p, k) => {
     const t = scrub(git(["show", `${sha}:${p}`]));
     removed += t.removed;
-    const src = `files/${k}.txt`;
-    writeFileSync(join(out, src), t.text);
-    return { id: `f${k}`, path: p, lang: langOf(p), src, lines: lineCount(t.text) };
+    return { id: `f${k}`, path: p, lang: langOf(p), lines: lineCount(t.text), text: t.text };
   });
-  const title =
-    paths.length === 1 ? (paths[0] ?? "Code") : `${paths.length} files at ${sha.slice(0, 7)}`;
-  writeFileSync(join(out, "files.json"), JSON.stringify({ title, ref: sha, files }));
-  writeFileSync(
-    join(out, "index.html"),
-    titled(readFileSync(join(TEMPLATES, "viewer.html"), "utf8"), "Code"),
+  const template = titled(readFileSync(join(TEMPLATES, "viewer.html"), "utf8"), "Code");
+  // Room for the template and the page's own fields around the files.
+  const room = SHELF_LIMIT - Buffer.byteLength(template, "utf8") - 4096;
+  const pageOf = packChunks(
+    files.map((f) => Buffer.byteLength(dataBlock("", f), "utf8")),
+    room,
   );
-  return `code viewer: ${files.length} file(s) at ${sha.slice(0, 7)}, ${removed} address(es) removed, in ${out}`;
+  const count = (pageOf.at(-1) ?? 0) + 1;
+  const pages = Array.from({ length: count }, (_, p) => files.filter((_, i) => pageOf[i] === p));
+  const whole =
+    paths.length === 1 ? (paths[0] ?? "Code") : `${paths.length} files at ${sha.slice(0, 7)}`;
+  const htmls = pages.map((list, p) => {
+    const title = count === 1 ? whole : `${whole}, part ${p + 1} of ${count}`;
+    const html = withData(titled(template, count === 1 ? "Code" : `Code ${p + 1} of ${count}`), [
+      dataBlock("files-data", { title, ref: sha, files: list }),
+    ]);
+    checkSize(list.length === 1 ? (list[0]?.path ?? "a file") : `page ${p + 1}`, html);
+    return html;
+  });
+  mkdirSync(out, { recursive: true });
+  const name = repoName();
+  const lines = htmls.map((html, p) => {
+    const file = join(out, count === 1 ? "index.html" : `index-${p + 1}.html`);
+    writeFileSync(file, html);
+    const slug = shelfSlug(["code", name, sha.slice(0, 7), ...(count === 1 ? [] : [`${p + 1}`])]);
+    return `${file} ${slug}: ${(pages[p] ?? []).map((f) => f.id).join(" ")}`;
+  });
+  return [
+    `code viewer: ${files.length} file(s) at ${sha.slice(0, 7)}, ${count} page(s), ${removed} address(es) removed`,
+    ...lines,
+  ];
 }
 
 export function main(args: string[]): number {
   const [mode, out, ...rest] = args;
   try {
     if (mode === "change" && out) {
-      console.log(buildChange(out, rest));
+      for (const line of buildChange(out, rest)) console.log(line);
       return 0;
     }
     if (mode === "files" && out && rest[0]) {
-      console.log(buildFiles(out, rest[0], rest.slice(1)));
+      for (const line of buildFiles(out, rest[0], rest.slice(1))) console.log(line);
       return 0;
     }
     console.error(USAGE);
