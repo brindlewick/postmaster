@@ -49,6 +49,12 @@
 # [notify]
 # channel = "none"
 #
+# The page host for this project alone, written as in the global config's [pages]
+# (docs/pages-contract.md). A key set here replaces the same key there.
+#
+# [pages]
+# publish = "host-cli publish {file} --slug {slug}"
+#
 # This person's landing choices for this project.
 #
 # [ship]
