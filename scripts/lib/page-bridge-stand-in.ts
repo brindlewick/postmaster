@@ -60,8 +60,10 @@ export interface StoredComment {
   readonly version: number;
 }
 
-/** One message the stand-in saw: its type, its id, and what became of it. */
+/** One message the stand-in saw: when, its type, its id, and what became of it. */
 export interface Logged {
+  /** The time it was seen, in milliseconds. */
+  readonly at: number;
   readonly type: string;
   readonly id: string | null;
   /** "dropped", "ignored", the type of the answer ("state", "comment", ...), or "error:<code>". */
@@ -85,6 +87,8 @@ export interface StandInState {
   } | null;
   /** How many rival writes have landed, to give each its own mark. */
   readonly rivals: number;
+  /** The time of the message being answered, for the log. */
+  readonly now: number;
   readonly log: readonly Logged[];
 }
 
@@ -97,6 +101,7 @@ export const EMPTY_STAND_IN: StandInState = {
   version: 1,
   visit: null,
   rivals: 0,
+  now: 0,
   log: [],
 };
 
@@ -166,7 +171,7 @@ function within(times: readonly number[], now: number, perSecond: number) {
 }
 
 function logged(s: StandInState, type: string, id: string | null, outcome: string): StandInState {
-  return { ...s, log: [...s.log, { type, id, outcome }].slice(-LOG_LIMIT) };
+  return { ...s, log: [...s.log, { at: s.now, type, id, outcome }].slice(-LOG_LIMIT) };
 }
 
 function finish(
@@ -281,9 +286,11 @@ function check(type: string, data: Record<string, unknown>, limits: BridgeLimits
 }
 
 /** Answer one message from the page, as a viewer that keeps to the page bridge. */
-export function standInAnswer(s: StandInState, data: unknown, now: number): Answer {
-  if (!isObject(data) || data.bridge !== "page-bridge")
-    return { state: s, reply: null, delayMs: 0 };
+export function standInAnswer(before: StandInState, data: unknown, now: number): Answer {
+  const s: StandInState = { ...before, now };
+  if (!isObject(data) || data.bridge !== "page-bridge") {
+    return { state: before, reply: null, delayMs: 0 };
+  }
   const type = typeof data.type === "string" ? data.type : "";
   const id = validId(data.id) ? data.id : null;
   const limits = s.options.limits;

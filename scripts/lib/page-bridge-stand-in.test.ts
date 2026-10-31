@@ -481,6 +481,13 @@ describe("what the gate reads back", () => {
     ]);
   });
 
+  test("each entry carries the time the message was seen", () => {
+    const p = play();
+    p.send(hello, 4000);
+    p.send({ ...env, type: "state-get", id: "r1" }, 4250);
+    expect(p.state.log.map((l) => l.at)).toEqual([4000, 4250]);
+  });
+
   test("a conflict is logged as such", () => {
     const p = play(tweak({ conflicts: 1 }));
     p.hello();
