@@ -47,9 +47,23 @@ A sticky header shows the tabs and the reviewed count (`12/107`); on the file sc
 the file's position and name, and previous and next. The count button, and the file name, open a
 search sheet over every file's name and purpose.
 
-Reviewed ticks are kept in the reader's browser and, when the page has the `db` capability, shared
-across their devices. A tick is keyed by a short hash of the file's path and diff, so a rebuild on a
-new head keeps the ticks of files whose diff did not change and clears the others.
+## How ticks and comments are kept
+
+A page in a sandboxed frame has no storage of its own, so it asks the viewer around it through the
+page bridge, an open contract of messages (Page bridge v1). A viewer that answers the page's hello
+within 1.5 seconds keeps its state between visits and stores the line comments it sends.
+
+- A tick is the key `tick:<path>:<sha256 hex>`. The builder hashes the file's diff as the page shows
+  it (`hash` in `review.json`), so a file whose diff did not change keeps its tick on a new head and a
+  changed one starts unticked.
+- A new line comment shows at once and is sent with a line anchor: file, side, lines and their text.
+  The viewer's comments are shown when the page opens, and its request to show lines opens the file
+  there.
+- With no answer the page keeps both in memory for the visit (ticks also in the browser's storage,
+  where the frame allows it) and says "Not saved". A page with the `db` capability keeps them in its
+  database.
+
+The page's side is `scripts/lib/page-bridge*.ts`; the contract is not kept in this repository.
 
 ## Where the detail is
 

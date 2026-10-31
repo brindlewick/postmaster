@@ -25,6 +25,17 @@ either, previous and next, ticks that do not survive a reload, the comment box, 
 collapse and the ruling links; from 1200 px it fails on the split layout (the tree at the left, the
 file beside it, no Back button).
 
+The page bridge is driven too, on the phone in light and dark and at 755 and 904 px, through a
+stand-in viewer: `/host.html` frames the page in a sandbox with an origin of its own and answers its
+messages as the contract says, and can delay, drop, fail, rate-limit or conflict. The checks are
+`bridge-ticks` (ticks come back after a reload), `bridge-new-version` (the file whose diff changed
+starts unticked), `bridge-not-saved` and `bridge-unanswered` (Not saved after 1.5 seconds with no
+hello answered, and after 5 seconds with no write answered; the second on the phone in light only),
+`bridge-conflict`, `bridge-comment` (it shows at once and arrives as a line anchor) and
+`bridge-focus`. With no viewer the Not saved line shows on every screen of the other runs, which
+audit it like the rest. A control in the gate's tests puts a fault into the page or the viewer, one at
+a time, and expects each to be named.
+
 Every run but the plain one also looks at the rows of a diff (`diff-layout`), on the file with the
 longest line, and fails on a sign column or a number column in front of the code, on code that
 starts more than 16 px from the left edge (of the window, or of its own box beside the tree), and on
@@ -66,12 +77,15 @@ The Artifact rules the page already follows, so a change to it must too:
 
 ## Read the comments
 
-A comment is a document in the `comments` collection: `path`, `side` (`new` or `old`), `from`, `to`,
-`text`, `by`, `at`. When the reader says they have commented, read them with ArtifactData `list` of
-`comments`. Answer each with ArtifactData `set` in `comments`, document id `reply-<its id>`, data
-`{replyTo, path, side, from, to, by: "claude", text, at}`; the reply shows under the comment without
-a reload. Ticks are documents `r-<signature>` in the `reviewed` collection. Then act on what the
-reader asked, in the conversation.
+With the `db` capability, a comment is a document in the `comments` collection: `path`, `side` (`new`
+or `old`), `from`, `to`, `text`, `by`, `at`. When the reader says they have commented, read them with
+ArtifactData `list` of `comments`. Answer each with ArtifactData `set` in `comments`, document id
+`reply-<its id>`, data `{replyTo, path, side, from, to, by: "claude", text, at}`; the reply shows under
+the comment without a reload. Ticks are documents `r-<signature>` in the `reviewed` collection. Then
+act on what the reader asked, in the conversation.
+
+Where a viewer keeps the comments instead (the page bridge), read them with the viewer's own comment
+command: a line comment carries an anchor (`file`, `side`, `from`, `to` and the text of the lines).
 
 ## Rebuild on a new head
 

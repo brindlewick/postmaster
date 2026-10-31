@@ -11,14 +11,18 @@ skills/review-pages/page/
   assets.json          the order of the files below; the builder inlines them
   layout.default.json  the default groups, withheld rule and area roots
   css/                 tokens, header, overview, tree, order, file, find, wide
-  js/                  core, data, ticks, diff, tree, order, overview, find, nav, boot (ES modules)
+  js/                  core, data, ticks, diff, tree, order, overview, find, nav, bridge, boot (ES modules)
 scripts/lib/review-tree.ts      the tree (pure; also inlined into the page)
+scripts/lib/page-bridge*.ts     the page's side of the page bridge: messages and their checks, requests
+                                and clocks, saved state, comments, the session (pure; also inlined)
+scripts/lib/page-bridge-stand-in.ts  a stand-in for the viewer, for the render gate
 scripts/lib/review-layout.ts    grouping, ordering, purposes and rulings (pure)
 scripts/lib/review-model.ts     review.json and the chunks (pure)
 scripts/lib/review-assemble.ts  the shell, stylesheets and scripts into one file (pure)
 scripts/lib/review-assets.ts    reads the assets (the edge)
 scripts/review-page.ts          the command (git and gh, files written)
 scripts/review-page-gate.ts     the render gate
+scripts/review-page-gate-bridge.ts  the gate's verdicts on the page bridge
 ```
 
 The scripts in `js/` are ES modules: each exports what the others use and imports what it takes, so
@@ -27,7 +31,8 @@ files, in the order of `assets.json`, as one script; a test checks that every im
 the manifest and a name that file exports.
 
 The page is one HTML file plus `review.json` (the files, groups, rulings and summary) and
-`chunks/<k>.json` (the diffs, loaded when a file is opened). `review.json` has a `version` (now 2).
+`chunks/<k>.json` (the diffs, loaded when a file is opened). `review.json` has a `version` (now 2); each file in it carries `sig`, a short hash of its path and diff for the
+browser, and `hash`, the SHA-256 of what the page shows of it, for the page bridge.
 The builder keeps no clock, random id or machine path in any output, so two builds of the same range
 with the same inputs are byte for byte the same; the tests build an invented sample repository twice
 and compare. The tree's logic is the one file `scripts/lib/review-tree.ts`, unit tested, and the page
@@ -44,6 +49,11 @@ inlines a transpiled copy with its `export` keywords removed, so it is written o
   `scripts/run review-page-gate <dir>`, and look at the screenshots.
 - Change the look or behaviour in the asset files; each file has one job and a comment at its top.
   Colours come from the tokens in `css/10-tokens.css`; add a token there with its dark value.
+- Change how ticks and comments are kept in `scripts/lib/page-bridge-session.ts` (one reducer: an event
+  in, a new session and the messages to send out) and its siblings, test first with
+  `bun test scripts/lib/page-bridge*.test.ts`; `js/10-bridge.js` only carries out what the session
+  returns. Then run the gate, whose bridge checks play a stand-in viewer. The preimage of `hash` is a
+  contract: a change to it drops every tick that pages have kept.
 - Add a tab: a button in `page.html`'s `.tabs`, a `<section class="screen" id="screen-<name>">`, a
   render function in a new `js/` module listed in `assets.json` (export it, and import what it
   uses), and the name in `applyScreens` and `selectTab` in `js/09-nav.js`; add its checks to
