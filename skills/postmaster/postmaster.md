@@ -402,7 +402,7 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
    turnpikes line, the ticket's whole body in a temporary file outside the run directory, the
    project profile, the team, the legs check, and the areas for the project's notes, and have it
    verify the legs before it finishes. The areas are yours to decide, from the ticket and the
-   tracker's project: one glob for each place the ticket's work is, such as `apps/portal/**`, and
+   tracker's project: one glob for each place the ticket's work is, such as `apps/web/**`, and
    none when the work spans the project. A refusal from the project's notes comes back in its
    report: tell the user what is wrong with them, and brief it again with "no project notes" only
    on their word:
