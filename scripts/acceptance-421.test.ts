@@ -1,11 +1,11 @@
 // Oracle for #421, committed before the change: one command keeps a
-// project's experiments, a private live page shows them with what is due
-// first, the postmaster keeps both current, and the README states the design
-// goal. C1, C3's command half and push-docs drive `run experiments` as a
+// project's experiments, a published page shows them with what is due first,
+// the postmaster keeps both current, and the README states the design goal.
+// C1, C3's command half and the page build drive `run experiments` as a
 // subprocess over scratch repositories, never importing the change; C2, C3's
-// page half and C4 run the page's own script in a fresh process with a stub
-// store; C5 and C6 read the runbook and the README. C7, the fixture run from
-// the final head, is the landing check and no test here. Where a headless
+// page half and C4 run the page's own script in a fresh process with its
+// inline rows; C5 and C6 read the runbook and the README. C7, the fixture run
+// from the final head, is the landing check and no test here. Where a headless
 // browser is on the machine the widths are screenshotted; there is none here,
 // so the page tests pin the viewport and the grid rule and the widths stay
 // for the postmaster before the first publish.
@@ -254,10 +254,10 @@ describe("C1: one command starts, moves and concludes an experiment", () => {
   });
 });
 
-describe("push-docs: the rows reach the page only from the command", () => {
-  test("it prints every row as one JSON object keyed by id", () => {
+describe("page: the rows reach the page only from the command", () => {
+  test("it builds one page with every row inline, and a rebuild shows a new row", () => {
     const s = stage();
-    const a = startIt(s, "alpha question", utcDate(7), ["alpha old", "alpha new"]);
+    startIt(s, "alpha question", utcDate(7), ["alpha old", "alpha new"]);
     const b = startIt(s, "beta question", utcDate(-1), ["beta old", "beta new"]);
     expectOk(
       experiments(s.repo, "conclude", [
@@ -269,31 +269,25 @@ describe("push-docs: the rows reach the page only from the command", () => {
       ]),
       "conclude",
     );
-    const r = experiments(s.repo, "push-docs", []);
-    expectOk(r, "push-docs");
-    const docs = JSON.parse(r.out) as Record<string, Record<string, unknown>>;
-    expect(Object.keys(docs).sort()).toEqual([a, b]);
-    expect(Object.keys(docs[a]!).sort()).toEqual([
-      "ended",
-      "evidence",
-      "levels",
-      "look",
-      "measure",
-      "question",
-      "result",
-      "started",
-      "state",
-    ]);
-    expect(docs[a]!["question"]).toBe("alpha question");
-    expect(docs[a]!["levels"]).toEqual(["alpha old", "alpha new"]);
-    expect(docs[a]!["started"]).toBe(utcDate(0));
-    expect(docs[a]!["state"]).toBe("running");
-    expect(docs[a]!["result"]).toBe(null);
-    expect(docs[a]!["evidence"]).toBe(null);
-    expect(docs[b]!["state"]).toBe("concluded");
-    expect(docs[b]!["result"]).toBe("beta won");
-    expect(docs[b]!["evidence"]).toBe("https://example.invalid/pull/2");
-    expect(docs[b]!["ended"]).toBe(utcDate(0));
+    const r = experiments(s.repo, "page", []);
+    expectOk(r, "page");
+    const [path, slug] = r.out.trim().split("\n");
+    expect(path).toBe(join(s.repo, ".postmaster", "experiments-page.html"));
+    expect(slug).toBe("experiments-repo");
+    const html = readFileSync(path!, "utf8");
+    expect(html).toContain("<title>repo experiments</title>");
+    // the page reaches for nothing of the window around it: its rows are in the file
+    expect(html).not.toContain("window");
+    const shown = renderPage(null, path);
+    expect(str(shown.asOf)).toMatch(/^As of [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} UTC\.$/u);
+    expect(cards(str(shown.first)).length).toBe(2);
+    expect(cardFor(str(shown.first), "beta question")).toContain("beta won");
+    expect(porcelain(s.repo)).toBe("");
+    startIt(s, "gamma question", utcDate(3), ["gamma old", "gamma new"]);
+    expectOk(experiments(s.repo, "page", []), "page again");
+    const again = renderPage(null, path);
+    expect(cards(str(again.first)).length).toBe(3);
+    expect(str(again.first)).toContain("gamma question");
     cleanup(s);
   });
 });
@@ -410,7 +404,6 @@ function cardFor(html: string, question: string): string {
 describe("C2: the page shows each experiment as a card", () => {
   test("three cards, each with its question, levels, dates, measure and state", () => {
     const rendered = renderPage(samples());
-    expect(rendered.collection).toBe("experiments");
     const html = str(rendered.first);
     expect(cards(html).length).toBe(3);
     for (const [question, old, fresh, started, measure, look, state] of [
@@ -449,26 +442,7 @@ describe("C2: the page shows each experiment as a card", () => {
     }
   });
 
-  test("a fourth row written to the open page shows without a reload", () => {
-    const fourth: PageDoc = {
-      id: "e4",
-      row: sampleRow(
-        "delta flow question",
-        ["delta old", "delta new"],
-        utcDate(0),
-        "delta minutes",
-        utcDate(2),
-        "running",
-      ),
-    };
-    const rendered = renderPage(samples(), [...samples(), fourth]);
-    expect(cards(str(rendered.first)).length).toBe(3);
-    const html = str(rendered.second);
-    expect(cards(html).length).toBe(4);
-    expect(html).toContain("delta flow question");
-  });
-
-  test("no store and an empty store show one plain line, and no error", () => {
+  test("no data and no rows show one plain line, and no error", () => {
     const none = renderPage(null);
     expect(str(none.first)).toContain("No experiments to show.");
     expect(str(none.first).split('class="card').length).toBe(1);
@@ -594,13 +568,14 @@ describe("levels are never arms or workhorses, on the page or in the code", () =
 });
 
 describe("C5: the postmaster keeps the record and the page current", () => {
-  test("the runbook names starting, due and concluding, the command and the page write", () => {
+  test("the runbook names starting, due and concluding, the command and the republish", () => {
     const text = readFileSync(POSTMASTER_MD, "utf8");
     expect(text).toContain("<tool>/scripts/run experiments");
     expect(text).toContain("experiments start");
     expect(text).toContain("experiments move");
     expect(text).toContain("experiments conclude");
-    expect(text).toContain("ArtifactData");
+    expect(text).toContain("experiments page");
+    expect(text).toContain("pages publish");
     const stageD = text.indexOf("## Stage D");
     const nextStage = text.indexOf("\n## ", stageD + 1);
     const supervise = text.slice(stageD, nextStage < 0 ? undefined : nextStage);
@@ -614,12 +589,12 @@ describe("C5: the postmaster keeps the record and the page current", () => {
     expect(r.code).toBe(0);
   });
 
-  test("the experiments skill says how to publish once, write rows and keep the link", () => {
+  test("the experiments skill says how to build, check and republish the page", () => {
     const text = readFileSync(SKILL, "utf8");
     for (const want of [
-      "Artifact",
-      "stop the watch",
-      "ArtifactData",
+      "experiments page --project",
+      "pages publish",
+      "--slug",
       ".postmaster/",
       "experiments",
     ]) {

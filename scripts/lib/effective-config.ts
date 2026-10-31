@@ -1401,7 +1401,7 @@ export const prSizeBudgetOf = (repo: string): Budget | null => {
 
 // --- writes ----------------------------------------------------------------------------------------
 // The folder's own ignore rules: run records, drafts, local verifiers, the
-// experiments record and the project's notes stay ignored whatever the user
+// experiments record and its page, and the project's notes stay ignored whatever the user
 // answers. The person's settings file is never ignored here: setup offers to
 // have git ignore it, and only the user's yes adds that rule (ignoreSettings).
 const IGNORE_RECORDS = [
@@ -1411,7 +1411,7 @@ const IGNORE_RECORDS = [
   "notes.md",
   "verifier/",
   "experiments.jsonl",
-  "experiments-page.url",
+  "experiments-page.html",
   ".gitignore",
 ] as const;
 

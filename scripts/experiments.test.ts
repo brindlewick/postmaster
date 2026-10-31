@@ -21,13 +21,16 @@ import {
   applyConclude,
   applyMove,
   applyStart,
+  asOfText,
+  buildPage,
   formatList,
   isDue,
   lockStep,
   nextId,
   orderRows,
+  pageRows,
+  pageSlug,
   parseDate,
-  pushDocs,
   releaseLock,
   replay,
   type Experiment,
@@ -182,13 +185,10 @@ describe("formatList", () => {
   });
 });
 
-describe("pushDocs", () => {
+describe("the page", () => {
   test("every row ships keyed by id, empty record ships empty", () => {
-    expect(pushDocs([])).toBe("{}\n");
-    const docs = JSON.parse(pushDocs([running("e2", "2026-10-12")])) as Record<
-      string,
-      Record<string, unknown>
-    >;
+    expect(pageRows([])).toEqual({});
+    const docs = pageRows([running("e2", "2026-10-12")]) as Record<string, unknown>;
     expect(Object.keys(docs)).toEqual(["e2"]);
     expect(docs["e2"]).toEqual({
       question: "e2 asks",
@@ -201,6 +201,31 @@ describe("pushDocs", () => {
       evidence: null,
       ended: null,
     });
+  });
+
+  test("the rows and the time go inline under the title; no text in a row closes its block", () => {
+    const template = "<title>Experiments</title><p>x</p><!-- page data --><script>run()</script>";
+    const row = { ...running("e1", "2026-10-12"), question: "is </script> safe?" };
+    const html = buildPage(template, [row], "2026-10-30 14:05 UTC", "my-repo");
+    expect(html.startsWith("<title>my-repo experiments</title>")).toBe(true);
+    const open = '<script type="application/json" id="experiments-data">';
+    const inner = html.slice(html.indexOf(open) + open.length, html.indexOf("</script>"));
+    const data = JSON.parse(inner) as { asOf: string; rows: Record<string, { question: string }> };
+    expect(data.asOf).toBe("2026-10-30 14:05 UTC");
+    expect(data.rows["e1"]?.question).toBe("is </script> safe?");
+    expect(html.endsWith("<script>run()</script>")).toBe(true);
+  });
+
+  test("the time is UTC to the minute", () => {
+    expect(asOfText("2026-10-30T14:05:59.123Z")).toBe("2026-10-30 14:05 UTC");
+  });
+
+  test("one slug per project, of lowercase letters, digits and hyphens", () => {
+    expect(pageSlug("postmaster")).toBe("experiments-postmaster");
+    expect(pageSlug("My_Repo.v2")).toBe("experiments-my-repo-v2");
+    expect(pageSlug("--x--")).toBe("experiments-x");
+    expect(pageSlug("a".repeat(80)).length).toBe(64);
+    expect(pageSlug("a".repeat(80))).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/u);
   });
 });
 
@@ -336,7 +361,7 @@ describe("record symlink guard", () => {
       mkdirSync(outside, { recursive: true });
       symlinkSync(outside, join(repo, ".postmaster"));
       expect(runExperiments(repo, ["list"]).status).not.toBe(0);
-      expect(runExperiments(repo, ["push-docs"]).status).not.toBe(0);
+      expect(runExperiments(repo, ["page"]).status).not.toBe(0);
       expect(runExperiments(repo, START).status).not.toBe(0);
       expect(existsSync(join(outside, "experiments.jsonl"))).toBe(false);
     } finally {

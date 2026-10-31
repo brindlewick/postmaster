@@ -1,16 +1,17 @@
 // One command keeps a project's experiments: it starts one, moves the date
 // to look at it, concludes it with its result, lists them with what is due
-// first, and prints the rows the live page shows.
+// first, and builds the page that shows them, for `run pages publish`.
 //
 //   run experiments start --project <repo> --question <q> --level <a> --level <b>
 //                 [--level ...] --measure <m> --look <date>
 //   run experiments move --project <repo> <id> --look <date>
 //   run experiments conclude --project <repo> <id> --result <r> [--evidence <addr>]
 //   run experiments list --project <repo> [--today <date>]
-//   run experiments push-docs --project <repo>
+//   run experiments page --project <repo>
 //
-//   exit 0  started, moved, concluded, listed or printed; start, move and
-//           conclude print the experiment's id
+//   exit 0  started, moved, concluded, listed or built; start, move and
+//           conclude print the experiment's id; page prints the page's path
+//           and the slug to publish it under, one per line
 //   exit 1  usage; a refusal, with the record untouched; a corrupt record;
 //           the lock held past its wait
 //
@@ -19,7 +20,10 @@
 // One change runs at a time, through a lock beside the record.
 // Each change is logged through the project's ledger. Dates are UTC calendar
 // days; an experiment is due when it is running and its date to look has come.
-// A level is one side of what the experiment compares.
+// A level is one side of what the experiment compares. The page is one file,
+// .postmaster/experiments-page.html, with every row inline and the time it
+// was built; the project keeps one slug, and each build published to it is the
+// page's next version.
 import {
   appendFileSync,
   existsSync,
@@ -29,7 +33,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   ensureIgnore,
   isDie,
@@ -37,6 +41,8 @@ import {
   projectRoot,
   settingsDir,
 } from "./lib/effective-config.ts";
+import { dataBlock, withData } from "./lib/page-text.ts";
+import { slugOf } from "./lib/pages-host.ts";
 import { argvDecoded, run } from "./lib/proc.ts";
 import { logProjectEvent } from "./log-action.ts";
 
@@ -46,7 +52,7 @@ const USAGE =
   " | run experiments move --project <repo> <id> --look <date>" +
   " | run experiments conclude --project <repo> <id> --result <r> [--evidence <addr>]" +
   " | run experiments list --project <repo> [--today <date>]" +
-  " | run experiments push-docs --project <repo>";
+  " | run experiments page --project <repo>";
 
 // --- core: the record, today's date in, rows out --------------------------------
 // Reading the record and the clock stays at the edge; everything here takes
@@ -199,8 +205,8 @@ export function formatList(rows: Experiment[], today: string): string {
     .join("\n\n")}\n`;
 }
 
-/** pushDocs <rows>: every row as one JSON object keyed by id, for the page's store. */
-export function pushDocs(rows: Experiment[]): string {
+/** pageRows <rows>: every row keyed by id, in id order, as the page reads them. */
+export function pageRows(rows: Experiment[]): Record<string, Omit<Experiment, "id">> {
   const docs: Record<string, Omit<Experiment, "id">> = {};
   const ordered = [...rows].sort((a, b) => idNum(a.id) - idNum(b.id));
   for (const r of ordered) {
@@ -216,7 +222,30 @@ export function pushDocs(rows: Experiment[]): string {
       ended: r.ended,
     };
   }
-  return `${JSON.stringify(docs, null, 2)}\n`;
+  return docs;
+}
+
+/** pageSlug <repo name>: the project's one slug. */
+export function pageSlug(name: string): string {
+  return slugOf(["experiments", name]);
+}
+
+/** buildPage <template> <rows> <as of> <name>: the page with its rows and its time inline. */
+export function buildPage(
+  template: string,
+  rows: Experiment[],
+  asOf: string,
+  name: string,
+): string {
+  const title = `${name} experiments`.replace(/[<>&]/gu, "");
+  return withData(template.replace(/<title>[^<]*<\/title>/u, `<title>${title}</title>`), [
+    dataBlock("experiments-data", { asOf, rows: pageRows(rows) }),
+  ]);
+}
+
+/** asOfText <instant>: the build time as the page shows it, in UTC to the minute. */
+export function asOfText(iso: string): string {
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
 type Applied = { event: ExperimentEvent; error: null } | { event: null; error: string };
@@ -442,7 +471,7 @@ function parseArgs(argv: string[]): Parsed {
     form !== "move" &&
     form !== "conclude" &&
     form !== "list" &&
-    form !== "push-docs"
+    form !== "page"
   ) {
     usage();
   }
@@ -673,9 +702,26 @@ function main(): void {
     releaseLock();
     return;
   }
-  if (p.form === "push-docs") {
-    process.stdout.write(pushDocs(rows));
+  if (p.form === "page") {
+    const template = readFileSync(
+      join(import.meta.dir, "..", "skills", "experiments", "experiments-page.html"),
+      "utf8",
+    );
+    const out = join(root, ".postmaster", "experiments-page.html");
+    if (isSymlink(out)) fail(`${out} must be a file inside the project, not a symlink`);
+    try {
+      ensureIgnore(root, true);
+    } catch (e) {
+      if (isDie(e)) fail(e.message);
+      throw e;
+    }
+    writeFileSync(
+      out,
+      buildPage(template, rows, asOfText(new Date().toISOString()), basename(root)),
+    );
     releaseLock();
+    console.log(out);
+    console.log(pageSlug(basename(root)));
     return;
   }
 
