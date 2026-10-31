@@ -130,8 +130,7 @@ describe("C1+C2: a fixture run is one tab of the postmaster project's space", ()
       }
       const first = tabPanes.filter((pane) => !recordPanes.has(pane));
       expect(first.length).toBe(1);
-      expect(paneView(st, first[0]!).tokens["postmaster"]).toBe("launch");
-      expect(paneView(st, first[0]!).tokens["role"]).toBe("runstate");
+      expect(paneView(st, first[0]!).tokens).toEqual({ postmaster: "launch" });
 
       const runTabs = runTabRecords(fx);
       expect(runTabs.length).toBe(1);
@@ -204,8 +203,7 @@ describe("C2: the fixture tab is shared whatever launches first", () => {
       const recordPanes = new Set(records.map((item) => String(item.pane)));
       const first = tabPanes.filter((pane) => !recordPanes.has(pane));
       expect(first.length).toBe(1);
-      expect(paneView(st, first[0]!).tokens["postmaster"]).toBe("launch");
-      expect(paneView(st, first[0]!).tokens["role"]).toBe("runstate");
+      expect(paneView(st, first[0]!).tokens).toEqual({ postmaster: "launch" });
       expect(fixTabRecords(fx).length).toBe(1);
       expect(runTabRecords(fx).length).toBe(1);
     } finally {

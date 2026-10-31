@@ -4199,23 +4199,18 @@ export async function runControls(): Promise<number> {
         f.caller,
         { POSTMASTER_HOST: "herdr" },
       );
-      const g1state = calls(root, "herdr").filter(
-        (line) => line.startsWith("pane\trun\t") && line.includes("run-state"),
-      );
+      // The launch's own pane command is the positive control for the filter.
+      const g1paneRuns = calls(root, "herdr").filter((line) => line.startsWith("pane\trun\t"));
       await pass(
-        "a run launch lands and starts its state pane",
-        () => g1run.code === 0 && g1state.length === 1,
+        "a run launch lands and runs its own command in its pane",
+        () =>
+          g1run.code === 0 && g1paneRuns.filter((line) => line.includes("_run herdr")).length === 1,
         `${g1run.out}${g1run.err}`,
       );
       await pass(
-        "the state pane runs through the isolated entry",
-        () => g1state.length === 1 && (g1state[0] ?? "").includes("scripts/run"),
-        g1state.join("\n"),
-      );
-      await pass(
-        "not as a bare Bun call from the worktree",
-        () => g1state.length === 1 && !(g1state[0] ?? "").includes("host.ts"),
-        g1state.join("\n"),
+        "and starts no run-state loop in the run tab's first pane",
+        () => g1paneRuns.filter((line) => line.includes("host run-state")).length === 0,
+        g1paneRuns.join("\n"),
       );
       resetHarness(root);
       const g2dispatch = realpathSync(closeDispatch);

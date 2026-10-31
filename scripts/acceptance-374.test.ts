@@ -5,7 +5,7 @@
 // workspace create for the run, the run as one tab of the repository's
 // space, each launch a pane of that tab labelled and titled by run host
 // name, and no tab per launch. C3 lands a marker and checks the tab stays
-// with its state pane, then close-run takes it away with the run. C4 cuts
+// with its first pane, then close-run takes it away with the run. C4 cuts
 // the run-level name to 30 characters and leaves launch names whole.
 // Covered: C1-C4. Not covered: C5 (the fixture run, scored at landing).
 import { describe, expect, test } from "bun:test";
@@ -89,7 +89,7 @@ describe("C1+C2: one run is one tab of the repository's space", () => {
       const runPanes = st.spaces[projSpace]!.panes.filter(
         (pane) => paneView(st, pane).tab === runTab,
       );
-      // Four launches plus the pane that shows the run's state.
+      // Four launches plus the tab's first pane.
       expect(runPanes.length).toBe(5);
       expect(hcalls.filter((line) => line.startsWith("tab\tcreate\t")).length).toBe(2);
 
@@ -107,10 +107,13 @@ describe("C1+C2: one run is one tab of the repository's space", () => {
         expect(paneView(st, pane!).label).toBe(name);
         expect(paneView(st, pane!).title).toBe(name);
       }
-      const statePanes = runPanes.filter((pane) => !recordPanes.has(pane));
-      expect(statePanes.length).toBe(1);
-      expect(paneView(st, statePanes[0]!).tokens["postmaster"]).toBe("launch");
-      expect(paneView(st, statePanes[0]!).tokens["role"]).toBe("runstate");
+      const firstPanes = runPanes.filter((pane) => !recordPanes.has(pane));
+      expect(firstPanes.length).toBe(1);
+      expect(paneView(st, firstPanes[0]!).tokens).toEqual({ postmaster: "launch" });
+      // Each launch's pane ran its own command (the control); no pane ran a run-state loop.
+      const paneRuns = hcalls.filter((line) => line.startsWith("pane\trun\t"));
+      expect(paneRuns.filter((line) => line.includes("_run herdr")).length).toBe(4);
+      expect(paneRuns.filter((line) => line.includes("host run-state"))).toEqual([]);
 
       const runTabs = runTabRecords(fx);
       expect(runTabs.length).toBe(1);
@@ -127,7 +130,7 @@ describe("C1+C2: one run is one tab of the repository's space", () => {
 });
 
 describe("C3: the run tab stays between launches and closes with the run", () => {
-  test("a landed marker leaves the tab with its state pane; close-run takes it", async () => {
+  test("a landed marker leaves the tab with its first pane; close-run takes it", async () => {
     const fx = makeFx("374-persist");
     try {
       const repo = join(fx.root, "repo");
@@ -169,12 +172,9 @@ describe("C3: the run tab stays between launches and closes with the run", () =>
         (pane) => paneView(between, pane).tab === runTab,
       );
       expect(held.length).toBe(1);
-      const stateOut = join(fx.stub, `pane-${held[0]}.out`);
-      expect(await waitFor(() => existsSync(stateOut), 30)).toBe(true);
-      expect(await waitFor(() => readFileSync(stateOut, "utf8").includes(LONG_NAME), 30)).toBe(
-        true,
-      );
-      expect(readFileSync(stateOut, "utf8")).toContain("stage:");
+      // The launch's pane ran its command (the control); the tab's first pane ran none.
+      expect(existsSync(join(fx.stub, `pane-${launchPane}.out`))).toBe(true);
+      expect(existsSync(join(fx.stub, `pane-${held[0]}.out`))).toBe(false);
 
       const closed = sh(SELF, ["host", "close-run", dispatch], env, fx.root);
       expect(closed.code).toBe(0);
