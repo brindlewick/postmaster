@@ -56,7 +56,7 @@ export const store = {
 export const S = {
   R: null, files: [], key: "review-page", hay: [],
   tree: [], treeSeq: [], orderSeq: [], allDirs: [], defaultOpen: new Set(),
-  open: new Set(), query: "", ticks: new Set(), comments: [], db: null, dbOff: false,
+  open: new Set(), query: "", ticks: new Set(), comments: [], db: null, dbTrying: false,
   tab: "overview", screen: "overview", seq: "order", fi: -1, wide: false,
   scroll: { overview: 0, tree: 0, order: 0 }, wrap: false, sel: null, flag: null,
 };
@@ -178,7 +178,11 @@ export function runs(into, list) {
     if (r.cls.length) into.append(el("span", r.cls.join(" "), r.text));
     else into.append(document.createTextNode(r.text));
   }
-  if (!list.length) into.append(document.createTextNode(" "));
+  // A blank line holds one space so that its row has a height; the mark says the line itself is empty.
+  if (!list.length) {
+    into.dataset.blank = "1";
+    into.append(document.createTextNode(" "));
+  }
   return into;
 }
 

@@ -5,6 +5,7 @@
 // page's structure are compared with goldens, and two builds are compared byte for byte.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -232,6 +233,77 @@ describe("the script: change", () => {
     for (const f of ["index.html", "review.json", "chunks/0.json"]) {
       expect(readFileSync(join(a, f), "utf8")).toBe(readFileSync(join(b, f), "utf8"));
     }
+  });
+});
+
+describe("the script: change, on a new head", () => {
+  const g = (...a: string[]) => {
+    const r = run("git", ["-C", repo, ...a]);
+    if (r.code !== 0) throw new Error(r.err);
+    return r.out.trim();
+  };
+  const hashesOf = (dir: string): Record<string, string> =>
+    Object.fromEntries(
+      (
+        JSON.parse(readFileSync(join(dir, "review.json"), "utf8")).files as {
+          path: string;
+          hash: string;
+        }[]
+      ).map((f) => [f.path, f.hash]),
+    );
+  const buildAt = (out: string, at: string) =>
+    run("bun", [script, "change", out, "--base", base, "--head", at, "--title", "Two edits"], {
+      cwd: repo,
+    });
+  let more = "";
+  let pictureOne = "";
+  let pictureTwo = "";
+
+  beforeAll(() => {
+    appendFileSync(join(repo, "src", "new.ts"), "export const m = 2;\n");
+    writeFileSync(join(repo, "logo.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    g("add", "-A");
+    g("commit", "-q", "-m", "more");
+    more = g("rev-parse", "HEAD");
+    pictureOne = more;
+    writeFileSync(join(repo, "logo.bin"), Buffer.from([0, 1, 2, 9, 0, 255]));
+    g("add", "-A");
+    g("commit", "-q", "-m", "picture");
+    pictureTwo = g("rev-parse", "HEAD");
+  });
+
+  test("a file whose diff did not change keeps its hash on a new head, and the changed one gets another", () => {
+    const first = join(repo, ".out-hash-v1");
+    const second = join(repo, ".out-hash-v2");
+    expect(build(first).code).toBe(0);
+    expect(buildAt(second, more).code).toBe(0);
+    const a = hashesOf(first);
+    const b = hashesOf(second);
+    for (const h of Object.values(a)) expect(h).toMatch(/^[0-9a-f]{64}$/u);
+    expect(b["keep.txt"]).toBe(a["keep.txt"]);
+    expect(b["gone.txt"]).toBe(a["gone.txt"]);
+    expect(b["src/new.ts"]).not.toBe(a["src/new.ts"]);
+  });
+
+  test("the same head gives the same hashes, whichever folder it is built into", () => {
+    const one = join(repo, ".out-hash-same-a");
+    const two = join(repo, ".out-hash-same-b");
+    expect(buildAt(one, more).code).toBe(0);
+    expect(buildAt(two, more).code).toBe(0);
+    expect(Object.keys(hashesOf(one)).length).toBeGreaterThan(3);
+    expect(hashesOf(two)).toEqual(hashesOf(one));
+    for (const h of Object.values(hashesOf(one))) expect(h).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  test("a binary file has no diff to show, so its hash follows the id of its content", () => {
+    const one = join(repo, ".out-hash-bin-1");
+    const two = join(repo, ".out-hash-bin-2");
+    const same = join(repo, ".out-hash-bin-3");
+    expect(buildAt(one, pictureOne).code).toBe(0);
+    expect(buildAt(two, pictureTwo).code).toBe(0);
+    expect(buildAt(same, pictureOne).code).toBe(0);
+    expect(hashesOf(two)["logo.bin"]).not.toBe(hashesOf(one)["logo.bin"]);
+    expect(hashesOf(same)["logo.bin"]).toBe(hashesOf(one)["logo.bin"]);
   });
 });
 

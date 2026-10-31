@@ -2,11 +2,13 @@
 // assets are loaded from the checkout, so a missing or broken asset fails here and not on a phone.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { stripExports, stripImports } from "./review-assemble.ts";
 import { loadPageAssets, parseManifest } from "./review-assets.ts";
 
 const TOOL = join(import.meta.dir, "..", "..");
+// An import of names from another module, as the transpiler writes it; the file it names is the first group.
+const MODULE_IMPORT = /^import[ \t\r\n]*\{[^}]*\}[ \t\r\n]*from[ \t\r\n]*["']([^"'\r\n]*)["']/gmu;
 
 describe("parseManifest", () => {
   test("a complete manifest is accepted as it is", () => {
@@ -46,13 +48,18 @@ describe("the page assets of this checkout", () => {
     expect(assets.shell).toContain("@@CSS@@");
   });
 
-  test("modules arrive as plain JavaScript: types and imports are gone, exports remain for stripping", () => {
-    for (const m of assets.modules) {
+  test("modules arrive as plain JavaScript: types are gone, an import names a module listed before it, and exports remain for stripping", () => {
+    const listed = (manifest.modules as string[]).map((f) => basename(f));
+    assets.modules.forEach((m, k) => {
+      for (const hit of m.matchAll(MODULE_IMPORT)) {
+        const at = listed.indexOf(basename(hit[1] ?? ""));
+        expect([k, hit[1], at >= 0 && at < k]).toEqual([k, hit[1], true]);
+      }
       // ASCII: the module text is the transpiler's own output.
-      expect(m).not.toMatch(/^\s*import\b/mu);
+      expect(stripImports(m)).not.toMatch(/^\s*import\b/mu);
       expect(m).not.toContain(": string");
       expect(m).toMatch(/^export function /mu);
-    }
+    });
   });
 
   test("no asset holds an em dash or an en dash, a slot marker or a tool path", () => {

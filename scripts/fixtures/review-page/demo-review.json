@@ -79,7 +79,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "4ac790c058"
+      "sig": "4ac790c058",
+      "hash": "284d751669cd73fc3c00488d0dce3f908739b316e3150ec842e6ce7ef1d2c68a"
     },
     {
       "path": "apps/shop/src/routes/cart.tsx",
@@ -94,7 +95,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "839ed54783"
+      "sig": "839ed54783",
+      "hash": "f2c3a7f1c80ef285a60544d8d775f49c37595685cdecfa49cc7190d53e299fd6"
     },
     {
       "path": "apps/shop/src/features/cart/components/GiftWrapToggle.tsx",
@@ -109,7 +111,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "b62c565201"
+      "sig": "b62c565201",
+      "hash": "caebdd9c55dcccc95f7b63a3d9e11b32f703b984bf906e6e951cf6ad5c6e28f0"
     },
     {
       "path": "apps/shop/src/routes/checkout.tsx",
@@ -124,7 +127,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "724446551c"
+      "sig": "724446551c",
+      "hash": "a7a8fff838b71642cc039fa71bdd721a16c4ec430dcebbc9e313bad303fd0097"
     },
     {
       "path": "apps/shop/src/features/cart/giftNote.ts",
@@ -139,7 +143,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "a203be3a13"
+      "sig": "a203be3a13",
+      "hash": "ab480961adb7b0ddb0bff5369de6fd0da7db33140d0d2fa1ab0def9bd84b75ff"
     },
     {
       "path": "apps/shop/src/features/cart/cartTotals.ts",
@@ -154,7 +159,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "581dd5962d"
+      "sig": "581dd5962d",
+      "hash": "f172a90d95829abe2521e031b2f6841a06ae617593cfe2d1a5ec79153095844a"
     },
     {
       "path": "apps/shop/src/features/checkout/checkout.ts",
@@ -169,7 +175,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "692a93f7a3"
+      "sig": "692a93f7a3",
+      "hash": "8c3e0d5dea60ed9973be3ae1a2d6b337f16fe21f9951f885e220fd30d4c6a08d"
     },
     {
       "path": "apps/shop/src/features/cart/components/CartList.tsx",
@@ -184,7 +191,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "a13b253e9e"
+      "sig": "a13b253e9e",
+      "hash": "d1d0a812037fbd67948df7f748723964de194c1f4a01a5b3a8862880c73cb2da"
     },
     {
       "path": "apps/shop/src/features/checkout/shipping.ts",
@@ -199,7 +207,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "d371940fd6"
+      "sig": "d371940fd6",
+      "hash": "84034789ac186087d905bb5e3b7b13e831a4ceeefa48c9c85f07fb8aa72214f8"
     },
     {
       "path": "packages/ui/src/styles.css",
@@ -214,7 +223,8 @@
       "purposeSource": "heuristic",
       "lang": "css",
       "chunk": 0,
-      "sig": "d6878a2a0f"
+      "sig": "d6878a2a0f",
+      "hash": "c3a06300ac4a0f044d98143bb3649a6b325dba26f8e275233343afcf8600714c"
     },
     {
       "path": "packages/ui/src/Toggle.tsx",
@@ -229,7 +239,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "5c6d54667e"
+      "sig": "5c6d54667e",
+      "hash": "4dba675b63100a0f9829599bd841be38c761f72d7a330ff57b4a3cd2d9df8dd8"
     },
     {
       "path": "packages/ui/src/icons/outline/gift.tsx",
@@ -244,7 +255,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "6406ad0616"
+      "sig": "6406ad0616",
+      "hash": "8f7bf03ebf260fe2fbc106b5630294019be0713de7ed8b023893e66b90a3d36a"
     },
     {
       "path": "packages/ui/src/icons/outline/box.tsx",
@@ -259,7 +271,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "c85432e85d"
+      "sig": "c85432e85d",
+      "hash": "6dd78be8206418bc94906f3226f05eca2296b3b0ae6cdf52d8b9fcf9c6be8875"
     },
     {
       "path": "packages/ui/src/icons/outline/types.ts",
@@ -274,7 +287,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "cf4f50d221"
+      "sig": "cf4f50d221",
+      "hash": "90efc2ea54554c7b40adc1b3d03d0365133060f97f73ef33215cb1490129c36c"
     },
     {
       "path": "packages/ui/src/index.ts",
@@ -289,7 +303,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "8a42874797"
+      "sig": "8a42874797",
+      "hash": "f555a01dd4bcee99eff0dea815753366db90f4faaba5a56f7d439059ef803ee5"
     },
     {
       "path": "packages/ui/src/Button.tsx",
@@ -304,7 +319,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "2d1810f530"
+      "sig": "2d1810f530",
+      "hash": "4e611241fc3250f6fef4056b280057b76215ae7d477251dd9471306ac5b7b1ad"
     },
     {
       "path": "apps/admin/src/orders/export/formats/csv.ts",
@@ -319,7 +335,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "c240760a03"
+      "sig": "c240760a03",
+      "hash": "74c8b151c859519251d871447bfb47f4501ebadea486502e6f13dbd0be214d5c"
     },
     {
       "path": "apps/admin/src/orders/export/formats/json.ts",
@@ -334,7 +351,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "10924f5ab6"
+      "sig": "10924f5ab6",
+      "hash": "ba39d6e4fc554dc2759909eb38baec643e3a06ffe4e60739691dfb2d1d0905fd"
     },
     {
       "path": "apps/admin/src/orders/orderList.ts",
@@ -349,7 +367,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "2f254737ea"
+      "sig": "2f254737ea",
+      "hash": "f51063ce3a4d19c79e0ddc369717e953debbafed01c6f46b60251ffbdd1c8706"
     },
     {
       "path": "packages/pricing/src/rules/volume/tiers/wrap.ts",
@@ -364,7 +383,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "a42495f9fe"
+      "sig": "a42495f9fe",
+      "hash": "731df89fd8e00d17988a79456bbc9d8f514a4a7af9f6daec56197819c0fa7a1c"
     },
     {
       "path": "packages/pricing/src/rules/volume/tiers/standard.ts",
@@ -379,7 +399,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "cff4caff64"
+      "sig": "cff4caff64",
+      "hash": "e4c35ec9b3e4282615f0bfa67c60c6e7edef9016a70622deef596795eed82408"
     },
     {
       "path": "packages/pricing/src/tax.ts",
@@ -394,7 +415,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "3a8d13c8f2"
+      "sig": "3a8d13c8f2",
+      "hash": "c8dc6e0b4a1a89c8b7c7da9f93e2dab3bda49e152abd561562fb61804c0ade5c"
     },
     {
       "path": "packages/pricing/src/index.ts",
@@ -409,7 +431,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "83f8e0a66d"
+      "sig": "83f8e0a66d",
+      "hash": "7b86124448a43346d27d4948c46f9dbd01ca151c5c455085b9c0f356c7bcdc77"
     },
     {
       "path": "packages/pricing/src/types.ts",
@@ -424,7 +447,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "477ecdca1a"
+      "sig": "477ecdca1a",
+      "hash": "1b4e9f71fa15aad368bf7d8f98fa8c582b4b41550331fc82c27f8ee82d6f6adc"
     },
     {
       "path": "docs/gift-wrap.md",
@@ -439,7 +463,8 @@
       "purposeSource": "layout",
       "lang": "markdown",
       "chunk": 0,
-      "sig": "b37d19916d"
+      "sig": "b37d19916d",
+      "hash": "82fafd0abc6f17906e69ef3b7e7d4739afd544473b96c1e1108c89a418fde114"
     },
     {
       "path": "docs/architecture.md",
@@ -454,7 +479,8 @@
       "purposeSource": "heuristic",
       "lang": "markdown",
       "chunk": 0,
-      "sig": "14107811a5"
+      "sig": "14107811a5",
+      "hash": "5bcd073cd36055fc1e1346d86ee1e2168e5aee7891008646e2aa81cad43a2210"
     },
     {
       "path": "README.md",
@@ -469,7 +495,8 @@
       "purposeSource": "heuristic",
       "lang": "markdown",
       "chunk": 0,
-      "sig": "d29d065398"
+      "sig": "d29d065398",
+      "hash": "16707a02edba14777c995df49748f49ca56acb021a4a13374fadfec9cb73378c"
     },
     {
       "path": ".github/workflows/ci.yml",
@@ -484,7 +511,8 @@
       "purposeSource": "heuristic",
       "lang": "yaml",
       "chunk": 0,
-      "sig": "7a17879d78"
+      "sig": "7a17879d78",
+      "hash": "d27a2f4605ab55af583af19e793aec88e3997c18da7e040eccc66101ffab62aa"
     },
     {
       "path": "package.json",
@@ -499,7 +527,8 @@
       "purposeSource": "heuristic",
       "lang": "json",
       "chunk": 0,
-      "sig": "5bc6c56c2c"
+      "sig": "5bc6c56c2c",
+      "hash": "d90e28971dc99b5bd7f05adb8553f6c0d3758c2c44688723ac236bd801405336"
     },
     {
       "path": "packages/pricing/package.json",
@@ -514,7 +543,8 @@
       "purposeSource": "heuristic",
       "lang": "json",
       "chunk": 0,
-      "sig": "8f87446e04"
+      "sig": "8f87446e04",
+      "hash": "7c6640cde27dd1441749ce9048f6909d2f7b6fec4734f50e0f6eeec6d081d004"
     },
     {
       "path": "apps/shop/.env.ci",
@@ -530,7 +560,8 @@
       "withheld": "Environment files are not shown on review pages. Only their name and size of change are listed.",
       "lang": "plaintext",
       "chunk": 0,
-      "sig": "c3a9320d7b"
+      "sig": "c3a9320d7b",
+      "hash": "0a4d0f9f9ece9f220d1d378580b314c869cd2c3794888371119ecf7a26ae2c52"
     },
     {
       "path": "apps/shop/src/features/cart/cartTotals.test.ts",
@@ -545,7 +576,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "bb11cc98d9"
+      "sig": "bb11cc98d9",
+      "hash": "8979c4ff405c8235f83669dbfb1f14232f0c8152144a7d52f3cc8e37998afaae"
     },
     {
       "path": "apps/admin/src/orders/export/formats/formats.test.ts",
@@ -560,7 +592,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "dfcfad4cf8"
+      "sig": "dfcfad4cf8",
+      "hash": "d6ee5dd1ed42e7a33a396ad335b373a8bfbb67b206fbd91e87152eef27508a39"
     },
     {
       "path": "apps/shop/src/features/cart/cart.test.ts",
@@ -575,7 +608,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "9deb34492d"
+      "sig": "9deb34492d",
+      "hash": "89ad9614bf499d8aec6d605c9656d2177a522d2cca4b370aff3990a5342a4598"
     },
     {
       "path": "apps/admin/src/orders/orderList.test.ts",
@@ -590,7 +624,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "2dbaa3fd16"
+      "sig": "2dbaa3fd16",
+      "hash": "fe376bf204c57e61c8c43dffa2181a64974fe1cf30c460ee4c8ca80b2594ec20"
     },
     {
       "path": "apps/shop/src/features/checkout/shipping.test.ts",
@@ -605,7 +640,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "57e7eff9db"
+      "sig": "57e7eff9db",
+      "hash": "31686a8d89933ee068ba397fe534f940b9e118838a5d8daa70d2e8b63c2c20a6"
     },
     {
       "path": "apps/shop/src/features/cart/components/GiftWrapToggle.test.tsx",
@@ -620,7 +656,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "5a1a36cfe9"
+      "sig": "5a1a36cfe9",
+      "hash": "19ee051fe3687f721591d6ce0e62c8e4142ba676bdedbd8777e3baf0cbbf1420"
     },
     {
       "path": "packages/ui/src/Toggle.test.tsx",
@@ -635,7 +672,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "7105cbd392"
+      "sig": "7105cbd392",
+      "hash": "3b5de0bf38e34297659cf79088f9308dccd0e502707e92387dcded1f306cc942"
     },
     {
       "path": "packages/pricing/src/rules/volume/tiers/wrap.test.ts",
@@ -650,7 +688,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "f440e20d44"
+      "sig": "f440e20d44",
+      "hash": "11383512185c2f16e7e2061f8f4e0b54c88a8abab7fec284f673b953baee4418"
     },
     {
       "path": "e2e/cart.spec.ts",
@@ -665,7 +704,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "997fa0ece6"
+      "sig": "997fa0ece6",
+      "hash": "fc4cf6c7e4645fe9f4a1637fcca6a8dc1c3e9a75789e58f3e1cf127af079bc9a"
     },
     {
       "path": "apps/shop/src/features/checkout/checkout.test.ts",
@@ -680,7 +720,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "ada64d8f60"
+      "sig": "ada64d8f60",
+      "hash": "8825e14f9a981ca71171e6ca75f59d62deab263d64bc593396d4174e32c4593a"
     },
     {
       "path": "e2e/checkout.spec.ts",
@@ -695,7 +736,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "2658d0903b"
+      "sig": "2658d0903b",
+      "hash": "d74725623de48e54d4ea0ab2a0b08e0c102245606ec0a0a1dec8d9667f4c4272"
     },
     {
       "path": "packages/pricing/src/testing/fixtures.ts",
@@ -710,7 +752,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "18ba919c0b"
+      "sig": "18ba919c0b",
+      "hash": "d638f693d29b647bb4f349fdc62c4c635782e59cf77f52b48da503f10d193d6a"
     },
     {
       "path": "e2e/helpers/server.ts",
@@ -725,7 +768,8 @@
       "purposeSource": "heuristic",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "9f3e99ef82"
+      "sig": "9f3e99ef82",
+      "hash": "4e7c93ab4910cdeb3e3d1ccea449733b84d996ef8fe4e2c36d222029d3fd7682"
     },
     {
       "path": "pnpm-lock.yaml",
@@ -740,7 +784,8 @@
       "purposeSource": "heuristic",
       "lang": "yaml",
       "chunk": 0,
-      "sig": "277cb44938"
+      "sig": "277cb44938",
+      "hash": "b318deb8297bc6acb24916cf50f6c6c4d6e9d00f7d46ca6e999205bc9ace0d7d"
     },
     {
       "path": "apps/shop/src/routeTree.gen.ts",
@@ -755,7 +800,8 @@
       "purposeSource": "layout",
       "lang": "typescript",
       "chunk": 0,
-      "sig": "83807f5a7d"
+      "sig": "83807f5a7d",
+      "hash": "7d1eeeb6d8cb369bca83e1181e7f95400cc6cd76fbd2d50443722770163093d5"
     }
   ],
   "rulings": [

@@ -22,6 +22,15 @@
 // below it in stacking order, left aligned a small fixed distance from the left edge of the row,
 // never taking a tap, and staying at the left edge of what is shown as the code scrolls.
 //
+// The page bridge is driven too, on the runs bridgeChecksFor names. /host.html is a stand-in for
+// the viewer around a page (scripts/lib/page-bridge-stand-in.ts): it frames /index.html in a sandbox
+// with an origin of its own, answers the page's messages the way the page bridge says a viewer must,
+// and can be told to delay, drop, fail, rate-limit or conflict. The bridge checks tick files and
+// reload (ticks come back), play a new version (the file whose diff changed starts unticked), wait for
+// a viewer that never answers (Not saved after 1.5 seconds, and after 5 seconds for a write), meet a
+// conflict, leave a comment (it shows at once and reaches the viewer as a line anchor) and let the
+// viewer ask for lines to be shown. Their verdicts are in scripts/review-page-gate-bridge.ts.
+//
 // Screenshots and report.json go into --out (default: a new temporary folder).
 //
 // Playwright is not a dependency of this repository: it is found at run time, in this order.
@@ -46,6 +55,26 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { extname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import {
+  createStandIn,
+  type StandIn,
+  type StandInOptions,
+  standInPage,
+} from "./lib/page-bridge-stand-in.ts";
+import {
+  allOf,
+  bridgeTicksVerdict,
+  commentVerdict,
+  conflictVerdict,
+  focusVerdict,
+  newVersionOverrides,
+  newVersionVerdict,
+  type Note,
+  notSavedVerdict,
+  protocolProblems,
+  unansweredVerdict,
+  withProtocol,
+} from "./review-page-gate-bridge.ts";
 
 export const USAGE = [
   "usage: review-page-gate.ts <page-dir> [--out <dir>] [--quick]",
@@ -237,7 +266,17 @@ export function contextOptions(run: Run) {
 }
 
 /** The steps photographed in a single-pane run (any width under WIDE_FROM). */
-const PHONE_SHOTS = ["overview", "tree", "tree-search", "file", "composer", "order", "find"];
+const PHONE_SHOTS = [
+  "overview",
+  "tree",
+  "tree-search",
+  "file",
+  "composer",
+  "order",
+  "find",
+  "not-saved",
+  "bridge-comment",
+];
 /** The steps photographed in a two-pane run. */
 const WIDE_SHOTS = ["overview", "tree-with-file"];
 
@@ -426,7 +465,21 @@ export interface PwLocator {
   nth(index: number): PwLocator;
   click(): Promise<void>;
 }
+/** A frame of a page: what the gate uses of the page inside the stand-in viewer. */
+export interface PwFrame {
+  url(): string;
+  evaluate(expression: string): Promise<unknown>;
+  waitForFunction(
+    expression: string,
+    arg: undefined,
+    options: { timeout: number; polling: number },
+  ): Promise<unknown>;
+  click(selector: string): Promise<void>;
+  fill(selector: string, value: string): Promise<void>;
+  locator(selector: string): PwLocator;
+}
 export interface PwPage {
+  frames(): PwFrame[];
   on(event: "console", listener: (message: PwConsoleMessage) => void): unknown;
   on(event: "pageerror", listener: (error: Error) => void): unknown;
   on(event: "requestfailed", listener: (request: PwRequest) => void): unknown;
@@ -1288,9 +1341,18 @@ export function diffLayoutVerdict(
 export interface PageServer {
   origin: string;
   stop(): void;
+  /** Text served in place of a file, by request path: the data of a page made to look like a new version. */
+  overrides: Map<string, string>;
+  /** Applied last to the text of the page (before it is wrapped) and of the data files, to put a fault in. */
+  setRewrite(rewrite: ((pathname: string, text: string) => string) | null): void;
 }
 
 const NO_STORE = { "cache-control": "no-store" };
+/** A page in a sandbox with no origin of its own reads its data files only if they say any origin may. */
+const ANY_ORIGIN = { "access-control-allow-origin": "*" };
+/** The stand-in viewer around the page, and the path where its page posts what the page sent. */
+export const VIEWER_URL = "/host.html";
+const MESSAGE_URL = "/__stand-in/message";
 
 function readText(path: string): string | null {
   try {
@@ -1308,34 +1370,70 @@ function readBytes(path: string): Uint8Array | null {
   }
 }
 
-/** Serve `dir` on loopback: /index.html wrapped, /plain.html bare, anything else as the file it names. */
-export function startServer(dir: string): PageServer {
+/**
+ * Serve `dir` on loopback: /index.html wrapped, /plain.html bare, anything else as the file it names.
+ * With a stand-in viewer, /host.html is the viewer page that frames /index.html, and a POST to
+ * /__stand-in/message is answered by the stand-in.
+ */
+export function startServer(dir: string, standIn?: StandIn): PageServer {
   const root = resolve(dir);
-  const html = (text: string): Response =>
-    new Response(text, { headers: { "content-type": contentType("index.html"), ...NO_STORE } });
-  const missing = (): Response =>
-    new Response("not found", {
-      status: 404,
-      headers: { "content-type": "text/plain", ...NO_STORE },
-    });
-  const handler = (req: ServeRequest): Response => {
+  const overrides = new Map<string, string>();
+  let rewrite: ((pathname: string, text: string) => string) | null = null;
+  const text = (pathname: string, built: string | null): string | null => {
+    const base = overrides.get(pathname) ?? built;
+    return base === null || rewrite === null ? base : rewrite(pathname, base);
+  };
+  const reply = (body: string, type: string, status = 200): Response =>
+    new Response(body, { status, headers: { "content-type": type, ...NO_STORE, ...ANY_ORIGIN } });
+  const html = (body: string): Response => reply(body, contentType("index.html"));
+  const missing = (): Response => reply("not found", "text/plain", 404);
+  const message = async (req: ServeRequest): Promise<Response> => {
+    if (standIn === undefined) return missing();
+    if (req.method !== "POST") return reply("use POST", "text/plain", 405);
+    try {
+      return reply(
+        JSON.stringify(standIn.receive(JSON.parse(await req.text()))),
+        "application/json",
+      );
+    } catch {
+      return reply("not JSON", "text/plain", 400);
+    }
+  };
+  const handler = (req: ServeRequest): Response | Promise<Response> => {
     const pathname = new URL(req.url).pathname;
     if (pathname === "/favicon.ico") return new Response(null, { status: 204 });
+    if (pathname === MESSAGE_URL) return message(req);
+    if (pathname === VIEWER_URL)
+      return standIn === undefined ? missing() : html(standInPage("/index.html"));
     const wrapped = pathname === "/" || pathname === "/index.html";
     if (wrapped || pathname === PLAIN_URL) {
-      const text = readText(join(root, "index.html"));
-      if (text === null) return missing();
-      return html(wrapped ? wrapSkeleton(text) : text);
+      const page = text("/index.html", readText(join(root, "index.html")));
+      if (page === null) return missing();
+      return html(wrapped ? wrapSkeleton(page) : page);
     }
     const file = servedPath(root, pathname);
+    const replaced = text(
+      pathname,
+      file === null || !pathname.endsWith(".json") ? null : readText(file),
+    );
+    if (replaced !== null) return reply(replaced, contentType(pathname));
     const bytes = file === null ? null : readBytes(file);
     if (file === null || bytes === null) return missing();
-    return new Response(bytes, { headers: { "content-type": contentType(file), ...NO_STORE } });
+    return new Response(bytes, {
+      headers: { "content-type": contentType(file), ...NO_STORE, ...ANY_ORIGIN },
+    });
   };
   // Bun.serve's declared options have no hostname, so the options are built first.
   const options = { hostname: "127.0.0.1", port: 0, fetch: handler };
   const server = Bun.serve(options);
-  return { origin: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
+  return {
+    origin: `http://127.0.0.1:${server.port}`,
+    stop: () => server.stop(true),
+    overrides,
+    setRewrite: (fn) => {
+      rewrite = fn;
+    },
+  };
 }
 
 // ---------- the helpers that run inside the page ----------
@@ -1368,6 +1466,12 @@ export const GATE_FUNCTIONS = [
   "wrapState",
   "boxSized",
   "diffLayout",
+  "saveNotes",
+  "tickedFiles",
+  "threads",
+  "flaggedLines",
+  "rowsOf",
+  "openPath",
 ] as const;
 
 type GateFunction = (typeof GATE_FUNCTIONS)[number];
@@ -1667,15 +1771,40 @@ window.__gate = (() => {
     return { box: { left: b.left, width: b.width, scrollLeft: code.scrollLeft, scrolls }, rows: measured };
   };
 
+  // The lines the page shows where ticks and comments appear ("Not saved"), those on screen, by what they are about.
+  const saveNotes = () => all(".savenote").filter(shown).map((e) => ({ scope: e.dataset.scope || "", text: e.textContent.trim() }));
+  // Every file whose tick is on, in any list: the tree, the order and the file list each hold a tick for every file.
+  const tickedFiles = () => Array.from(new Set(all(".tick[data-fi]")
+    .filter((b) => b.getAttribute("aria-checked") === "true").map((b) => Number(b.dataset.fi)))).sort((a, b) => a - b);
+  // The comments under the lines of the open file: who wrote them, what they say, and whether they are kept.
+  const threads = () => all("#file-code .thread .cm").map((e) => ({
+    who: (($(".who", e) || {}).textContent || "").trim(),
+    text: Array.from(e.childNodes).filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.nodeValue).join("").trim(),
+    save: e.dataset.save || "",
+    note: (($(".cnote", e) || {}).textContent || "").trim(),
+  }));
+  // The rows of the open diff that are marked, as side and line.
+  const flaggedLines = () => all("#file-code .r.flag").map((r) => ({ side: r.dataset.side, line: Number(r.dataset.line) }));
+  // The first n rows of the open diff: side, line and the text of the line.
+  const rowsOf = (n) => all("#file-code .r").slice(0, n).map((r) => {
+    const c = $(".c", r);
+    return { side: r.dataset.side, line: Number(r.dataset.line), text: c ? c.textContent : "", blank: !!(c && c.hasAttribute("data-blank")) };
+  });
+  // The path of the open file, as its head shows it.
+  const openPath = () => (text("#file-head .fdir") || "") + (text("#file-head .fname") || "");
+
   return { screens, header, audit, fonts, edges, rows, tree, collapsed, fileFacts, fileReady, box, composer,
     progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes, wrapState,
-    boxSized, diffLayout };
+    boxSized, diffLayout, saveNotes, tickedFiles, threads, flaggedLines, rowsOf, openPath };
 })();
 `;
 
 // ---------- driving the page ----------
 
-interface Ctx {
+/** What the gate's helpers use of a page: a whole page, or the frame of one inside the stand-in viewer. */
+type Driver = Pick<PwPage, "evaluate" | "waitForFunction" | "click" | "fill" | "locator">;
+
+export interface Ctx {
   page: PwPage;
   run: Run;
   review: ReviewInfo;
@@ -1685,6 +1814,11 @@ interface Ctx {
   steps: ReadonlySet<string>;
   audits: ScreenAudit[];
   failed: string[];
+  /** The stand-in for the viewer, and the server that holds it and can serve a changed page. */
+  standIn: StandIn;
+  server: PageServer;
+  /** Options the bridge checks give the stand-in on top of their own: how a control puts a fault in the viewer. */
+  fault: Partial<StandInOptions>;
 }
 
 interface TreeFacts {
@@ -1711,13 +1845,13 @@ const SIDEWAYS_PX = 200;
 const BACK_SETTLE_MS = 450;
 
 /** Call window.__gate.<fn>(...args) in the page. */
-function gate<T>(page: PwPage, fn: GateFunction, ...args: readonly unknown[]): Promise<T> {
+function gate<T>(page: Driver, fn: GateFunction, ...args: readonly unknown[]): Promise<T> {
   const call = `window.__gate.${fn}(${args.map((a) => JSON.stringify(a)).join(",")})`;
   return page.evaluate(call) as Promise<T>;
 }
 
 async function until(
-  page: PwPage,
+  page: Driver,
   expression: string,
   what: string,
   timeout = WAIT_MS,
@@ -1730,7 +1864,7 @@ async function until(
 }
 
 /** Wait, and carry on if it never happens: the verdict reports what the page shows. */
-async function tryUntil(page: PwPage, expression: string, timeout = WAIT_MS): Promise<void> {
+async function tryUntil(page: Driver, expression: string, timeout = WAIT_MS): Promise<void> {
   try {
     await page.waitForFunction(expression, undefined, { timeout, polling: POLL_MS });
   } catch {
@@ -1738,7 +1872,7 @@ async function tryUntil(page: PwPage, expression: string, timeout = WAIT_MS): Pr
   }
 }
 
-async function tap(page: PwPage, selector: string): Promise<void> {
+async function tap(page: Driver, selector: string): Promise<void> {
   try {
     await page.click(selector);
   } catch (e) {
@@ -1746,7 +1880,7 @@ async function tap(page: PwPage, selector: string): Promise<void> {
   }
 }
 
-async function typeInto(page: PwPage, selector: string, value: string): Promise<void> {
+async function typeInto(page: Driver, selector: string, value: string): Promise<void> {
   try {
     await page.fill(selector, value);
   } catch (e) {
@@ -1762,16 +1896,16 @@ async function attempt(id: string, fn: () => Promise<Verdict>): Promise<Check> {
   }
 }
 
-const waitFileReady = (page: PwPage): Promise<void> =>
+const waitFileReady = (page: Driver): Promise<void> =>
   until(page, "window.__gate.fileReady()", "the file to load");
 
 const rowSelector = (fi: number): string => `#tree li.trow.file[data-fi="${fi}"] button.tgo`;
 
-const stamp = (page: PwPage, scheme: string): Promise<unknown> =>
+const stamp = (page: Driver, scheme: string): Promise<unknown> =>
   page.evaluate(`document.documentElement.setAttribute("data-theme", ${JSON.stringify(scheme)})`);
 
 /** The page is ready once its tree has rows. */
-async function whenReady(page: PwPage, scheme: string): Promise<void> {
+async function whenReady(page: Driver, scheme: string): Promise<void> {
   await stamp(page, scheme);
   await until(
     page,
@@ -1794,7 +1928,7 @@ async function audit(ctx: Ctx, screen: string, root = ""): Promise<void> {
 type Tab = "overview" | "tree" | "order";
 
 /** Show a tab's screen; the file list is closed first, and under WIDE_FROM with a file open, Back is pressed, so the tabs are there. */
-async function gotoTab(page: PwPage, tab: Tab): Promise<void> {
+async function gotoTab(page: Driver, tab: Tab): Promise<void> {
   if ((await gate<{ opened: boolean }>(page, "find")).opened) await tap(page, "#find-close");
   const head = await gate<{ tabs: boolean; back: boolean }>(page, "header");
   if (!head.tabs && head.back) {
@@ -1807,7 +1941,7 @@ async function gotoTab(page: PwPage, tab: Tab): Promise<void> {
 }
 
 /** Open files from the top of the tree until one has at least `min` diff lines; its index, or null. */
-async function openFileWithRows(ctx: Ctx, min: number): Promise<number | null> {
+async function openFileWithRows(ctx: { page: Driver }, min: number): Promise<number | null> {
   const { page } = ctx;
   await gotoTab(page, "tree");
   await tap(page, "#tree-expand");
@@ -1855,7 +1989,7 @@ async function visitFile(ctx: Ctx): Promise<Check[]> {
 
 type PhoneCheck = (ctx: Ctx) => Promise<Verdict>;
 
-const treeOf = (page: PwPage): Promise<TreeFacts> => gate<TreeFacts>(page, "tree");
+const treeOf = (page: Driver): Promise<TreeFacts> => gate<TreeFacts>(page, "tree");
 
 async function checkTreeVisible({ page }: Ctx): Promise<Verdict> {
   await gotoTab(page, "tree");
@@ -1909,7 +2043,7 @@ async function checkOpenFile({ page }: Ctx): Promise<Verdict> {
 }
 
 /** Collapse everything, then open the largest folders on screen until two are open and the page can scroll. */
-async function openFolders(page: PwPage): Promise<void> {
+async function openFolders(page: Driver): Promise<void> {
   await tap(page, "#tree-collapse");
   let opened = 0;
   for (let step = 0; step < FILES_TRIED; step++) {
@@ -2156,6 +2290,478 @@ async function checkRulings({ page, review }: Ctx): Promise<Verdict> {
   return rulingVerdict(facts, after);
 }
 
+// ---------- the page bridge ----------
+
+/** The page's path in the stand-in viewer's frame. */
+const FRAMED_PATH = "/index.html";
+const FRAME_WAIT_MS = 10_000;
+/** How long a write may take to reach the stand-in, and how long an answer the gate holds back lasts. */
+const BRIDGE_WRITE_WAIT_MS = 5000;
+const ANSWER_DELAY_MS = 1500;
+/**
+ * The page waits 1.5 seconds for bridge-ready and 5 seconds for an answer. The gate looks on both
+ * sides of each, close enough that a page which waits a second too long or too short is caught,
+ * and says so when it is too late to take the first look.
+ */
+const BEFORE_READY_MS = 1100;
+const READY_LATEST_MS = 1350;
+const AFTER_READY_MS = 2000;
+const BEFORE_ANSWER_MS = 4500;
+const ANSWER_LATEST_MS = 4850;
+const AFTER_ANSWER_MS = 5800;
+const COMMENT_TEXT = "Why is this retried?";
+
+interface Thread {
+  who: string;
+  text: string;
+  save: string;
+  note: string;
+}
+
+interface RowFacts {
+  side: string;
+  line: number;
+  text: string;
+  /** The line is empty: its row holds one space only to have a height. */
+  blank: boolean;
+}
+
+/**
+ * The page inside the stand-in viewer's frame, driven as the gate drives a page. Each call finds the
+ * frame afresh: a reload of the viewer makes a new one.
+ */
+function framedPage(top: PwPage): Driver {
+  const frame = async (): Promise<PwFrame> => {
+    for (let waited = 0; waited <= FRAME_WAIT_MS; waited += POLL_MS) {
+      const found = top.frames().find((f) => f.url().endsWith(FRAMED_PATH));
+      if (found !== undefined) return found;
+      await Bun.sleep(POLL_MS);
+    }
+    throw new Error("the frame of the page did not appear in the viewer");
+  };
+  const locator = (selector: string, index = 0): PwLocator => ({
+    nth: (i) => locator(selector, i),
+    click: async () => (await frame()).locator(selector).nth(index).click(),
+  });
+  return {
+    evaluate: async (expression) => (await frame()).evaluate(expression),
+    waitForFunction: async (expression, arg, options) =>
+      (await frame()).waitForFunction(expression, arg, options),
+    click: async (selector) => (await frame()).click(selector),
+    fill: async (selector, value) => (await frame()).fill(selector, value),
+    locator: (selector) => locator(selector),
+  };
+}
+
+/** Open the page in the stand-in viewer, as a person's viewer shows it, and wait for the page to build its tree. */
+async function openViewer(ctx: Ctx): Promise<Driver> {
+  await ctx.page.goto(`${ctx.origin}${VIEWER_URL}`, {
+    waitUntil: "load",
+    timeout: NAVIGATION_TIMEOUT_MS,
+  });
+  const doc = framedPage(ctx.page);
+  await whenReady(doc, ctx.run.scheme);
+  return doc;
+}
+
+async function reloadViewer(ctx: Ctx, doc: Driver): Promise<void> {
+  await ctx.page.reload({ waitUntil: "load", timeout: NAVIGATION_TIMEOUT_MS });
+  await whenReady(doc, ctx.run.scheme);
+}
+
+/** A fresh stand-in with the options a check wants, then the options a control asks for on top. */
+function begin(ctx: Ctx, mine: Partial<StandInOptions> = {}): void {
+  ctx.standIn.reset();
+  ctx.server.overrides.clear();
+  ctx.standIn.configure({ ...mine, ...ctx.fault });
+}
+
+/** The page asked for its state and the stand-in answered, after the first `since` entries of its log. */
+const sawState = (standIn: StandIn, since: number): boolean =>
+  standIn
+    .log()
+    .slice(since)
+    .some((l) => l.type === "state-get" && l.outcome === "state");
+
+async function waitHost(what: string, ready: () => boolean, timeout = WAIT_MS): Promise<void> {
+  for (let waited = 0; waited <= timeout; waited += POLL_MS) {
+    if (ready()) return;
+    await Bun.sleep(POLL_MS);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Wait, and carry on if it never happens: the verdict reports what the stand-in holds. */
+async function tryHost(ready: () => boolean, timeout = WAIT_MS): Promise<void> {
+  try {
+    await waitHost("the stand-in", ready, timeout);
+  } catch {
+    // the verdict that follows reads the stand-in as it is
+  }
+}
+
+/** Sleep until `ms` after `since`, which is a time on this machine's clock. */
+const sleepUntil = (since: number, ms: number): Promise<void> =>
+  Bun.sleep(Math.max(0, since + ms - Date.now()));
+
+const hasDiff = (f: ReviewFile | undefined): boolean =>
+  f !== undefined && f["withheld"] === undefined && f["binary"] !== true;
+
+/** The key the spec gives a file's tick: `tick:<path>:<hash>`, the hash being the one review.json carries. */
+function tickKeyOf(review: ReviewInfo, fi: number): string {
+  const f = review.files[fi];
+  const hash = f?.["hash"];
+  if (f === undefined || typeof hash !== "string") {
+    throw new Error(`review.json carries no hash for file ${fi}`);
+  }
+  return `tick:${f.path}:${hash}`;
+}
+
+/** Tick up to `n` files whose diffs are shown, in the tree; their indexes. A review with one such file ticks that one. */
+async function tickShown(ctx: Ctx, doc: Driver, n: number): Promise<number[]> {
+  await gotoTab(doc, "tree");
+  await tap(doc, "#tree-expand");
+  const chosen = (await treeOf(doc)).files
+    .map((f) => f.fi)
+    .filter((fi) => hasDiff(ctx.review.files[fi]))
+    .slice(0, n);
+  if (chosen.length === 0) throw new Error("no file with a diff to tick");
+  for (const fi of chosen) await tap(doc, `#tree li.trow.file[data-fi="${fi}"] .tick`);
+  return chosen;
+}
+
+/** The verdict, failed as well when the stand-in refused or ignored a message of the visit (a conflict aside, where the check asked for one). */
+const protocol = (ctx: Ctx, verdict: Verdict, conflict = false): Verdict =>
+  withProtocol(verdict, protocolProblems(ctx.standIn.log(), { conflict }));
+
+const ticked = (doc: Driver): Promise<number[]> => gate<number[]>(doc, "tickedFiles");
+const notesOf = (doc: Driver): Promise<Note[]> => gate<Note[]>(doc, "saveNotes");
+
+async function checkBridgeTicks(ctx: Ctx): Promise<Verdict> {
+  const { standIn } = ctx;
+  begin(ctx);
+  const doc = await openViewer(ctx);
+  await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
+  const fis = await tickShown(ctx, doc, 2);
+  const keys = fis.map((fi) => ({ fi, key: tickKeyOf(ctx.review, fi) }));
+  await tryHost(() => standIn.tickKeys().length >= fis.length, BRIDGE_WRITE_WAIT_MS);
+  const written = standIn.tickKeys();
+  const seen = standIn.log().length;
+  await reloadViewer(ctx, doc);
+  await tryHost(() => sawState(standIn, seen));
+  await gotoTab(doc, "tree");
+  await tryUntil(doc, `window.__gate.tickedFiles().length >= ${fis.length}`, 3000);
+  const after = {
+    fis: await ticked(doc),
+    count: (await gate<{ n: number }>(doc, "progress")).n,
+    notes: (await notesOf(doc)).map((n) => n.text),
+  };
+  return protocol(ctx, bridgeTicksVerdict({ ticked: keys, written, after }));
+}
+
+/** The data of the page as if rebuilt on a new head where only file `fi`'s diff changed. */
+async function versionOverrides(ctx: Ctx, fi: number): Promise<ReadonlyMap<string, string>> {
+  const read = async (path: string): Promise<string> => {
+    const res = await fetch(`${ctx.origin}${path}`);
+    if (!res.ok) throw new Error(`${path} could not be read (${res.status})`);
+    return res.text();
+  };
+  const chunk = ctx.review.files[fi]?.["chunk"];
+  if (typeof chunk !== "number") throw new Error(`review.json names no chunk for file ${fi}`);
+  const path = `/chunks/${chunk}.json`;
+  return newVersionOverrides(await read("/review.json"), new Map([[path, await read(path)]]), fi);
+}
+
+async function checkBridgeNewVersion(ctx: Ctx): Promise<Verdict> {
+  const { standIn, server } = ctx;
+  begin(ctx);
+  try {
+    const doc = await openViewer(ctx);
+    await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
+    const [changed, kept = null] = await tickShown(ctx, doc, 2);
+    if (changed === undefined) return fail("no file to tick");
+    await tryHost(() => standIn.tickKeys().length >= (kept === null ? 1 : 2), BRIDGE_WRITE_WAIT_MS);
+    for (const [path, text] of await versionOverrides(ctx, changed))
+      server.overrides.set(path, text);
+    const seen = standIn.log().length;
+    await reloadViewer(ctx, doc);
+    await tryHost(() => sawState(standIn, seen));
+    await gotoTab(doc, "tree");
+    // With a second file, the wait ends when its tick is back; with one, the page is given a moment to take the answer.
+    if (kept === null) await Bun.sleep(POLL_MS * 8);
+    else await tryUntil(doc, `window.__gate.tickedFiles().includes(${kept})`, 3000);
+    return protocol(
+      ctx,
+      newVersionVerdict({
+        changed,
+        kept,
+        ticked: await ticked(doc),
+        count: (await gate<{ n: number }>(doc, "progress")).n,
+      }),
+    );
+  } finally {
+    server.overrides.clear();
+  }
+}
+
+async function checkBridgeNotSaved(ctx: Ctx): Promise<Verdict> {
+  const { standIn } = ctx;
+  begin(ctx, { drop: ["bridge-hello"] });
+  const doc = await openViewer(ctx);
+  await waitHost("the page's hello", () => standIn.log().some((l) => l.type === "bridge-hello"));
+  const helloAt = standIn.log().find((l) => l.type === "bridge-hello")?.at ?? Date.now();
+  await sleepUntil(helloAt, BEFORE_READY_MS);
+  if (Date.now() > helloAt + READY_LATEST_MS) {
+    throw new Error(
+      "the lines were looked at too late to tell whether the page waited 1.5 seconds",
+    );
+  }
+  const early = await notesOf(doc);
+  await sleepUntil(helloAt, AFTER_READY_MS);
+  const late = await notesOf(doc);
+  await shot(ctx, "not-saved");
+  // The same line on every screen where ticks and comments appear, each about the right thing.
+  const screens: { name: string; scope: string; notes: Note[] }[] = [];
+  await gotoTab(doc, "tree");
+  screens.push({ name: "tree", scope: "ticks", notes: await notesOf(doc) });
+  await gotoTab(doc, "order");
+  await until(doc, 'document.querySelectorAll("#order-list .orow").length > 0', "the order rows");
+  screens.push({ name: "order", scope: "ticks", notes: await notesOf(doc) });
+  if ((await openFileWithRows({ page: doc }, 5)) === null) {
+    return fail("no file in the tree has five lines to tap");
+  }
+  screens.push({ name: "file", scope: "ticks", notes: await notesOf(doc) });
+  await doc.locator("#file-code .r").nth(4).click();
+  await until(doc, "window.__gate.composer().shown", "the comment box");
+  screens.push({ name: "composer", scope: "comments", notes: await notesOf(doc) });
+  const [fi] = await tickShown(ctx, doc, 1);
+  return protocol(
+    ctx,
+    notSavedVerdict({
+      early,
+      late,
+      screens,
+      ticked: fi !== undefined && (await ticked(doc)).includes(fi),
+      sent: standIn.log().filter((l) => l.type !== "bridge-hello").length,
+    }),
+  );
+}
+
+async function checkBridgeUnanswered(ctx: Ctx): Promise<Verdict> {
+  const { standIn } = ctx;
+  begin(ctx, { drop: ["state-set"] });
+  const doc = await openViewer(ctx);
+  await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
+  const [fi] = await tickShown(ctx, doc, 1);
+  await waitHost("the write", () => standIn.log().some((l) => l.type === "state-set"));
+  const sentAt = standIn.log().find((l) => l.type === "state-set")?.at ?? Date.now();
+  await sleepUntil(sentAt, BEFORE_ANSWER_MS);
+  if (Date.now() > sentAt + ANSWER_LATEST_MS) {
+    throw new Error(
+      "the lines were looked at too late to tell whether the page waited 5 seconds for an answer",
+    );
+  }
+  const before = await notesOf(doc);
+  await sleepUntil(sentAt, AFTER_ANSWER_MS);
+  const after = await notesOf(doc);
+  return protocol(
+    ctx,
+    unansweredVerdict({
+      before,
+      after,
+      ticked: fi !== undefined && (await ticked(doc)).includes(fi),
+    }),
+  );
+}
+
+async function checkBridgeConflict(ctx: Ctx): Promise<Verdict> {
+  const { standIn } = ctx;
+  begin(ctx, { conflicts: 1 });
+  const doc = await openViewer(ctx);
+  await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
+  const [fi] = await tickShown(ctx, doc, 1);
+  if (fi === undefined) return fail("no file to tick");
+  const outcomes = (): string[] =>
+    standIn
+      .log()
+      .filter((l) => l.type === "state-set")
+      .map((l) => l.outcome);
+  await tryHost(() => outcomes().length >= 2, BRIDGE_WRITE_WAIT_MS);
+  await Bun.sleep(POLL_MS * 6);
+  return protocol(
+    ctx,
+    conflictVerdict({
+      outcomes: outcomes(),
+      doc: standIn.doc(),
+      key: tickKeyOf(ctx.review, fi),
+      ticked: (await ticked(doc)).includes(fi),
+      notes: (await notesOf(doc)).map((n) => n.text),
+    }),
+    true,
+  );
+}
+
+const baseNameOf = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+async function checkBridgeComment(ctx: Ctx): Promise<Verdict> {
+  const { standIn } = ctx;
+  begin(ctx);
+  const doc = await openViewer(ctx);
+  await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
+  if ((await openFileWithRows({ page: doc }, 5)) === null) {
+    return fail("no file in the tree has five lines to tap");
+  }
+  const path = await gate<string>(doc, "openPath");
+  await doc.locator("#file-code .r").nth(4).click();
+  await until(doc, "window.__gate.composer().shown", "the comment box");
+  const row = (await gate<RowFacts[]>(doc, "rowsOf", 5))[4];
+  if (row === undefined) return fail("the fifth row of the diff is missing");
+  await typeInto(doc, "#mtext", COMMENT_TEXT);
+  standIn.configure({ delayMs: ANSWER_DELAY_MS });
+  await tap(doc, "#msave");
+  await tryUntil(doc, "window.__gate.threads().length > 0", ANSWER_DELAY_MS - 300);
+  const first = (await gate<Thread[]>(doc, "threads"))[0];
+  await tryHost(() => standIn.comments().length >= 1, BRIDGE_WRITE_WAIT_MS);
+  await tryUntil(
+    doc,
+    'window.__gate.threads().some((t) => t.save === "kept")',
+    BRIDGE_WRITE_WAIT_MS,
+  );
+  const settled = (await gate<Thread[]>(doc, "threads"))[0]?.save ?? null;
+  await shot(ctx, "bridge-comment");
+  standIn.configure({ delayMs: 0 });
+  const stored = standIn.comments().map((c) => ({ body: c.body, anchor: { ...c.anchor } }));
+  const seen = standIn.log().length;
+  await reloadViewer(ctx, doc);
+  await tryHost(() => sawState(standIn, seen));
+  const fi = ctx.review.files.findIndex((f) => f.path === path);
+  await gotoTab(doc, "tree");
+  await tap(doc, "#tree-expand");
+  await tap(doc, rowSelector(fi));
+  await waitFileReady(doc);
+  await tryUntil(doc, "window.__gate.threads().length > 0", 3000);
+  const reloaded = await gate<Thread[]>(doc, "threads");
+  return protocol(
+    ctx,
+    commentVerdict({
+      typed: COMMENT_TEXT,
+      row: { path, side: row.side, line: row.line, text: row.text, blank: row.blank },
+      atOnce: first === undefined ? null : { text: first.text, save: first.save },
+      stored,
+      settled,
+      reloaded: reloaded.map((t) => ({ text: t.text, save: t.save, note: t.note })),
+    }),
+  );
+}
+
+/** Lines of a file for a viewer to ask the page to show, on one side of its diff. */
+interface FocusTarget {
+  path: string;
+  side: "new" | "old";
+  from: number;
+  to: number;
+}
+
+/**
+ * From the files at the top of the tree, a pair of neighbouring lines (or one line) on the new side and
+ * the same on the old side, each in the first file that shows one. A change that removes nothing has no
+ * old side to ask for.
+ */
+async function findFocusTargets(ctx: Ctx, doc: Driver): Promise<FocusTarget[]> {
+  await gotoTab(doc, "tree");
+  await tap(doc, "#tree-expand");
+  const { files } = await treeOf(doc);
+  const found: Partial<Record<FocusTarget["side"], FocusTarget>> = {};
+  for (const file of files.slice(0, FILES_TRIED)) {
+    if (!hasDiff(ctx.review.files[file.fi])) continue;
+    await tap(doc, rowSelector(file.fi));
+    await waitFileReady(doc);
+    const rows = await gate<RowFacts[]>(doc, "rowsOf", 80);
+    const path = await gate<string>(doc, "openPath");
+    for (const side of ["new", "old"] as const) {
+      if (found[side] !== undefined) continue;
+      const pair = rows.findIndex(
+        (r, k) => r.side === side && rows[k + 1]?.side === side && rows[k + 1]?.line === r.line + 1,
+      );
+      const start = pair >= 0 ? rows[pair] : rows.find((r) => r.side === side);
+      if (start !== undefined) {
+        found[side] = { path, side, from: start.line, to: pair >= 0 ? start.line + 1 : start.line };
+      }
+    }
+    if (found.new !== undefined && found.old !== undefined) break;
+    await gotoTab(doc, "tree");
+  }
+  return [found.new, found.old].filter((t): t is FocusTarget => t !== undefined);
+}
+
+async function checkBridgeFocus(ctx: Ctx): Promise<Verdict> {
+  const { standIn } = ctx;
+  begin(ctx);
+  const doc = await openViewer(ctx);
+  await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
+  const targets = await findFocusTargets(ctx, doc);
+  if (!targets.some((t) => t.side === "new")) {
+    return fail("no file at the top of the tree shows a line of the new side to ask for");
+  }
+  const verdicts: Verdict[] = [];
+  for (const target of targets) {
+    await gotoTab(doc, "overview");
+    const anchor = {
+      kind: "line",
+      file: target.path,
+      side: target.side,
+      from: target.from,
+      to: target.to,
+    };
+    await ctx.page.evaluate(`window.__viewer.focus(${JSON.stringify(anchor)})`);
+    const marked = `window.__gate.flaggedLines().some((r) => r.line === ${target.from} && r.side === ${JSON.stringify(target.side)})`;
+    await tryUntil(doc, `window.__gate.fileFacts().fileShown && ${marked}`, 5000);
+    const facts = await gate<FileFacts>(doc, "fileFacts");
+    verdicts.push(
+      focusVerdict({
+        side: target.side,
+        from: target.from,
+        to: target.to,
+        flagged: await gate<{ side: string; line: number }[]>(doc, "flaggedLines"),
+        fileShown: facts.fileShown,
+        fname: facts.fname,
+        expectedName: baseNameOf(target.path),
+      }),
+    );
+  }
+  const asked = allOf(verdicts);
+  const sides = targets.map((t) => t.side);
+  return protocol(
+    ctx,
+    asked.ok && !sides.includes("old")
+      ? { ok: true, detail: `${asked.detail} (no removed line at the top of the tree to ask for)` }
+      : asked,
+  );
+}
+
+/** The bridge checks, each with its id; the last waits 5 seconds for a write nobody answers. */
+export const BRIDGE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
+  ["bridge-ticks", checkBridgeTicks],
+  ["bridge-new-version", checkBridgeNewVersion],
+  ["bridge-not-saved", checkBridgeNotSaved],
+  ["bridge-conflict", checkBridgeConflict],
+  ["bridge-comment", checkBridgeComment],
+  ["bridge-focus", checkBridgeFocus],
+  ["bridge-unanswered", checkBridgeUnanswered],
+];
+
+const SLOW_BRIDGE_CHECK = "bridge-unanswered";
+/** The runs that drive the bridge: a phone in both schemes and the widths of a folded-out phone. */
+const BRIDGE_RUNS: readonly string[] = ["phone-light", "phone-dark", "w755-light", "w904-light"];
+
+/** The bridge checks a run drives: none outside BRIDGE_RUNS, and the slow one on the phone in light only. */
+export function bridgeChecksFor(run: Run): readonly string[] {
+  if (!BRIDGE_RUNS.includes(run.name)) return [];
+  return BRIDGE_CHECKS.map(([id]) => id).filter(
+    (id) => id !== SLOW_BRIDGE_CHECK || run.name === "phone-light",
+  );
+}
+
 const PHONE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
   ["tree-visible", checkTreeVisible],
   ["tree-edge-to-edge", checkEdges],
@@ -2227,6 +2833,10 @@ async function runChecks(ctx: Ctx): Promise<Check[]> {
   const driven: Check[] = [];
   if (single && !plain) {
     for (const [id, check] of PHONE_CHECKS) driven.push(await attempt(id, () => check(ctx)));
+    const wanted = bridgeChecksFor(ctx.run);
+    for (const [id, check] of BRIDGE_CHECKS) {
+      if (wanted.includes(id)) driven.push(await attempt(id, () => check(ctx)));
+    }
   }
   return [...walk, ...split, ...fonts, ...driven];
 }
@@ -2255,9 +2865,11 @@ async function runOne(
   browser: PwBrowser,
   run: Run,
   review: ReviewInfo,
-  origin: string,
+  server: PageServer,
+  standIn: StandIn,
   out: string,
 ): Promise<RunReport> {
+  const origin = server.origin;
   const errors: string[] = [];
   const failed: string[] = [];
   let context: PwContext | undefined;
@@ -2277,6 +2889,9 @@ async function runOne(
       steps: screenshotSteps(run),
       audits: [],
       failed,
+      standIn,
+      server,
+      fault: {},
     };
     const ready = await attempt("ready", async () => {
       await page.goto(`${origin}${run.url}`, { waitUntil: "load", timeout: NAVIGATION_TIMEOUT_MS });
@@ -2315,7 +2930,8 @@ export interface GateOptions {
 /** Serve the page, run the matrix in a real Chromium, write report.json, and return the report. */
 export async function runGate(options: GateOptions): Promise<GateReport> {
   mkdirSync(options.out, { recursive: true });
-  const server = startServer(options.dir);
+  const standIn = createStandIn();
+  const server = startServer(options.dir, standIn);
   let browser: PwBrowser | undefined;
   try {
     try {
@@ -2328,7 +2944,7 @@ export async function runGate(options: GateOptions): Promise<GateReport> {
     }
     const runs: RunReport[] = [];
     for (const run of matrix(options.quick)) {
-      runs.push(await runOne(browser, run, options.review, server.origin, options.out));
+      runs.push(await runOne(browser, run, options.review, server, standIn, options.out));
     }
     const report: GateReport = { runs };
     writeFileSync(join(options.out, "report.json"), JSON.stringify(report, null, 2));

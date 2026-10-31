@@ -7,10 +7,18 @@
     "css/40-tree.css",
     "css/50-order.css",
     "css/60-file.css",
+    "css/65-save.css",
     "css/70-find.css",
     "css/80-wide.css"
   ],
-  "modules": ["scripts/lib/review-tree.ts"],
+  "modules": [
+    "scripts/lib/review-tree.ts",
+    "scripts/lib/page-bridge.ts",
+    "scripts/lib/page-bridge-requests.ts",
+    "scripts/lib/page-bridge-state.ts",
+    "scripts/lib/page-bridge-comments.ts",
+    "scripts/lib/page-bridge-session.ts"
+  ],
   "js": [
     "js/01-core.js",
     "js/02-data.js",
@@ -21,6 +29,7 @@
     "js/07-overview.js",
     "js/08-find.js",
     "js/09-nav.js",
-    "js/10-boot.js"
+    "js/10-bridge.js",
+    "js/11-boot.js"
   ]
 }
