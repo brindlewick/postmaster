@@ -14,7 +14,10 @@ committed on purpose with `git add -f`: the checks that show a change works, the
 turnpikes, the tracker binding by name, whether a GitHub project keeps a board, the changed lines a pull
 request for review aims at and never passes (naming a cap turns that budget on, as draft pull
 requests do), and the risk surfaces. It names no credential, no
-filesystem path, no machine name and no role assignment. This person's choices for the
+filesystem path, no machine name and no role assignment, and no command: the page host's
+commands (`[pages]`, [the pages contract](pages-contract.md)) are the machine's and the
+person's choice, in the global config or in `settings.toml`, since a command in a cloned
+repository is not one this machine should run. This person's choices for the
 project are in `.postmaster/settings.toml`, written like the global config: they override it
 setting by setting, models and env files included. Share it by committing it; a tracked
 file is used only after the user has accepted it. The
