@@ -854,6 +854,7 @@ declare module "bun:test" {
   export interface Matchers {
     toBe(expected: unknown): void;
     toEqual(expected: unknown): void;
+    toMatchObject(expected: unknown): void;
     toBeUndefined(): void;
     toBeDefined(): void;
     toBeNull(): void;
