@@ -415,7 +415,7 @@ export function tmuxSessionFor(repo: string): string {
 }
 
 // A run on an ordinary project: one run tab in the project's space, with a
-// pane per launch beside the state pane, and the project's own watcher tab
+// pane per launch beside the tab's first pane, and the project's own watcher tab
 // beside them.
 export interface NormalRun {
   fx: Fx;
@@ -453,7 +453,7 @@ export function setupNormal(tag: string): NormalRun {
   const watcher = hTab(st, proj.ws, repo, "watch · repo");
   st.panes[watcher.pane]!.tokens = { postmaster: "launch" };
   const run = hTab(st, proj.ws, synth, "#373, probe");
-  st.panes[run.pane]!.tokens = { postmaster: "launch", role: "runstate" };
+  st.panes[run.pane]!.tokens = { postmaster: "launch" };
   const runPanes: string[] = [];
   for (const [cwd, label] of [
     [synth, "coachman · leg 1"],
@@ -582,7 +582,7 @@ export function setupFixture(tag: string, userTabInCopy: boolean): FixtureRun {
   place(fx, { workspace: copy.ws, tab: pm.tab, pane: pm.pane, cwd: fix, run: "" });
   place(fx, { workspace: copy.ws, tab: watch.tab, pane: watch.pane, cwd: fix, run: "" });
   const run = hTab(st, copy.ws, synth, "#373, probe");
-  st.panes[run.pane]!.tokens = { postmaster: "launch", role: "runstate" };
+  st.panes[run.pane]!.tokens = { postmaster: "launch" };
   const runPanes: string[] = [];
   for (const [cwd, label] of [
     [synth, "coachman · leg 1"],

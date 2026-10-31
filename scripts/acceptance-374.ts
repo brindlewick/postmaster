@@ -16,7 +16,7 @@ import {
   type Fx,
   type HerdrState,
 } from "./acceptance-373.ts";
-import { killStateLoops, testStopFinishers } from "./host-self-test.ts";
+import { testStopFinishers } from "./host-self-test.ts";
 
 // The waybill name C4 pins, 84 characters at the base.
 export const LONG_NAME =
@@ -125,10 +125,8 @@ export function runTabRecords(fx: Fx): Record<string, unknown>[] {
   return out;
 }
 
-// The state pane's refresh loop outlives the test; the shared killer stops
-// it, the finishers stop, and the fixture goes.
+// The finishers stop, and the fixture goes.
 export function cleanup(fx: Fx): void {
   testStopFinishers(fx.root);
-  killStateLoops(fx.stub);
   rmSync(fx.root, { recursive: true, force: true });
 }
