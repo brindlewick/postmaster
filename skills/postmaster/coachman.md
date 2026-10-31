@@ -999,7 +999,9 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
      footprint as `<tool>/scripts/run footprint <repo> <BASE> HEAD` prints it (context for the
      reviewer, never a gate), and the least-code ladder: for each requirement, take the first
      rung that meets it, (1) a setting of a library the project already uses, (2) a function
-     already in the repository, (3) a thin wrapper over one of those, (4) new code. A finding names
+     already in the repository, (3) a thin wrapper over one of those, (4) new code. A library's
+     documented setting stays rung 1 unless a plain alternative is simpler (fewer moving parts,
+     then fewer lines). A finding names
      a mechanism, which is a file, module, hook, store or dependency with callers, and never an
      identifier, a line or a comment; names the higher rung and the code it would delete; shows by a
      documentation link, the installed version's types or a probe that the rung meets every criterion

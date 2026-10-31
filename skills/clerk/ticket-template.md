@@ -91,11 +91,12 @@ Expected changed lines: <N, a whole number; this one line is all the section hol
 
 <What the libraries, SDKs and services this change touches already do, and what the project's own
 code already offers, read from the vendor's own documentation, the installed version and the menus
-`api-index` and `code-index` made from this draft. The agents use the library's own option, or the
-project's own helper, where one is listed here. A custom mechanism that duplicates one is a
-deviation: the hand-off records it with its reason, and it is not marked do-not-reopen. For a
-change that touches nothing outside the repository, the single line "None: nothing outside the
-repository is involved.">
+`api-index` and `code-index` made from this draft. The agents use the library's documented way, or
+the project's own helper, where one is listed here. A plain alternative replaces the library's way
+only where it is simpler (fewer moving parts, then fewer lines). A custom mechanism that duplicates
+one is a deviation: the hand-off records it with its reason, and it is not marked do-not-reopen.
+For a change that touches nothing outside the repository, the single line "None: nothing outside
+the repository is involved.">
 
 - **<library, service or project module, and the thing the ticket needs from it>** Offers: <what
   it provides, with its source: a documentation link, or a file and line of the installed version
