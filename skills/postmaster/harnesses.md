@@ -43,7 +43,7 @@ names (below).
 |---|---|
 | codex | `thread_id` |
 | claude | `session_id` |
-| grok | `id` on a session record, else `session_id`, `sessionId`, `conversation_id` or `conversationId` |
+| grok | `id` on a session record, else `session_id`, `sessionId` (the closing `end` record of `streaming-json`), `conversation_id` or `conversationId` |
 | agy | `conversationId` |
 | pi | `id` on the `session` record |
 | muse | `stream.id` on a `session` record |
@@ -234,8 +234,16 @@ keeps one per name, and muse lists it once.
 
 `<tool>/scripts/run launch form <lane>` prints this harness's launch and resume commands. What differs:
 
-- Thread id: the session uuid in the stream, minted at launch.
-- Final message: the last result line of the events stream.
+- `--output-format` takes `plain` (the default), `json`, `streaming-json` and
+  `streaming-messages-json` (`grok --help`, 1.0.70); any other value, `stream-json` among them,
+  is refused with exit 2 before the run starts. The flow uses `streaming-json`: one JSON record
+  per line. The two runs recorded on 1.0.70 held records of the types `available_commands`,
+  `thought`, `text`, `usage`, `tool_call` and `tool_call_update`, then a closing `end`. The
+  records of `json` and `streaming-messages-json` are not recorded here.
+- Thread id: in those two runs, `sessionId` on the closing `end` record and nowhere earlier,
+  so a stream cut off before its `end` holds none.
+- Final message: the reply arrives as `text` records of a few characters each. No record is a
+  result line, and the `end` record carries no text.
 - Resume takes the same flags, the caller appending to the same stream. This is the coachman's
   own resume form when the coachman runs on grok: the postmaster delivers a ruling this way.
 - Durable record: its session store; `grok export` renders a thread as Markdown. Threads persist
@@ -579,30 +587,35 @@ takes its bypass flag from the headless form above; run it once before relying o
 ## Helpers: starting one, per harness
 
 `postmaster.md` hands every step to a helper on Claude Code, and runs each brief's steps
-itself on any other harness. A helper is that harness's built-in sub-agent where it has
-one, and nothing elsewhere:
+itself on any other harness, whether or not that harness has a sub-agent of its own. A
+helper is that harness's built-in sub-agent where it has one, and nothing elsewhere; every
+harness here but pi has one. The rows after claude's record what helper trials on 2026-10-31
+and each harness's own help and records showed:
 
 | harness | helper form |
 |---|---|
 | claude | the Agent tool, below |
-| pi | none: this harness has no helper form, so the postmaster runs each brief's steps itself |
-| codex | none: this harness has no helper form, so the postmaster runs each brief's steps itself |
-| grok | none: this harness has no helper form, so the postmaster runs each brief's steps itself |
-| agy | none: this harness has no helper form, so the postmaster runs each brief's steps itself |
-| muse | none: this harness has no helper form, so the postmaster runs each brief's steps itself |
-| mimo | none: this harness has no helper form, so the postmaster runs each brief's steps itself |
+| pi | none: pi has no sub-agents by design (its README, "No sub-agents"), so the postmaster runs each brief's steps itself |
+| codex | built-in (`multi_agent`, stable and on in 0.162.1). The tool is `spawn_agent`, a `collab_tool_call` item in the `--json` stream: the call completes at once and names the child thread, in state `pending_init`. `codex exec` ended with the parent's turn, and a child nobody waited for never ran its command. The tool that waits for one is not recorded |
+| grok | built-in. The tool is `spawn_subagent` (`description`, `prompt`, `background`): the call returns a subagent id at once and says to read its result with `get_command_or_subagent_output` (`task_ids`, `timeout_ms`); the tool list also has `kill_command_or_subagent`. A headless run kept going until a helper started with `background` true had ended. `--no-subagents` turns the tool off |
+| agy | built-in. The tool is `invoke_subagent`, logged with a `Role` and a `TypeName` (`research` and `self` seen): the call returns at once with the helper's conversation id. `agy -p` waited for the helper and answered again once it had ended |
+| muse | built-in. The tool is `subagent_spawn`: the call answers `accepted` with a subagent id at once, and the session's tools also include `subagent_status`, `subagent_wait`, `subagent_read_result`, `subagent_send_message` and `subagent_cancel`. `muse exec` waited for the helper and opened a second run when it ended, whose `run.terminal.completed` carried the final answer |
+| mimo | built-in. The tool is `actor`, whose `subagent_type` is `explore` or `general` (0.1.15, `raw/trials/code-review-scope/`), and a lane has handed work to a background helper and ended its turn with no verdict ([incident I11](../../wiki/concepts/several-lanes.md#incidents)). How a call is shaped, and whether `mimo run` waits for a helper, are not recorded: no helper trial ran on mimo |
 
 **Starting a helper on claude** (as documented for 2.1.302): call the Agent tool with the
-brief as its prompt, `subagent_type` `general-purpose`, and nothing else set: a fresh
-helper, never a fork of the conversation, on the postmaster's own model. The tool takes no
-`run_in_background` parameter. In a session someone types to, fork mode is on by default and
-the helper runs in the background; its report arrives in a later turn as a completion
-notification, an automated event carrying the helper's final message. Where nobody types to
-the session, as in a fixture copy, start the helper in the foreground and wait for its
-report before ending the turn: headless, a background helper is given up after ten idle
-minutes. A background helper keeps Bash, Read, Write, Edit, Grep, Glob and the MCP tools,
-and at most 20 run at once by default. Its transcript is kept beside the session's, under
-`<session id>/subagents/`.
+brief as its prompt, `subagent_type` `general-purpose`, and nothing else set but
+`run_in_background`, below: a fresh helper, never a fork of the conversation, on the
+postmaster's own model. In a session someone types to, fork mode is on by default and the
+helper runs in the background; its report arrives in a later turn as a completion
+notification, an automated event carrying the helper's final message. Headless, the tool
+takes `run_in_background`: in streams recorded on Claude Code 2.1.301 to 2.1.314, true
+returned at once with `Async agent launched` and false returned the helper's report as the
+call's result, and left out beside `general-purpose` every recorded call ran in the
+background. Where nobody types to the session, as in a fixture copy, set `run_in_background`
+to false, so the helper runs in the foreground, and wait for its report before ending the
+turn: headless, a background helper is given up after ten idle minutes. A background helper
+keeps Bash, Read, Write, Edit, Grep, Glob and the MCP tools, and at most 20 run at once by
+default. Its transcript is kept beside the session's, under `<session id>/subagents/`.
 
 ## Keeping the watcher running
 
@@ -665,7 +678,7 @@ that reports usage and one that does not, in each harness's exact event shape be
 | harness | where it reports | input / output | cost | shape source |
 |---|---|---|---|---|
 | codex | the last terminal turn event (`turn.completed`, `turn.failed`, `turn.interrupted`) of `codex exec --json`; turns report cumulative session usage | `usage.input_tokens`, `usage.output_tokens` | not reported | [Codex event type](https://github.com/openai/codex/blob/main/sdk/typescript/src/events.ts), recorded turns |
-| grok | the terminal `type: "end"` event; chunk-level usage is ignored | `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` on that event | [Grok headless event format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md) |
+| grok | the closing `end` record of `--output-format streaming-json`; the `usage` records before it are ignored | `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` or `usage.cost_usd` when the record has one; the two 1.0.70 recordings have neither | [Grok headless event format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md), two recorded 1.0.70 streams |
 | agy | the last `event: "result"` event; results report cumulative session usage | `result.usageMetadata.promptTokenCount`, `.candidatesTokenCount`, or `result.usage.input_tokens`, `.output_tokens` | not reported | Gemini-family usageMetadata, [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/) |
 | claude | the `result` events of `--output-format stream-json`: the last result's `modelUsage`, or the `usage` of the results summed, whichever is larger, and the cost from the last; else the assistant messages | `modelUsage.<model>.inputTokens`, `.outputTokens`, or `usage.input_tokens`, `usage.output_tokens` | `total_cost_usd` | [Claude Code stream-json output](https://code.claude.com/docs/en/agent-sdk/overview), a live resumed thread, recorded reviews that started helpers |
 | pi | assistant `message.usage` on `message_end` | `input` / `input_tokens`, `output` / `output_tokens` | `usage.cost.total` | [Pi RPC event format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md) |
@@ -682,7 +695,9 @@ cost is; a resumed thread's was not checked against its results, so each token f
 larger of the two readings. A stream that ends without a result falls back to summing its
 assistant messages. Mimo and pi per-step figures are summed. Muse Code's
 `goal_usage_attribution` repeats its `model_completed` values per call, so the reader takes
-`model_completed` alone.
+`model_completed` alone. Grok's `end` record carried `usage_is_incomplete` true in both
+recorded runs, each of which started a helper, and its figures were the first two of the
+stream's `usage` records: the later ones are not in them.
 
 A report of zero tokens in and zero out is a harness reporting nothing, as `codex exec review`
 does in its `--json` stream, and is read as no report. `sum` prints a `no usage recorded` line,
