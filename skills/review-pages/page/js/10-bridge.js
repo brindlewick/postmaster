@@ -14,6 +14,10 @@ import { $, S, note } from "./01-core.js";
 import { gotoLines, paintComments, repaintCommentCounts } from "./04-diff.js";
 import { repaintTicks } from "./03-ticks.js";
 
+// The session counts time in milliseconds on a clock that only moves forward, so a change of the
+// device's clock stretches or shortens none of its waits.
+const clockNow = () => performance.now();
+
 let session = NEW_SESSION;
 let wakeTimer = 0;
 let paintedState = null;
@@ -31,7 +35,7 @@ function dispatch(event) {
   paintBridge();
   const at = sessionWake(session);
   clearTimeout(wakeTimer);
-  if (at !== null) wakeTimer = setTimeout(() => dispatch({ type: "clock", now: Date.now() }), Math.max(0, at - Date.now()));
+  if (at !== null) wakeTimer = setTimeout(() => dispatch({ type: "clock", now: clockNow() }), Math.max(0, at - clockNow()));
 }
 
 function deliver(message) {
@@ -50,26 +54,26 @@ export function connectBridge() {
     window.addEventListener("message", (event) => {
       if (event.source !== window.parent) return;
       const message = parseViewerMessage(event.data);
-      if (message !== null) dispatch({ type: "viewer", now: Date.now(), message });
+      if (message !== null) dispatch({ type: "viewer", now: clockNow(), message });
     });
-    const leaving = () => dispatch({ type: "hide", now: Date.now() });
+    const leaving = () => dispatch({ type: "hide", now: clockNow() });
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") leaving(); });
     window.addEventListener("pagehide", leaving);
   }
-  dispatch({ type: "start", now: Date.now(), framed });
+  dispatch({ type: "start", now: clockNow(), framed });
 }
 
 // The reader ticked or unticked a file: the session keeps the change and writes it after a short wait.
 export function bridgeTick(fi, on) {
   const f = S.files[fi];
   if (!f || !f.hash) return;
-  dispatch({ type: "tick", now: Date.now(), key: fileTickKey(f.path, f.hash), on });
+  dispatch({ type: "tick", now: clockNow(), key: fileTickKey(f.path, f.hash), on });
 }
 
 // The reader saved a comment on lines of a file and no database keeps it: it is in view at once, and the
 // session sends it to the viewer, or keeps it for this visit when there is none.
 export function submitBridgeComment(draft) {
-  dispatch({ type: "comment", now: Date.now(), draft });
+  dispatch({ type: "comment", now: clockNow(), draft });
 }
 
 // The viewer asked to show the lines of a comment.

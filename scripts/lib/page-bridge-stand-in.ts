@@ -79,11 +79,12 @@ export interface StandInState {
   readonly comments: readonly StoredComment[];
   /** The version of the page shown, stamped on a new comment. */
   readonly version: number;
-  /** A page that has said hello: what it was granted and when its writes and messages went. */
+  /** A page that has said hello: what it was granted, when its writes and messages went, and the ids it has used. */
   readonly visit: {
     readonly caps: readonly StandInCap[];
     readonly writes: readonly number[];
     readonly messages: readonly number[];
+    readonly ids: readonly string[];
   } | null;
   /** How many rival writes have landed, to give each its own mark. */
   readonly rivals: number;
@@ -320,9 +321,18 @@ export function standInAnswer(before: StandInState, data: unknown, now: number):
       errorReply(null, "bad_message", "a request needs an id of 1 to 64 safe characters"),
     );
   }
+  const open = s.visit;
+  if (open.ids.includes(id)) {
+    return finish(
+      s,
+      type,
+      id,
+      errorReply(id, "bad_message", "the id was used already in this visit"),
+    );
+  }
   const checked = check(type, data, limits);
   if (!checked.ok) return finish(s, type, id, errorReply(id, "bad_message", checked.why));
-  const visit = s.visit;
+  const visit = { ...open, ids: [...open.ids, id] };
   const messages = within(visit.messages, now, limits.writesPerSecond * 5);
   const counted = { ...visit, messages: messages.times };
   const seen: StandInState = { ...s, visit: counted };
@@ -382,7 +392,7 @@ function hello(s: StandInState, data: Record<string, unknown>): Answer {
     );
   }
   const caps = s.options.grant.filter((c) => want.includes(c));
-  const visit = { caps, writes: [], messages: [] };
+  const visit = { caps, writes: [], messages: [], ids: [] };
   return finish(
     { ...s, visit },
     "bridge-hello",

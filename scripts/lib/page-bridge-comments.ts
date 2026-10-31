@@ -31,6 +31,8 @@ export interface ReviewComment {
   readonly sendAt: number;
   /** How many times the viewer answered rate_limited. */
   readonly tries: number;
+  /** The reader wrote it in this visit: a list from the viewer never takes it out of view. */
+  readonly mine: boolean;
 }
 
 /** What the reader wrote and where. */
@@ -69,6 +71,7 @@ export function fromBridgeComment(c: BridgeComment): ReviewComment {
     quote: c.anchor.quote ?? "",
     sendAt: 0,
     tries: 0,
+    mine: false,
   };
 }
 
@@ -108,16 +111,21 @@ export function draftComment(
     quote: draft.quote,
     sendAt: now,
     tries: 0,
+    mine: true,
   };
   return { book: { entries: [...book.entries, entry], next: book.next + 1 }, id };
 }
 
-/** The viewer's list replaces the comments it keeps; the reader's own that it has not kept stay after them. */
+/**
+ * The viewer's list replaces the comments it kept before; the reader's own comments stay after it,
+ * those the viewer has kept in this visit as well (the list may have been asked for before they were
+ * made and answered after) unless the list holds them.
+ */
 export function bookLoaded(book: CommentBook, list: readonly BridgeComment[]): CommentBook {
-  return {
-    ...book,
-    entries: [...list.map(fromBridgeComment), ...book.entries.filter((e) => e.save !== "kept")],
-  };
+  const listed = list.map(fromBridgeComment);
+  const ids = new Set(listed.map((e) => e.id));
+  const stays = book.entries.filter((e) => (e.save !== "kept" || e.mine) && !ids.has(e.id));
+  return { ...book, entries: [...listed, ...stays] };
 }
 
 export const bookSending = (book: CommentBook, id: string): CommentBook =>
@@ -126,7 +134,7 @@ export const bookSending = (book: CommentBook, id: string): CommentBook =>
 /** The viewer kept a comment the reader wrote: its comment takes the place of ours, once. */
 export function bookKept(book: CommentBook, id: string, kept: BridgeComment): CommentBook {
   if (!book.entries.some((e) => e.id === id)) return book;
-  const made = fromBridgeComment(kept);
+  const made = { ...fromBridgeComment(kept), mine: true };
   const others = book.entries.filter((e) => e.id !== made.id);
   return { ...book, entries: others.map((e) => (e.id === id ? made : e)) };
 }

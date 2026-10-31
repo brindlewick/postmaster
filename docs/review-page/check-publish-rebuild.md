@@ -31,10 +31,11 @@ messages as the contract says, and can delay, drop, fail, rate-limit or conflict
 `bridge-ticks` (ticks come back after a reload), `bridge-new-version` (the file whose diff changed
 starts unticked), `bridge-not-saved` and `bridge-unanswered` (Not saved after 1.5 seconds with no
 hello answered, and after 5 seconds with no write answered; the second on the phone in light only),
-`bridge-conflict`, `bridge-comment` (it shows at once and arrives as a line anchor) and
-`bridge-focus`. With no viewer the Not saved line shows on every screen of the other runs, which
-audit it like the rest. A control in the gate's tests puts a fault into the page or the viewer, one at
-a time, and expects each to be named.
+`bridge-conflict`, `bridge-comment` (it shows at once and arrives as a line anchor with the text of
+its line) and `bridge-focus` (a line of each side of the diff). A check also fails if the stand-in
+refused or ignored a message the page sent. With no viewer the Not saved line shows on every screen
+of the other runs, which audit it like the rest. A control in the gate's tests puts a fault into the
+page or the viewer, one at a time, and expects each to be named.
 
 Every run but the plain one also looks at the rows of a diff (`diff-layout`), on the file with the
 longest line, and fails on a sign column or a number column in front of the code, on code that

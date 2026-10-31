@@ -62,6 +62,7 @@ import {
   standInPage,
 } from "./lib/page-bridge-stand-in.ts";
 import {
+  allOf,
   bridgeTicksVerdict,
   commentVerdict,
   conflictVerdict,
@@ -70,7 +71,9 @@ import {
   newVersionVerdict,
   type Note,
   notSavedVerdict,
+  protocolProblems,
   unansweredVerdict,
+  withProtocol,
 } from "./review-page-gate-bridge.ts";
 
 export const USAGE = [
@@ -1783,9 +1786,10 @@ window.__gate = (() => {
   // The rows of the open diff that are marked, as side and line.
   const flaggedLines = () => all("#file-code .r.flag").map((r) => ({ side: r.dataset.side, line: Number(r.dataset.line) }));
   // The first n rows of the open diff: side, line and the text of the line.
-  const rowsOf = (n) => all("#file-code .r").slice(0, n).map((r) => ({
-    side: r.dataset.side, line: Number(r.dataset.line), text: (($(".c", r) || {}).textContent || ""),
-  }));
+  const rowsOf = (n) => all("#file-code .r").slice(0, n).map((r) => {
+    const c = $(".c", r);
+    return { side: r.dataset.side, line: Number(r.dataset.line), text: c ? c.textContent : "", blank: !!(c && c.hasAttribute("data-blank")) };
+  });
   // The path of the open file, as its head shows it.
   const openPath = () => (text("#file-head .fdir") || "") + (text("#file-head .fname") || "");
 
@@ -2293,12 +2297,18 @@ const FRAMED_PATH = "/index.html";
 const FRAME_WAIT_MS = 10_000;
 /** How long a write may take to reach the stand-in, and how long an answer the gate holds back lasts. */
 const BRIDGE_WRITE_WAIT_MS = 5000;
-const ANSWER_DELAY_MS = 900;
-/** The page waits 1.5 seconds for bridge-ready and 5 seconds for an answer; the gate looks on both sides of each. */
-const BEFORE_READY_MS = 700;
-const AFTER_READY_MS = 2400;
-const BEFORE_ANSWER_MS = 4000;
-const AFTER_ANSWER_MS = 6200;
+const ANSWER_DELAY_MS = 1500;
+/**
+ * The page waits 1.5 seconds for bridge-ready and 5 seconds for an answer. The gate looks on both
+ * sides of each, close enough that a page which waits a second too long or too short is caught,
+ * and says so when it is too late to take the first look.
+ */
+const BEFORE_READY_MS = 1100;
+const READY_LATEST_MS = 1350;
+const AFTER_READY_MS = 2000;
+const BEFORE_ANSWER_MS = 4500;
+const ANSWER_LATEST_MS = 4850;
+const AFTER_ANSWER_MS = 5800;
 const COMMENT_TEXT = "Why is this retried?";
 
 interface Thread {
@@ -2312,6 +2322,8 @@ interface RowFacts {
   side: string;
   line: number;
   text: string;
+  /** The line is empty: its row holds one space only to have a height. */
+  blank: boolean;
 }
 
 /**
@@ -2405,7 +2417,7 @@ function tickKeyOf(review: ReviewInfo, fi: number): string {
   return `tick:${f.path}:${hash}`;
 }
 
-/** Tick `n` files whose diffs are shown, in the tree; their indexes. */
+/** Tick up to `n` files whose diffs are shown, in the tree; their indexes. A review with one such file ticks that one. */
 async function tickShown(ctx: Ctx, doc: Driver, n: number): Promise<number[]> {
   await gotoTab(doc, "tree");
   await tap(doc, "#tree-expand");
@@ -2413,11 +2425,14 @@ async function tickShown(ctx: Ctx, doc: Driver, n: number): Promise<number[]> {
     .map((f) => f.fi)
     .filter((fi) => hasDiff(ctx.review.files[fi]))
     .slice(0, n);
-  if (chosen.length < n)
-    throw new Error(`only ${chosen.length} files with a diff to tick, not ${n}`);
+  if (chosen.length === 0) throw new Error("no file with a diff to tick");
   for (const fi of chosen) await tap(doc, `#tree li.trow.file[data-fi="${fi}"] .tick`);
   return chosen;
 }
+
+/** The verdict, failed as well when the stand-in refused or ignored a message of the visit (a conflict aside, where the check asked for one). */
+const protocol = (ctx: Ctx, verdict: Verdict, conflict = false): Verdict =>
+  withProtocol(verdict, protocolProblems(ctx.standIn.log(), { conflict }));
 
 const ticked = (doc: Driver): Promise<number[]> => gate<number[]>(doc, "tickedFiles");
 const notesOf = (doc: Driver): Promise<Note[]> => gate<Note[]>(doc, "saveNotes");
@@ -2441,7 +2456,7 @@ async function checkBridgeTicks(ctx: Ctx): Promise<Verdict> {
     count: (await gate<{ n: number }>(doc, "progress")).n,
     notes: (await notesOf(doc)).map((n) => n.text),
   };
-  return bridgeTicksVerdict({ ticked: keys, written, after });
+  return protocol(ctx, bridgeTicksVerdict({ ticked: keys, written, after }));
 }
 
 /** The data of the page as if rebuilt on a new head where only file `fi`'s diff changed. */
@@ -2463,22 +2478,27 @@ async function checkBridgeNewVersion(ctx: Ctx): Promise<Verdict> {
   try {
     const doc = await openViewer(ctx);
     await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
-    const [changed, kept] = await tickShown(ctx, doc, 2);
-    if (changed === undefined || kept === undefined) return fail("no two files to tick");
-    await tryHost(() => standIn.tickKeys().length >= 2, BRIDGE_WRITE_WAIT_MS);
+    const [changed, kept = null] = await tickShown(ctx, doc, 2);
+    if (changed === undefined) return fail("no file to tick");
+    await tryHost(() => standIn.tickKeys().length >= (kept === null ? 1 : 2), BRIDGE_WRITE_WAIT_MS);
     for (const [path, text] of await versionOverrides(ctx, changed))
       server.overrides.set(path, text);
     const seen = standIn.log().length;
     await reloadViewer(ctx, doc);
     await tryHost(() => sawState(standIn, seen));
     await gotoTab(doc, "tree");
-    await tryUntil(doc, `window.__gate.tickedFiles().includes(${kept})`, 3000);
-    return newVersionVerdict({
-      changed,
-      kept,
-      ticked: await ticked(doc),
-      count: (await gate<{ n: number }>(doc, "progress")).n,
-    });
+    // With a second file, the wait ends when its tick is back; with one, the page is given a moment to take the answer.
+    if (kept === null) await Bun.sleep(POLL_MS * 8);
+    else await tryUntil(doc, `window.__gate.tickedFiles().includes(${kept})`, 3000);
+    return protocol(
+      ctx,
+      newVersionVerdict({
+        changed,
+        kept,
+        ticked: await ticked(doc),
+        count: (await gate<{ n: number }>(doc, "progress")).n,
+      }),
+    );
   } finally {
     server.overrides.clear();
   }
@@ -2500,17 +2520,32 @@ async function checkBridgeNotSaved(ctx: Ctx): Promise<Verdict> {
   await sleepUntil(helloAt, AFTER_READY_MS);
   const late = await notesOf(doc);
   await shot(ctx, "not-saved");
+  // The same line on every screen where ticks and comments appear, each about the right thing.
+  const screens: { name: string; scope: string; notes: Note[] }[] = [];
+  await gotoTab(doc, "tree");
+  screens.push({ name: "tree", scope: "ticks", notes: await notesOf(doc) });
+  await gotoTab(doc, "order");
+  await until(doc, 'document.querySelectorAll("#order-list .orow").length > 0', "the order rows");
+  screens.push({ name: "order", scope: "ticks", notes: await notesOf(doc) });
+  if ((await openFileWithRows({ page: doc }, 5)) === null) {
+    return fail("no file in the tree has five lines to tap");
+  }
+  screens.push({ name: "file", scope: "ticks", notes: await notesOf(doc) });
+  await doc.locator("#file-code .r").nth(4).click();
+  await until(doc, "window.__gate.composer().shown", "the comment box");
+  screens.push({ name: "composer", scope: "comments", notes: await notesOf(doc) });
   const [fi] = await tickShown(ctx, doc, 1);
-  return notSavedVerdict({
-    early,
-    late,
-    ticked: fi !== undefined && (await ticked(doc)).includes(fi),
-    written: standIn.tickKeys().length,
-  });
+  return protocol(
+    ctx,
+    notSavedVerdict({
+      early,
+      late,
+      screens,
+      ticked: fi !== undefined && (await ticked(doc)).includes(fi),
+      sent: standIn.log().filter((l) => l.type !== "bridge-hello").length,
+    }),
+  );
 }
-
-/** The latest the lines may be looked at and still count as before the 1.5 seconds ran out. */
-const READY_LATEST_MS = 1300;
 
 async function checkBridgeUnanswered(ctx: Ctx): Promise<Verdict> {
   const { standIn } = ctx;
@@ -2521,14 +2556,22 @@ async function checkBridgeUnanswered(ctx: Ctx): Promise<Verdict> {
   await waitHost("the write", () => standIn.log().some((l) => l.type === "state-set"));
   const sentAt = standIn.log().find((l) => l.type === "state-set")?.at ?? Date.now();
   await sleepUntil(sentAt, BEFORE_ANSWER_MS);
+  if (Date.now() > sentAt + ANSWER_LATEST_MS) {
+    throw new Error(
+      "the lines were looked at too late to tell whether the page waited 5 seconds for an answer",
+    );
+  }
   const before = await notesOf(doc);
   await sleepUntil(sentAt, AFTER_ANSWER_MS);
   const after = await notesOf(doc);
-  return unansweredVerdict({
-    before,
-    after,
-    ticked: fi !== undefined && (await ticked(doc)).includes(fi),
-  });
+  return protocol(
+    ctx,
+    unansweredVerdict({
+      before,
+      after,
+      ticked: fi !== undefined && (await ticked(doc)).includes(fi),
+    }),
+  );
 }
 
 async function checkBridgeConflict(ctx: Ctx): Promise<Verdict> {
@@ -2545,13 +2588,17 @@ async function checkBridgeConflict(ctx: Ctx): Promise<Verdict> {
       .map((l) => l.outcome);
   await tryHost(() => outcomes().length >= 2, BRIDGE_WRITE_WAIT_MS);
   await Bun.sleep(POLL_MS * 6);
-  return conflictVerdict({
-    outcomes: outcomes(),
-    doc: standIn.doc(),
-    key: tickKeyOf(ctx.review, fi),
-    ticked: (await ticked(doc)).includes(fi),
-    notes: (await notesOf(doc)).map((n) => n.text),
-  });
+  return protocol(
+    ctx,
+    conflictVerdict({
+      outcomes: outcomes(),
+      doc: standIn.doc(),
+      key: tickKeyOf(ctx.review, fi),
+      ticked: (await ticked(doc)).includes(fi),
+      notes: (await notesOf(doc)).map((n) => n.text),
+    }),
+    true,
+  );
 }
 
 const baseNameOf = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
@@ -2594,14 +2641,57 @@ async function checkBridgeComment(ctx: Ctx): Promise<Verdict> {
   await waitFileReady(doc);
   await tryUntil(doc, "window.__gate.threads().length > 0", 3000);
   const reloaded = await gate<Thread[]>(doc, "threads");
-  return commentVerdict({
-    typed: COMMENT_TEXT,
-    row: { path, side: row.side, line: row.line, text: row.text },
-    atOnce: first === undefined ? null : { text: first.text, save: first.save },
-    stored,
-    settled,
-    reloaded: reloaded.map((t) => ({ text: t.text, save: t.save, note: t.note })),
-  });
+  return protocol(
+    ctx,
+    commentVerdict({
+      typed: COMMENT_TEXT,
+      row: { path, side: row.side, line: row.line, text: row.text, blank: row.blank },
+      atOnce: first === undefined ? null : { text: first.text, save: first.save },
+      stored,
+      settled,
+      reloaded: reloaded.map((t) => ({ text: t.text, save: t.save, note: t.note })),
+    }),
+  );
+}
+
+/** Lines of a file for a viewer to ask the page to show, on one side of its diff. */
+interface FocusTarget {
+  path: string;
+  side: "new" | "old";
+  from: number;
+  to: number;
+}
+
+/**
+ * From the files at the top of the tree, a pair of neighbouring lines (or one line) on the new side and
+ * the same on the old side, each in the first file that shows one. A change that removes nothing has no
+ * old side to ask for.
+ */
+async function findFocusTargets(ctx: Ctx, doc: Driver): Promise<FocusTarget[]> {
+  await gotoTab(doc, "tree");
+  await tap(doc, "#tree-expand");
+  const { files } = await treeOf(doc);
+  const found: Partial<Record<FocusTarget["side"], FocusTarget>> = {};
+  for (const file of files.slice(0, FILES_TRIED)) {
+    if (!hasDiff(ctx.review.files[file.fi])) continue;
+    await tap(doc, rowSelector(file.fi));
+    await waitFileReady(doc);
+    const rows = await gate<RowFacts[]>(doc, "rowsOf", 80);
+    const path = await gate<string>(doc, "openPath");
+    for (const side of ["new", "old"] as const) {
+      if (found[side] !== undefined) continue;
+      const pair = rows.findIndex(
+        (r, k) => r.side === side && rows[k + 1]?.side === side && rows[k + 1]?.line === r.line + 1,
+      );
+      const start = pair >= 0 ? rows[pair] : rows.find((r) => r.side === side);
+      if (start !== undefined) {
+        found[side] = { path, side, from: start.line, to: pair >= 0 ? start.line + 1 : start.line };
+      }
+    }
+    if (found.new !== undefined && found.old !== undefined) break;
+    await gotoTab(doc, "tree");
+  }
+  return [found.new, found.old].filter((t): t is FocusTarget => t !== undefined);
 }
 
 async function checkBridgeFocus(ctx: Ctx): Promise<Verdict> {
@@ -2609,32 +2699,44 @@ async function checkBridgeFocus(ctx: Ctx): Promise<Verdict> {
   begin(ctx);
   const doc = await openViewer(ctx);
   await waitHost("the page to ask the viewer for its state", () => sawState(standIn, 0));
-  if ((await openFileWithRows({ page: doc }, 5)) === null) {
-    return fail("no file in the tree has five lines to tap");
+  const targets = await findFocusTargets(ctx, doc);
+  if (!targets.some((t) => t.side === "new")) {
+    return fail("no file at the top of the tree shows a line of the new side to ask for");
   }
-  const path = await gate<string>(doc, "openPath");
-  const rows = await gate<RowFacts[]>(doc, "rowsOf", 12);
-  const at = rows.findIndex(
-    (r, k) => r.side === "new" && rows[k + 1]?.side === "new" && rows[k + 1]?.line === r.line + 1,
+  const verdicts: Verdict[] = [];
+  for (const target of targets) {
+    await gotoTab(doc, "overview");
+    const anchor = {
+      kind: "line",
+      file: target.path,
+      side: target.side,
+      from: target.from,
+      to: target.to,
+    };
+    await ctx.page.evaluate(`window.__viewer.focus(${JSON.stringify(anchor)})`);
+    const marked = `window.__gate.flaggedLines().some((r) => r.line === ${target.from} && r.side === ${JSON.stringify(target.side)})`;
+    await tryUntil(doc, `window.__gate.fileFacts().fileShown && ${marked}`, 5000);
+    const facts = await gate<FileFacts>(doc, "fileFacts");
+    verdicts.push(
+      focusVerdict({
+        side: target.side,
+        from: target.from,
+        to: target.to,
+        flagged: await gate<{ side: string; line: number }[]>(doc, "flaggedLines"),
+        fileShown: facts.fileShown,
+        fname: facts.fname,
+        expectedName: baseNameOf(target.path),
+      }),
+    );
+  }
+  const asked = allOf(verdicts);
+  const sides = targets.map((t) => t.side);
+  return protocol(
+    ctx,
+    asked.ok && !sides.includes("old")
+      ? { ok: true, detail: `${asked.detail} (no removed line at the top of the tree to ask for)` }
+      : asked,
   );
-  const start = rows[at >= 0 ? at : rows.findIndex((r) => r.side === "new")];
-  if (start === undefined) return fail("the open file shows no line of the new side to ask for");
-  const from = start.line;
-  const to = at >= 0 ? from + 1 : from;
-  await gotoTab(doc, "overview");
-  const anchor = { kind: "line", file: path, side: "new", from, to };
-  await ctx.page.evaluate(`window.__viewer.focus(${JSON.stringify(anchor)})`);
-  await tryUntil(doc, "window.__gate.fileFacts().fileShown && window.__gate.flagged() > 0", 5000);
-  const facts = await gate<FileFacts>(doc, "fileFacts");
-  return focusVerdict({
-    side: "new",
-    from,
-    to,
-    flagged: await gate<{ side: string; line: number }[]>(doc, "flaggedLines"),
-    fileShown: facts.fileShown,
-    fname: facts.fname,
-    expectedName: baseNameOf(path),
-  });
 }
 
 /** The bridge checks, each with its id; the last waits 5 seconds for a write nobody answers. */

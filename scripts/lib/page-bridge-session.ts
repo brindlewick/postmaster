@@ -211,10 +211,11 @@ function ask(
 export function reduceSession(s: Session, e: SessionEvent): SessionStep {
   switch (e.type) {
     case "start":
-      return pump(start(s, e.now, e.framed), e.now);
+      return pump(start(s, e.now, e.framed), e.now, false);
     case "viewer":
-      return pump(heard(s, e.now, e.message), e.now);
+      return pump(heard(s, e.now, e.message), e.now, false);
     case "tick":
+      // A tick is the one event that asks again for a document that never came.
       return pump(
         stay({
           ...s,
@@ -224,9 +225,10 @@ export function reduceSession(s: Session, e: SessionEvent): SessionStep {
           limited: 0,
         }),
         e.now,
+        true,
       );
     case "comment":
-      return pump(written(s, e.now, e.draft), e.now);
+      return pump(written(s, e.now, e.draft), e.now, false);
     case "hide":
       return pump(
         stay(
@@ -235,9 +237,10 @@ export function reduceSession(s: Session, e: SessionEvent): SessionStep {
             : s,
         ),
         e.now,
+        false,
       );
     case "clock":
-      return pump(clocked(s, e.now), e.now);
+      return pump(clocked(s, e.now), e.now, false);
   }
 }
 
@@ -466,12 +469,17 @@ function written(s: Session, now: number, draft: CommentDraft): SessionStep {
   return stay({ ...s, book: draftComment(s.book, { ...draft, text }, now, failure).book });
 }
 
-/** Send whatever is due: the document again if ticks wait on it, the tick write, and the queued comments. */
-function pump(step: SessionStep, now: number): SessionStep {
+/**
+ * Send whatever is due: the tick write and the queued comments, and, on a tick (`retryLoad`), the
+ * document again if ticks wait on one that never came. A request that ran out of time is not asked
+ * again by the clock: the page has fallen back, and the reader's next tick is what tries again.
+ */
+function pump(step: SessionStep, now: number, retryLoad: boolean): SessionStep {
   let s = step.session;
   const effects: Effect[] = [...step.effects];
   const ready = s.phase === "ready";
   if (
+    retryLoad &&
     ready &&
     s.caps.includes("state") &&
     !s.state.loaded &&

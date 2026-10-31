@@ -90,7 +90,9 @@ export function renderStart() {
 
 function chatText() {
   const R = S.R;
-  const n = S.comments.filter((c) => !c.replyTo && c.by !== "claude").length;
+  // The comments the session can read: not its own replies, not the closed ones, and, where a viewer keeps them,
+  // only those the viewer holds.
+  const n = S.comments.filter((c) => !c.replyTo && c.by !== "claude" && c.status !== "closed" && (c.save === undefined || c.save === "kept")).length;
   return `I reviewed ${R.ticket ? `#${R.ticket}` : "the change"}${R.pr ? ` (pull request ${R.pr})` : ""} on its page: ${n} ${n === 1 ? "line comment" : "line comments"}. Read them there.`;
 }
 

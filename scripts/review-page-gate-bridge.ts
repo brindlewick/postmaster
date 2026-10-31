@@ -4,6 +4,7 @@
 // reads facts from the page and from the stand-in, and hands them here; nothing here touches a
 // browser. A verdict names what went wrong, since a check that only says "failed" tells nobody
 // where to look.
+import { cutText } from "./lib/page-bridge.ts";
 import type { ChangedFile } from "./lib/review-layout.ts";
 import { contentHash } from "./lib/review-model.ts";
 import type { Verdict } from "./review-page-gate.ts";
@@ -71,25 +72,31 @@ export function bridgeTicksVerdict(f: TicksFacts): Verdict {
 }
 
 export interface VersionFacts {
-  /** The file whose diff changed in the new version, and one whose diff did not. */
+  /** The file whose diff changed in the new version, and one whose diff did not (none in a review with a single file to tick). */
   readonly changed: number;
-  readonly kept: number;
+  readonly kept: number | null;
   readonly ticked: readonly number[];
   readonly count: number;
 }
 
 /** On a new version the file whose diff changed starts unticked and the unchanged file keeps its tick. */
 export function newVersionVerdict(f: VersionFacts): Verdict {
+  const expected = f.kept === null ? 0 : 1;
   const problems = [
     ...(f.ticked.includes(f.changed)
       ? [`file ${f.changed} kept its tick although its diff changed`]
       : []),
-    ...(f.ticked.includes(f.kept)
+    ...(f.kept === null || f.ticked.includes(f.kept)
       ? []
       : [`file ${f.kept} lost its tick although its diff did not change`]),
-    ...(f.count === 1 ? [] : [`the reviewed count is ${f.count}, expected 1`]),
+    ...(f.count === expected ? [] : [`the reviewed count is ${f.count}, expected ${expected}`]),
   ];
-  return judged(problems, "the changed file started unticked and the unchanged file kept its tick");
+  return judged(
+    problems,
+    f.kept === null
+      ? "the changed file started unticked"
+      : "the changed file started unticked and the unchanged file kept its tick",
+  );
 }
 
 // ---------- no viewer answers ----------
@@ -97,29 +104,40 @@ export function newVersionVerdict(f: VersionFacts): Verdict {
 export interface NotSavedFacts {
   /** The lines shown while the page was still within its 1.5 seconds. */
   readonly early: readonly Note[];
-  /** The lines shown once the wait was over. */
+  /** The lines shown on the overview once the wait was over. */
   readonly late: readonly Note[];
+  /** Each screen visited after the wait: what its line is about (ticks, or comments in the comment box) and what it showed. */
+  readonly screens: readonly {
+    readonly name: string;
+    readonly scope: string;
+    readonly notes: readonly Note[];
+  }[];
   /** A tick made then is shown as ticked. */
   readonly ticked: boolean;
-  /** Ticks the viewer holds. */
-  readonly written: number;
+  /** The messages the viewer saw from the page, its hello apart: a page that never got bridge-ready sends none. */
+  readonly sent: number;
 }
 
-/** With no bridge-ready the page keeps working for the visit, and says Not saved only after 1.5 seconds. */
+/** With no bridge-ready the page keeps working for the visit, sends nothing, and says Not saved only after 1.5 seconds. */
 export function notSavedVerdict(f: NotSavedFacts): Verdict {
+  const missing = f.screens.filter(
+    (screen) =>
+      !screen.notes.some((n) => n.scope === screen.scope && n.text.startsWith("Not saved")),
+  );
   const problems = [
     ...f.early
       .slice(0, 1)
       .map((n) => `the page said "${n.text}" before the wait for the viewer was over`),
     ...(saysNotSaved(f.late) ? [] : ["the page never said Not saved"]),
+    ...missing.map(
+      (screen) => `no Not saved line for ${screen.scope} on the ${screen.name} screen`,
+    ),
     ...(f.ticked ? [] : ["a tick did not work without a viewer"]),
-    ...(f.written === 0
-      ? []
-      : [`the page wrote ${f.written} ticks to a viewer that never said ready`]),
+    ...(f.sent === 0 ? [] : [`the page sent ${f.sent} messages to a viewer that never said ready`]),
   ];
   return judged(
     problems,
-    "nothing was said for 1.5 seconds, then Not saved, and a tick still worked",
+    `nothing was said for 1.5 seconds, then Not saved on ${["overview", ...f.screens.map((x) => x.name)].join(", ")}, and a tick still worked`,
   );
 }
 
@@ -178,12 +196,13 @@ export function conflictVerdict(f: ConflictFacts): Verdict {
 
 export interface CommentFacts {
   readonly typed: string;
-  /** The row the comment was left on: its file, side, line and the text of the line. */
+  /** The row the comment was left on: its file, side, line and the text of the line (blank, where the line is empty). */
   readonly row: {
     readonly path: string;
     readonly side: string;
     readonly line: number;
     readonly text: string;
+    readonly blank: boolean;
   };
   /** The comment on the page right after Save, before the viewer answered; null if it was not there. */
   readonly atOnce: { readonly text: string; readonly save: string } | null;
@@ -201,6 +220,9 @@ export interface CommentFacts {
     readonly note: string;
   }[];
 }
+
+/** The quote a comment on this line carries: its text cut at 2000 characters, and nothing for a blank line. */
+const quoteOf = (row: CommentFacts["row"]): string => (row.blank ? "" : cutText(row.text, 2000));
 
 /** A comment shows at once, reaches the viewer as a line anchor, settles as kept, and is there after a reload. */
 export function commentVerdict(f: CommentFacts): Verdict {
@@ -236,7 +258,7 @@ export function commentVerdict(f: CommentFacts): Verdict {
             : [
                 `the anchor lines are ${String(anchor.from)} to ${String(anchor.to)}, not ${f.row.line}`,
               ]),
-          ...(anchor.quote === undefined || anchor.quote === f.row.text
+          ...((typeof anchor.quote === "string" ? anchor.quote : "") === quoteOf(f.row)
             ? []
             : [`the anchor quote is not the text of the line`]),
         ]),
@@ -332,4 +354,51 @@ export function constantHashes(review: string): string {
 /** A fault: the page with a rule at the end that hides every Not saved line. */
 export function withoutSaveNotes(html: string): string {
   return `${html}<style>.savenote{display:none!important}</style>`;
+}
+
+/** A fault: the page with a rule at the end that hides the Not saved line of the comment box alone. */
+export function withoutComposerNote(html: string): string {
+  return `${html}<style>.composer .savenote{display:none!important}</style>`;
+}
+
+// ---------- what the stand-in refused ----------
+
+/** One message the stand-in saw, as its log writes it. */
+export interface LoggedMessage {
+  readonly type: string;
+  readonly id: string | null;
+  readonly outcome: string;
+}
+
+/**
+ * The messages the stand-in ignored or refused, one line each. A page that keeps to the contract
+ * draws none (a conflict aside, where the check asked for one), so a refusal in a clean visit is a
+ * page that sent what it should not, whatever else the check found.
+ */
+export function protocolProblems(
+  log: readonly LoggedMessage[],
+  expect: { readonly conflict: boolean },
+): string[] {
+  return log.flatMap((l) => {
+    const refused =
+      l.outcome === "ignored" ||
+      (l.outcome.startsWith("error:") && !(expect.conflict && l.outcome === "error:conflict"));
+    return refused ? [`${l.type}${l.id === null ? "" : ` ${l.id}`}: ${l.outcome}`] : [];
+  });
+}
+
+/** The verdict, failed as well when the stand-in refused or ignored something the page sent. */
+export function withProtocol(verdict: Verdict, problems: readonly string[]): Verdict {
+  if (problems.length === 0) return verdict;
+  const refused = `the viewer refused or ignored ${plural(problems.length, "message", "messages")}: ${problems.join(", ")}`;
+  return fail(verdict.ok ? refused : `${verdict.detail}; ${refused}`);
+}
+
+/** Verdicts taken together: all must pass, and what failed is said. */
+export function allOf(verdicts: readonly Verdict[]): Verdict {
+  if (verdicts.length === 0) return fail("nothing was checked");
+  const failed = verdicts.filter((v) => !v.ok);
+  return failed.length === 0
+    ? pass(verdicts.map((v) => v.detail).join("; "))
+    : fail(failed.map((v) => v.detail).join("; "));
 }

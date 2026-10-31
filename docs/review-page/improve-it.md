@@ -10,12 +10,12 @@ skills/review-pages/page/
   page.html            the markup: header, four screens, the file list sheet, the toast
   assets.json          the order of the files below; the builder inlines them
   layout.default.json  the default groups, withheld rule and area roots
-  css/                 tokens, header, overview, tree, order, file, find, wide
+  css/                 tokens, header, overview, tree, order, file, save, find, wide
   js/                  core, data, ticks, diff, tree, order, overview, find, nav, bridge, boot (ES modules)
 scripts/lib/review-tree.ts      the tree (pure; also inlined into the page)
 scripts/lib/page-bridge*.ts     the page's side of the page bridge: messages and their checks, requests
                                 and clocks, saved state, comments, the session (pure; also inlined)
-scripts/lib/page-bridge-stand-in.ts  a stand-in for the viewer, for the render gate
+scripts/lib/page-bridge-stand-in.ts  a stand-in for the viewer, for the render gate (not inlined)
 scripts/lib/review-layout.ts    grouping, ordering, purposes and rulings (pure)
 scripts/lib/review-model.ts     review.json and the chunks (pure)
 scripts/lib/review-assemble.ts  the shell, stylesheets and scripts into one file (pure)
@@ -31,12 +31,14 @@ files, in the order of `assets.json`, as one script; a test checks that every im
 the manifest and a name that file exports.
 
 The page is one HTML file plus `review.json` (the files, groups, rulings and summary) and
-`chunks/<k>.json` (the diffs, loaded when a file is opened). `review.json` has a `version` (now 2); each file in it carries `sig`, a short hash of its path and diff for the
-browser, and `hash`, the SHA-256 of what the page shows of it, for the page bridge.
+`chunks/<k>.json` (the diffs, loaded when a file is opened). `review.json` has a `version` (now 2);
+each file in it carries `sig`, a short hash of its path and diff that keys its tick in the browser,
+and `hash`, the SHA-256 of what the page shows of it, which keys its tick in the page bridge.
 The builder keeps no clock, random id or machine path in any output, so two builds of the same range
 with the same inputs are byte for byte the same; the tests build an invented sample repository twice
-and compare. The tree's logic is the one file `scripts/lib/review-tree.ts`, unit tested, and the page
-inlines a transpiled copy with its `export` keywords removed, so it is written once.
+and compare. The tree's logic and the page bridge's are TypeScript files under `scripts/lib`, unit
+tested, and the page inlines a transpiled copy of each with its `export` keywords removed, so each is
+written once. A module may import one listed before it in `assets.json`.
 
 ## Improve it
 
