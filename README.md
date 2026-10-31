@@ -79,5 +79,6 @@ The rest is in short pages:
 - [Native sessions](docs/native-sessions.md)
 - [Design principles](docs/design-principles.md)
 - [Records and the wiki](docs/records-and-the-wiki.md)
+- [The pages contract](docs/pages-contract.md) and [the page bridge](docs/page-bridge.md), for the author of an artifact host that stores postmaster's review pages
 
 See `AGENTS.md` for the full context, and `skills/postmaster/` for the runbooks and adapters.
