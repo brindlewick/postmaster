@@ -217,6 +217,55 @@ describe("reading rules", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  // The record types and the end record's fields are the ones grok 1.0.70 printed with
+  // --output-format streaming-json; the values are made up. That end record carries no cost.
+  test("a grok streaming-json stream is read from its end record, not from the usage records before it", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "usage-"));
+    try {
+      const events = join(tmp, "grok-streaming-json.jsonl");
+      writeFileSync(
+        events,
+        [
+          JSON.stringify({
+            type: "available_commands",
+            commands: ["compact"],
+            tools: ["read_file"],
+          }),
+          JSON.stringify({ type: "text", data: "working" }),
+          JSON.stringify({
+            type: "usage",
+            usage: { input_tokens: 30, output_tokens: 4 },
+            signature: "made-up",
+          }),
+          JSON.stringify({
+            type: "usage",
+            usage: { input_tokens: 11, output_tokens: 3 },
+            signature: "made-up",
+          }),
+          JSON.stringify({
+            type: "end",
+            stopReason: "end_turn",
+            sessionId: "made-up-session",
+            usage: {
+              input_tokens: 40,
+              cache_read_input_tokens: 5,
+              output_tokens: 6,
+              reasoning_tokens: 1,
+              total_tokens: 51,
+            },
+            num_turns: 2,
+            usage_is_incomplete: true,
+            modelUsage: { "made-up-model": { inputTokens: 40, outputTokens: 6, modelCalls: 2 } },
+          }),
+          "",
+        ].join("\n"),
+      );
+      expect(readJson(events, "grok")).toEqual({ input_tokens: 40, output_tokens: 6 });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("record and sum", () => {
