@@ -250,9 +250,9 @@ export function keepComposerVisible() {
   if (Math.abs(dy) > 1) window.scrollBy(0, dy);
 }
 
-// Who wrote a comment, as the page names them: Claude for the session's replies; for a comment the viewer
-// keeps, the name it gives (or "Reader"); a comment of the reader's own that is not yet kept, or one from the
-// page's database, is "You".
+// Who wrote a comment, as the page names them: the session's replies carry the session's name; for a comment
+// the viewer keeps, the name it gives (or "Reader"); a comment of the reader's own that is not yet kept, or
+// one from the page's database, is "You".
 function whoWrote(x) {
   if (x.by === "claude") return "Claude";
   if (x.source === "bridge" && x.save === "kept") return x.by || "Reader";

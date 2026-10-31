@@ -58,11 +58,14 @@ export function repaintTicks() {
 export async function connectDb() {
   let d = null;
   try {
-    d = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
+    // While the database is being asked for, the page does not yet say that nothing keeps its ticks.
+    S.dbTrying = !!(window.claude && typeof window.claude.use === "function");
+    d = S.dbTrying ? await window.claude.use("db") : null;
   } catch {
     d = null;
   }
-  if (!d) { S.dbOff = true; paintSaveNotes(); return; }
+  S.dbTrying = false;
+  if (!d) { paintSaveNotes(); return; }
   S.db = d;
   paintSaveNotes();
   const bySig = new Map(S.files.map((f, fi) => [f.sig, fi]));

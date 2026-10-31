@@ -128,10 +128,10 @@ function syncComments() {
 }
 
 // Show or hide each "Not saved" line. Nothing is shown where the page's database keeps ticks and
-// comments, or while the viewer has not yet answered.
+// comments (or is still being asked for), or while the viewer has not yet answered.
 export function paintSaveNotes() {
   if (!started) return;
-  const databaseKeeps = !!S.db || (!!window.claude && !S.dbOff);
+  const databaseKeeps = !!S.db || S.dbTrying;
   for (const line of document.querySelectorAll(".savenote")) {
     const text = databaseKeeps ? null : line.dataset.scope === "comments" ? commentsNote(session) : ticksNote(session);
     line.hidden = text === null;

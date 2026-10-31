@@ -56,7 +56,7 @@ export const store = {
 export const S = {
   R: null, files: [], key: "review-page", hay: [],
   tree: [], treeSeq: [], orderSeq: [], allDirs: [], defaultOpen: new Set(),
-  open: new Set(), query: "", ticks: new Set(), comments: [], db: null, dbOff: false,
+  open: new Set(), query: "", ticks: new Set(), comments: [], db: null, dbTrying: false,
   tab: "overview", screen: "overview", seq: "order", fi: -1, wide: false,
   scroll: { overview: 0, tree: 0, order: 0 }, wrap: false, sel: null, flag: null,
 };
