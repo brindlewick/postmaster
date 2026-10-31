@@ -240,9 +240,10 @@ onto the fragment it supersedes.
   first launch opens the tab, labelled with the ticket number and the start of its title in
   30 characters, and every launch splits a pane off it, with its own checkout as the pane's
   working directory. That includes reviewer scratches: a clone is never opened as a separate
-  workspace. The tab's first pane shows the run's state while no lane runs — the ticket, the
-  stage, what the run waits for, read from the run's records by `run host run-state` — and
-  keeps the tab listed between launches. A failure before the launch lands rolls back
+  workspace. The tab's first pane runs nothing and keeps the tab listed between launches. To
+  look at a run, run `<tool>/scripts/run host run-state [--watch] <dispatch>`: the ticket, the
+  stage and what the run waits for, read from the run's records, once, or every 60 seconds
+  with `--watch`. A failure before the launch lands rolls back
   instead — the run tab while the launch pane does not exist yet, the launch pane after —
   so a failed placement leaves nothing a later close could refuse. A run launch without
   `--under` is refused instead of opening a top-level space. A fixture copy's launches join the
@@ -364,7 +365,7 @@ checks the uncapped notice and successful launch.
 `<tool>/scripts/run host --live-test` runs the
 ticket's controls against the hosts on this machine, in a scratch repository it creates: a
 postmaster using the project's first tab; run launches sharing one ticket-labeled tab in the
-project's space, with a state pane that outlives them and a close-run that takes the tab;
+project's space, with a first pane that outlives them and a close-run that takes the tab;
 a workhorse and style, bug, and security launches under that run, including a security
 clone whose pane closes without closing the run tab; a spawned session that `close-handle`
 closes from its placement record, and the handle spawns again; then the same launch with no
