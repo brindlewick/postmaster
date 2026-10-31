@@ -17,13 +17,13 @@
 // change: diffs the head against its merge base with the base, as GitHub does, and writes
 // <out-dir>/index.html (the phone-first review page, assembled from skills/review-pages/page),
 // review.json and chunks/<k>.json, which index.html loads, and <out-dir>/publish.html: the same page
-// with that data inside it, the one file to publish. Files are grouped by importance, ordered and described by the
-// layout (skills/review-pages/page/layout.default.json, then --layout and --purposes), and the page
-// loads a file's diff only when it is opened. With --pr, the title, the summary (the pull request's
-// text), the base and the head come from `gh api` on the repository's origin. With --ticket, or a
-// pull request titled "#<n>, <title>", the ticket's text comes from that issue; --ticket-body is a
-// Markdown file holding the ticket's text instead, for a ticket that is not a GitHub issue.
-// --summary is a Markdown file containing the change's summary.
+// with that data inside it and in a complete document, the one file to publish. Files are grouped by
+// importance, ordered and described by the layout (skills/review-pages/page/layout.default.json, then
+// --layout and --purposes), and the page loads a file's diff only when it is opened. With --pr, the
+// title, the summary (the pull request's text), the base and the head come from `gh api` on the
+// repository's origin. With --ticket, or a pull request titled "#<n>, <title>", the ticket's text comes
+// from that issue; --ticket-body is a Markdown file holding the ticket's text instead, for a ticket
+// that is not a GitHub issue. --summary is a Markdown file containing the change's summary.
 //
 // demo: builds the same page for an invented sample repository made in a temporary folder, so a
 // session can see the page, and the page's own tests have a fixed input.
@@ -39,6 +39,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inSkeleton } from "./lib/page-skeleton.ts";
 import { dataBlock, langOf, scrub, withData } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
 import { assemblePage } from "./lib/review-assemble.ts";
@@ -248,13 +249,16 @@ function buildFrom(out: string, args: string[], facts: Facts, extra: unknown[], 
   const pageTitle = flag(args, "--page-title") ?? "Code Review";
   const page = assemblePage({ ...loadPageAssets(TOOL), title: pageTitle });
   writeFileSync(join(out, "index.html"), page);
-  // The same page with its data inside it: the one file to publish, for a host that stores one file.
+  // The same page with its data inside it, in the document the gate checks it in: the one file to
+  // publish, for a host that stores one file and serves it as it is.
   writeFileSync(
     join(out, "publish.html"),
-    withData(page, [
-      dataBlock(reviewBlockId(), built.review),
-      ...built.chunks.map((items, k) => dataBlock(chunkBlockId(k), items)),
-    ]),
+    inSkeleton(
+      withData(page, [
+        dataBlock(reviewBlockId(), built.review),
+        ...built.chunks.map((items, k) => dataBlock(chunkBlockId(k), items)),
+      ]),
+    ),
   );
   const files = built.review.files;
   const heuristic = files.filter((f) => f.purposeSource === "heuristic").length;
@@ -346,9 +350,11 @@ function buildFiles(out: string, ref: string, paths: string[]): string {
   });
   const title =
     paths.length === 1 ? (paths[0] ?? "Code") : `${paths.length} files at ${sha.slice(0, 7)}`;
-  const html = withData(titled(readFileSync(join(TEMPLATES, "viewer.html"), "utf8"), "Code"), [
-    dataBlock("files-data", { title, ref: sha, files }),
-  ]);
+  const html = inSkeleton(
+    withData(titled(readFileSync(join(TEMPLATES, "viewer.html"), "utf8"), "Code"), [
+      dataBlock("files-data", { title, ref: sha, files }),
+    ]),
+  );
   mkdirSync(out, { recursive: true });
   const page = join(out, "index.html");
   writeFileSync(page, html);

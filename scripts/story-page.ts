@@ -30,6 +30,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { inSkeleton } from "./lib/page-skeleton.ts";
 import { langOf, scrub } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
 
@@ -1996,7 +1997,7 @@ export function build(o: BuildOptions): string {
   const page = pageHtml(parts, diagramCss);
   const sheet = sheetHtml(parts, diagramCss);
   mkdirSync(o.outDir, { recursive: true });
-  writeFileSync(join(o.outDir, "index.html"), page);
+  writeFileSync(join(o.outDir, "index.html"), inSkeleton(page));
   writeFileSync(join(o.outDir, "sheet.html"), sheet);
   let pictureBytes = 0;
   const pictureFiles: Record<string, string> = {};

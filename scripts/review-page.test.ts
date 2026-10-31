@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inSkeleton } from "./lib/page-skeleton.ts";
 import { dataBlock, withData } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
 import { chunkBlockId, readBlock, reviewBlockId } from "./lib/review-source.ts";
@@ -198,7 +199,10 @@ describe("the script: change", () => {
       dataBlock(reviewBlockId(), review),
       ...chunks.map((items, k) => dataBlock(chunkBlockId(k), items)),
     ];
-    expect(withData(index, blocks)).toBe(single);
+    expect(inSkeleton(withData(index, blocks))).toBe(single);
+    // a host that stores the file as it is gives it standards mode and a phone's width: a complete document
+    expect(single.startsWith("<!doctype html>")).toBe(true);
+    expect(single).toContain("<meta name=viewport");
     // The page checked in a browser is index.html, which holds no data of its own.
     expect(index).not.toContain('type="application/json"');
     expect(single).toContain("<title>Code Review</title>");
@@ -381,6 +385,8 @@ describe("the script: files", () => {
     expect(html).not.toContain("som" + "eon" + "e@c" + "omp" + "any" + ".co");
     expect(html).not.toContain("<!-- page data -->");
     expect(html).toContain("<title>Code</title>");
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain("<meta name=viewport");
     // the page reads its files from the block, fetches nothing, and reaches the window only for
     // highlight.js and the hash change
     expect(html).not.toMatch(/fetch\(/u);

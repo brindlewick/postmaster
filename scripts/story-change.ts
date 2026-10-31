@@ -22,6 +22,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { inSkeleton } from "./lib/page-skeleton.ts";
 import { langOf, scrub } from "./lib/page-text.ts";
 
 type Range = [number, number];
@@ -946,7 +947,7 @@ const skeleton = (theme: string): string =>
   `<!doctype html><html lang="en"${theme ? ` data-theme="${theme}"` : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0;font:14px system-ui;background:#fafafa}img{max-width:100%}[hidden]{display:none!important}</style></head><body>\n${page}</body></html>\n`;
 if (mode === "build") {
   mkdirSync(outDir!, { recursive: true });
-  writeFileSync(join(outDir!, "index.html"), page);
+  writeFileSync(join(outDir!, "index.html"), inSkeleton(page));
   writeFileSync(join(outDir!, "preview-light.html"), skeleton("light"));
   writeFileSync(join(outDir!, "preview-dark.html"), skeleton("dark"));
 }

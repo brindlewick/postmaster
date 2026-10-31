@@ -541,6 +541,15 @@ describe("sheet: every drawing in every state", () => {
   });
 });
 
+describe("the published page is a complete document", () => {
+  test("a story page starts with a doctype and a viewport, for a host that stores the file as it is", () => {
+    const html = page(B.b271);
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain("<meta name=viewport");
+    expect(html.endsWith("</body></html>")).toBe(true);
+  });
+});
+
 describe("scrub: no page holds an address", () => {
   test("the company address is removed and the example address stays", () => {
     const html = page(B.scrub);

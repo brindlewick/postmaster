@@ -276,6 +276,8 @@ describe("page: the rows reach the page only from the command", () => {
     expect(slug).toBe("experiments-repo");
     const html = readFileSync(path!, "utf8");
     expect(html).toContain("<title>repo experiments</title>");
+    // a complete document, for a host that stores the file as it is
+    expect(html.startsWith("<!doctype html>")).toBe(true);
     // the page reaches for nothing of the window around it: its rows are in the file
     expect(html).not.toContain("window");
     const shown = renderPage(null, path);

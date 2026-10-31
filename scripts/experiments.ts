@@ -21,9 +21,9 @@
 // Each change is logged through the project's ledger. Dates are UTC calendar
 // days; an experiment is due when it is running and its date to look has come.
 // A level is one side of what the experiment compares. The page is one file,
-// .postmaster/experiments-page.html, with every row inline and the time it
-// was built; the project keeps one slug, and each build published to it is the
-// page's next version.
+// .postmaster/experiments-page.html, a complete document with every row inline and
+// the time it was built; the project keeps one slug, and each build published to
+// it is the page's next version.
 import {
   appendFileSync,
   existsSync,
@@ -41,6 +41,7 @@ import {
   projectRoot,
   settingsDir,
 } from "./lib/effective-config.ts";
+import { inSkeleton } from "./lib/page-skeleton.ts";
 import { dataBlock, withData } from "./lib/page-text.ts";
 import { slugOf } from "./lib/pages-host.ts";
 import { argvDecoded, run } from "./lib/proc.ts";
@@ -717,7 +718,7 @@ function main(): void {
     }
     writeFileSync(
       out,
-      buildPage(template, rows, asOfText(new Date().toISOString()), basename(root)),
+      inSkeleton(buildPage(template, rows, asOfText(new Date().toISOString()), basename(root))),
     );
     releaseLock();
     console.log(out);

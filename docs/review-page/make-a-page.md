@@ -13,7 +13,7 @@ scripts/run review-page change <dir> --base <base> --head <full sha> --summary <
 Run it from the repository the change belongs to. `<dir>` is a new folder in the session's
 scratchpad. The command reads git (and `gh` for `--pr` and `--ticket`) and writes `index.html`,
 `review.json` and `chunks/<k>.json` into `<dir>`, and `publish.html` beside them: the same page with
-that data inside it, the one file to publish. It prints one line: files, groups, lines, chunks,
+that data inside it and in a complete document, the one file to publish. It prints one line: files, groups, lines, chunks,
 addresses removed, how many file purposes came from the heuristics, how many files are withheld, and
 then the path of `publish.html`. It exits 1, naming the text, when the layout does not parse or a
 ruling's link finds no line.

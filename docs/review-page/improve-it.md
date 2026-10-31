@@ -35,8 +35,10 @@ the manifest and a name that file exports.
 The page is one HTML file, `index.html`, plus `review.json` (the files, groups, rulings and summary)
 and `chunks/<k>.json` (the diffs, loaded when a file is opened). `publish.html` is the same page with
 that data inside it, in a block `review-data` and a block `review-chunk-<k>` for each chunk, which the
-page reads first; it is the one file to publish, and a test holds it to `index.html` plus the data
-files, byte for byte. The render gate checks `index.html`, which a browser loads with its data files
+page reads first, and in the document the gate checks pages in (a doctype, a viewport and no body
+margin, `scripts/lib/page-skeleton.ts`), so a host that serves the file as it is shows it as the gate
+saw it. It is the one file to publish, and a test holds it to `index.html` plus the data files and
+that skeleton, byte for byte. The render gate checks `index.html`, which a browser loads with its data files
 beside it. `review.json` has a `version` (now 2);
 each file in it carries `sig`, a short hash of its path and diff that keys its tick in the browser,
 and `hash`, the SHA-256 of what the page shows of it, which keys its tick in the page bridge.
