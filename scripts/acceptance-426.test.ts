@@ -10,7 +10,9 @@
 // installs and the trust commands are pinned beside the criteria that imply
 // them. Every install case drives the real manager through the guard's own
 // shim against a loopback registry, and proves "before any download" from
-// the registry's request log, never from the guard's word. Refusals exit 1,
+// the registry's request log, never from the guard's word. Each call runs
+// with a cache, a store and a config of its own, so nothing the machine
+// already holds can stand in for a download. Refusals exit 1,
 // name the package and tell the agent to stop and report it; the dispatch
 // hold exits 2. Berry's decisions run against a stub yarn here and for real
 // in the hand-run transcript on the run's card: no deterministic Berry binary
@@ -29,9 +31,12 @@ import {
   RUN,
   SHIM,
   buildTarball,
+  directAdd,
   expectRefused,
   guarded,
   installedVersion,
+  killTree,
+  managerEnv,
   mkDispatch,
   mkProject,
   packumentHits,
@@ -41,6 +46,7 @@ import {
   scratchDir,
   startRegistry,
   tarballHits,
+  treeOf,
   type Guarded,
   type LoggedRequest,
   type Pm,
@@ -48,7 +54,7 @@ import {
   type RegistryVersion,
 } from "./acceptance-426.ts";
 import { run } from "./lib/proc.ts";
-import { processTable } from "./lib/processes.ts";
+import { processState } from "./lib/processes.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const isoAgo = (ms: number): string => new Date(Date.now() - ms).toISOString();
@@ -145,38 +151,19 @@ function seed(): void {
 }
 
 /** Generate committed-lockfile snapshots per manager with direct unguarded
- * installs, so the sync cases start from real lockfiles. */
+ * installs, so the sync cases start from real lockfiles. Each manager gets a
+ * home of its own, so the snapshots read and write nothing of the machine's. */
 async function snapshot(pm: Pm): Promise<void> {
-  const bin = pmBin(pm);
-  if (bin === null) return;
-  const env = (process.env as Record<string, string>).PATH;
-  const pathEnv = `${DEV_BIN}:${env}`;
-  const add = async (dir: string, spec: string): Promise<void> => {
-    // Snapshots need only the lockfile: install scriptless so pnpm's native
-    // build gate does not fail the fixture setup.
-    const r = await runAsync(
-      bin,
-      [
-        "add",
-        spec,
-        "--registry",
-        registry.url,
-        "--ignore-scripts",
-        ...(pm === "yarn" ? ["--non-interactive"] : []),
-        ...(pm === "npm" ? ["--no-audit", "--no-fund"] : []),
-      ],
-      {
-        cwd: dir,
-        env: { ...(process.env as Record<string, string>), PATH: pathEnv },
-      },
-    );
-    if (r.code !== 0)
-      throw new Error(`snapshot ${pm} add ${spec}: ${(r.err + r.out).slice(0, 400)}`);
-  };
+  if (pmBin(pm) === null) return;
+  const home = join(tmp, `snap-home-${pm}`);
+  mkdirSync(home, { recursive: true });
+  const env = managerEnv(process.env, home);
+  // Snapshots need only the lockfile: directAdd installs scriptless so pnpm's
+  // native build gate does not fail the fixture setup.
   const plain = mkProject(tmp, `snap-${pm}-plain`);
-  await add(plain, "g-clean@1.0.0");
+  await directAdd(registry, pm, plain, "g-clean@1.0.0", env);
   const scripts = mkProject(tmp, `snap-${pm}-scripts`);
-  await add(scripts, "g-scripts@1.0.0");
+  await directAdd(registry, pm, scripts, "g-scripts@1.0.0", env);
   snapshots[pm] = { plain, scripts };
 }
 
@@ -246,6 +233,75 @@ test("hit counters attribute the bun-run npm user agent to the run", () => {
   ];
   expect(packumentHits(log)).toEqual(["/g-dep"]);
   expect(tarballHits(log)).toEqual(["/tarballs/g-dep-1.0.0.tgz"]);
+});
+
+test("a manager's environment keeps every cache, store and config of its own inside the dispatch's home", () => {
+  const home = "/scratch/dispatch/home";
+  const machine: Record<string, string> = {
+    PATH: "/usr/bin:/bin",
+    TMPDIR: "/var/tmp/",
+    LANG: "en_GB.UTF-8",
+    HOME: "/Users/someone",
+    XDG_CACHE_HOME: "/Users/someone/.cache",
+    BUN_INSTALL: "/Users/someone/.bun",
+    BUN_INSTALL_CACHE_DIR: "/Users/someone/.bun/cache",
+    PNPM_HOME: "/Users/someone/Library/pnpm",
+    pnpm_config_store_dir: "/Users/someone/store",
+    npm_config_cache: "/Users/someone/.npm",
+    NPM_CONFIG_USERCONFIG: "/Users/someone/.npmrc",
+    npm_config_user_agent: "bun/1.4.2 npm/? node/v26.3.0 linux x64",
+    YARN_CACHE_FOLDER: "/Users/someone/.yarn-cache",
+    COREPACK_HOME: "/Users/someone/.corepack",
+    NPM_TOKEN: "a-credential",
+    HTTPS_PROXY: "http://proxy.invalid:3128",
+  };
+  const env = managerEnv(machine, home);
+  // Anything the machine could use to name a place is either gone or inside the home.
+  const naming = /^(HOME|XDG_|BUN_|PNPM_|YARN_|COREPACK_|npm_|NPM_)/iu;
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined || !naming.test(key)) continue;
+    expect([key, value === home || value.startsWith(`${home}/`)]).toEqual([key, true]);
+  }
+  // Each manager's own place is set, not merely cleared, so none falls back to a default.
+  for (const key of [
+    "HOME",
+    "XDG_CACHE_HOME",
+    "BUN_INSTALL",
+    "PNPM_HOME",
+    "YARN_CACHE_FOLDER",
+    "npm_config_cache",
+  ]) {
+    expect([key, env[key] !== undefined]).toEqual([key, true]);
+  }
+  // What the manager needs to run comes through, and the credential and the proxy do not.
+  expect(env.PATH).toBe("/usr/bin:/bin");
+  expect(env.TMPDIR).toBe("/var/tmp/");
+  expect(env.LANG).toBe("en_GB.UTF-8");
+  expect(env.NPM_TOKEN).toBeUndefined();
+  expect(env.HTTPS_PROXY).toBeUndefined();
+  expect(machine.HOME).toBe("/Users/someone");
+});
+
+test("a call that does not finish is killed with everything it started, and the failure names it", async () => {
+  const dir = scratchDir("acceptance-426-hung-");
+  try {
+    const pidFile = join(dir, "grandchild.pid");
+    const started = Date.now();
+    let failure = "";
+    try {
+      await runAsync("sh", ["-c", `sleep 20 & echo $! > ${pidFile}; wait`], { timeoutMs: 500 });
+    } catch (e) {
+      failure = String(e);
+    }
+    expect(failure).toMatch(/did not finish within 0\.5s/u);
+    expect(Date.now() - started).toBeLessThan(15_000);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    const deadline = Date.now() + 5000;
+    while (processState(pid) === "live" && Date.now() < deadline) await Bun.sleep(50);
+    expect(processState(pid)).not.toBe("live");
+  } finally {
+    removeDir(dir);
+  }
 });
 
 beforeAll(async () => {
@@ -372,6 +428,58 @@ describe("C1: the ticket list plus the recorded yes", () => {
     expect(r.code).toBe(0);
     expect(installedVersion(project, "@gscope/g-scoped")).toBe("2.0.0");
   });
+});
+
+describe("a cache or store the machine already holds does not stand in for the registry", () => {
+  // Where each manager takes its downloads from when the environment names a place: bun's cache
+  // follows BUN_INSTALL ahead of HOME, pnpm's store follows PNPM_HOME, npm's cache npm_config_cache
+  // and Yarn Classic's YARN_CACHE_FOLDER.
+  const named = (root: string): Record<Pm, Record<string, string>> => ({
+    npm: { npm_config_cache: join(root, "npm") },
+    pnpm: { PNPM_HOME: join(root, "pnpm") },
+    yarn: { YARN_CACHE_FOLDER: join(root, "yarn") },
+    bun: { BUN_INSTALL: join(root, "bun") },
+  });
+  for (const pm of PMS) {
+    test.skipIf(!avail[pm])(
+      `${pm}: the listed library is downloaded though the environment names a warm cache`,
+      async () => {
+        const root = join(tmp, `warm-${pm}`);
+        mkdirSync(join(root, "home"), { recursive: true });
+        const names = named(root)[pm];
+        // Warm that cache the way a long-lived machine has it: install the library once, directly.
+        const warmEnv = { ...managerEnv(process.env, join(root, "home")), ...names };
+        await directAdd(registry, pm, mkProject(root, "first"), "g-dep@1.0.0", warmEnv);
+        // The control: a second direct install now downloads nothing, so the cache is really warm
+        // and the guarded install below could not pass for want of one.
+        drain();
+        await directAdd(registry, pm, mkProject(root, "second"), "g-dep@1.0.0", warmEnv);
+        expect(tarballHits(registry.log)).toEqual([]);
+        const saved = Object.keys(names).map((key) => [key, process.env[key]] as const);
+        Object.assign(process.env, names);
+        try {
+          const dispatch = mkDispatch(
+            tmp,
+            `warm-${pm}-d`,
+            ["- g-dep@1.0.0 vetted: brings g-trans"],
+            [yes("g-dep@1.0.0")],
+          );
+          const project = mkProject(tmp, `warm-${pm}-p`);
+          drain();
+          const r = await guarded(registry, dispatch, project, pm, ["add", "g-dep@1.0.0"]);
+          expect(r.code).toBe(0);
+          expect(installedVersion(project, "g-dep")).toBe("1.0.0");
+          expect(installedVersion(project, "g-trans")).toBe("1.0.0");
+          expect(tarballHits(registry.log).length).toBeGreaterThan(0);
+        } finally {
+          for (const [key, value] of saved) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+          }
+        }
+      },
+    );
+  }
 });
 
 const waiver = (target: string) => ({
@@ -1033,22 +1141,28 @@ describe("the coachman's guarded exec", () => {
   test("exec arms the dispatch bin and refuses what the run never approved", async () => {
     const dispatch = mkDispatch(tmp, "exec", [], []);
     const project = mkProject(tmp, "exec-p");
+    const home = join(dispatch, "home");
+    mkdirSync(home, { recursive: true });
+    // Async, so the loopback registry in this process keeps answering while the
+    // command runs: a run that wrongly reached it would show in the hit counts
+    // and not stall on a registry nobody serves.
     const runExec = (args: string[]) =>
-      run(RUN, ["install-guard", "exec", dispatch, ...args], {
+      runAsync(RUN, ["install-guard", "exec", dispatch, ...args], {
         cwd: project,
         env: {
+          ...managerEnv(process.env, home),
           POSTMASTER_TOOL: ROOT,
           POSTMASTER_GUARD_REGISTRY: registry.url,
           POSTMASTER_GUARD_SOCKET_API: registry.url,
           PATH: `${DEV_BIN}:${process.env.PATH ?? ""}`,
         },
       });
-    const version = runExec(["npm", "--version"]);
+    const version = await runExec(["npm", "--version"]);
     expect(version.code).toBe(0);
     expect(version.out).toMatch(/[0-9]+\.[0-9]+\.[0-9]+/u);
     expect(existsSync(join(dispatch, "guard", "bin", "npm"))).toBe(true);
     const before = packumentHits(registry.log).filter((p) => p.includes("g-clean")).length;
-    const add = runExec(["npm", "add", "g-clean@1.0.0"]);
+    const add = await runExec(["npm", "add", "g-clean@1.0.0"]);
     expect(add.code).toBe(1);
     expect(`${add.out}\n${add.err}`).toMatch(/refusing to install g-clean@1\.0\.0/u);
     expect(packumentHits(registry.log).filter((p) => p.includes("g-clean")).length).toBe(before);
@@ -1068,37 +1182,6 @@ describe("non-install commands pass through", () => {
 });
 
 describe("the shim never recurses", () => {
-  /** Descendant pids of root (plus root itself) from the shared process table. */
-  function treeOf(root: number): number[] {
-    const children = new Map<number, number[]>();
-    for (const [pid, info] of processTable()) {
-      const list = children.get(info.parent) ?? [];
-      list.push(pid);
-      children.set(info.parent, list);
-    }
-    const out = [root];
-    const queue = [root];
-    while (queue.length > 0) {
-      const pid = queue.pop() as number;
-      for (const kid of children.get(pid) ?? []) {
-        out.push(kid);
-        queue.push(kid);
-      }
-    }
-    return out;
-  }
-
-  function killTree(root: number): void {
-    // Leaf-first, so a parent cannot fork replacements while we kill.
-    for (const pid of treeOf(root).reverse()) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // Already gone.
-      }
-    }
-  }
-
   const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(() => resolve(), ms));
 
@@ -1136,8 +1219,10 @@ describe("the shim never recurses", () => {
         const link = join(bin, name);
         if (!existsSync(link)) symlinkSync(SHIM, link);
       }
+      const home = join(dispatch, "home");
+      mkdirSync(home, { recursive: true });
       const env = {
-        ...(process.env as Record<string, string>),
+        ...managerEnv(process.env, home),
         PATH: `${bin}:${DEV_BIN}:${process.env.PATH ?? ""}`,
         POSTMASTER_DISPATCH: dispatch,
         POSTMASTER_TOOL: ROOT,
