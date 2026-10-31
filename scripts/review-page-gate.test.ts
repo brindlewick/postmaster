@@ -5,19 +5,23 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createStandIn, type StandInOptions } from "./lib/page-bridge-stand-in.ts";
 import { snapshotDescendants } from "./lib/processes.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import {
   asPlaywright,
   auditChecks,
+  BRIDGE_CHECKS,
   BrowserUnavailable,
   backVerdict,
+  bridgeChecksFor,
   type Check,
   chromiumPath,
   cli,
   composerVerdict,
   contentType,
   contextOptions,
+  type Ctx,
   type Deps,
   describeMissing,
   type DiffLayoutFacts,
@@ -76,6 +80,7 @@ import {
   wrapSkeleton,
   wrapVerdict,
 } from "./review-page-gate.ts";
+import { constantHashes, withoutSaveNotes } from "./review-page-gate-bridge.ts";
 
 const HEAD =
   '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>';
@@ -197,8 +202,18 @@ describe("the run matrix", () => {
     expect([plain.hasTouch, plain.isMobile, plain.colorScheme]).toEqual([false, false, "light"]);
   });
 
-  test("screenshots: seven on every single-pane run, two on two-pane runs, one in the plain run", () => {
-    const single = ["composer", "file", "find", "order", "overview", "tree", "tree-search"].sort();
+  test("screenshots: nine on every single-pane run, two on two-pane runs, one in the plain run", () => {
+    const single = [
+      "bridge-comment",
+      "composer",
+      "file",
+      "find",
+      "not-saved",
+      "order",
+      "overview",
+      "tree",
+      "tree-search",
+    ].sort();
     for (const name of ["phone-light", "w755-light", "w823-dark", "w904-light", "w1199-light"]) {
       expect([...screenshotSteps(runNamed(name))].sort()).toEqual(single);
     }
@@ -633,6 +648,172 @@ describe("serving a folder", () => {
         server.stop();
       }
     });
+  });
+});
+
+describe("the stand-in viewer on the page server", () => {
+  const page = (dir: string): void => {
+    writeFileSync(join(dir, "index.html"), "<p>page</p>");
+    writeFileSync(join(dir, "review.json"), '{"changedFiles":0,"files":[]}');
+    mkdirSync(join(dir, "chunks"));
+    writeFileSync(join(dir, "chunks", "0.json"), "[]");
+  };
+  const hello = {
+    bridge: "page-bridge",
+    v: 1,
+    type: "bridge-hello",
+    versions: [1],
+    want: ["state", "comments"],
+  };
+
+  test("with a stand-in, /host.html frames the page and the message path answers for it", async () => {
+    await withTempDir(async (dir) => {
+      page(dir);
+      const server = startServer(
+        dir,
+        createStandIn(() => 1000),
+      );
+      try {
+        const host = await fetch(`${server.origin}/host.html`);
+        expect(host.status).toBe(200);
+        expect(host.headers.get("content-type")).toBe("text/html; charset=utf-8");
+        expect(await host.text()).toContain(
+          '<iframe id="doc" sandbox="allow-scripts" src="/index.html"',
+        );
+        const asked = await fetch(`${server.origin}/__stand-in/message`, {
+          method: "POST",
+          body: JSON.stringify(hello),
+        });
+        expect(asked.status).toBe(200);
+        const answer = await asked.json<{ reply: { type: string }; delayMs: number }>();
+        expect(answer.reply.type).toBe("bridge-ready");
+        expect(answer.delayMs).toBe(0);
+        expect((await fetch(`${server.origin}/__stand-in/message`)).status).toBe(405);
+        const garbled = await fetch(`${server.origin}/__stand-in/message`, {
+          method: "POST",
+          body: "{ not json",
+        });
+        expect(garbled.status).toBe(400);
+      } finally {
+        server.stop();
+      }
+    });
+  });
+
+  test("without a stand-in there is no viewer page and no message path", async () => {
+    await withTempDir(async (dir) => {
+      page(dir);
+      const server = startServer(dir);
+      try {
+        expect((await fetch(`${server.origin}/host.html`)).status).toBe(404);
+        const asked = await fetch(`${server.origin}/__stand-in/message`, {
+          method: "POST",
+          body: JSON.stringify(hello),
+        });
+        expect(asked.status).toBe(404);
+      } finally {
+        server.stop();
+      }
+    });
+  });
+
+  test("a page with no origin of its own may read the data files", async () => {
+    await withTempDir(async (dir) => {
+      page(dir);
+      const server = startServer(dir);
+      try {
+        for (const path of ["/review.json", "/chunks/0.json", "/index.html"]) {
+          const res = await fetch(`${server.origin}${path}`);
+          expect([path, res.headers.get("access-control-allow-origin")]).toEqual([path, "*"]);
+        }
+      } finally {
+        server.stop();
+      }
+    });
+  });
+
+  test("a file can be served in place of the built one, and a rewrite is applied last, to the page before it is wrapped and to the data", async () => {
+    await withTempDir(async (dir) => {
+      page(dir);
+      const server = startServer(dir);
+      try {
+        server.overrides.set("/review.json", '{"changedFiles":7,"files":[]}');
+        expect(await (await fetch(`${server.origin}/review.json`)).text()).toBe(
+          '{"changedFiles":7,"files":[]}',
+        );
+        server.setRewrite((path, text) =>
+          path === "/index.html"
+            ? `${text}<i>rewritten</i>`
+            : path === "/review.json"
+              ? text.replace("7", "8")
+              : text,
+        );
+        expect(await (await fetch(`${server.origin}/review.json`)).text()).toBe(
+          '{"changedFiles":8,"files":[]}',
+        );
+        expect(await (await fetch(`${server.origin}/index.html`)).text()).toBe(
+          wrapSkeleton("<p>page</p><i>rewritten</i>"),
+        );
+        expect(await (await fetch(`${server.origin}/plain.html`)).text()).toBe(
+          "<p>page</p><i>rewritten</i>",
+        );
+        expect(await (await fetch(`${server.origin}/chunks/0.json`)).text()).toBe("[]");
+        server.overrides.clear();
+        server.setRewrite(null);
+        expect(await (await fetch(`${server.origin}/review.json`)).text()).toBe(
+          '{"changedFiles":0,"files":[]}',
+        );
+        expect(await (await fetch(`${server.origin}/index.html`)).text()).toBe(
+          wrapSkeleton("<p>page</p>"),
+        );
+      } finally {
+        server.stop();
+      }
+    });
+  });
+});
+
+describe("which runs drive the page bridge", () => {
+  const ids = (name: string): readonly string[] => bridgeChecksFor(runNamed(name));
+  const ALL = [
+    "bridge-ticks",
+    "bridge-new-version",
+    "bridge-not-saved",
+    "bridge-conflict",
+    "bridge-comment",
+    "bridge-focus",
+  ];
+
+  test("the checks are listed once each, the slow one last", () => {
+    expect(BRIDGE_CHECKS.map(([id]) => id)).toEqual([...ALL, "bridge-unanswered"]);
+  });
+
+  test("the phone in light drives every check, the one that waits for 5 seconds included", () => {
+    expect(ids("phone-light")).toEqual([...ALL, "bridge-unanswered"]);
+  });
+
+  test("a phone in dark, and the widths of a folded phone, drive all but the slow one", () => {
+    for (const name of ["phone-dark", "w755-light", "w904-light"]) expect(ids(name)).toEqual(ALL);
+  });
+
+  test("the other widths, the two-pane widths and the plain run drive none", () => {
+    for (const name of [
+      "w823-light",
+      "w823-dark",
+      "w1024-light",
+      "w1199-light",
+      "w1200-light",
+      "desk-light",
+      "desk-dark",
+      "phone-plain",
+    ]) {
+      expect([name, ids(name)]).toEqual([name, []]);
+    }
+  });
+
+  test("the quick matrix drives the bridge on the phone, in light and dark", () => {
+    const quick = matrix(true).filter((run) => bridgeChecksFor(run).length > 0);
+    expect(quick.map((run) => run.name)).toEqual(["phone-light", "phone-dark"]);
   });
 });
 
@@ -1627,6 +1808,20 @@ describe("the real gate", () => {
           expect(idsOf(name)).toContain("diff-layout");
           expect(idsOf(name)).not.toContain("tree-visible");
         }
+        // The page bridge is driven where bridgeChecksFor says, and nowhere else.
+        for (const name of ["phone-light", "phone-dark", "w755-light", "w904-light"]) {
+          for (const id of bridgeChecksFor(runNamed(name))) expect(idsOf(name)).toContain(id);
+        }
+        for (const name of [
+          "w823-light",
+          "w1024-light",
+          "w1199-light",
+          "w1200-light",
+          "desk-dark",
+          "phone-plain",
+        ]) {
+          expect([name, idsOf(name).some((id) => id.startsWith("bridge-"))]).toEqual([name, false]);
+        }
         // The plain run is only audited: it does not look at the rows.
         expect(idsOf("phone-plain")).not.toContain("diff-layout");
         expect(await lingering()).toEqual([]);
@@ -1636,7 +1831,7 @@ describe("the real gate", () => {
         expect(e.message.length).toBeGreaterThan(0);
       }
     });
-  }, 600_000);
+  }, 1_800_000);
 
   // The control for the clipped-controls audit: silent on the page as built, loud on the same page
   // made wrong, through the one command (window.__gate.audit) the gate uses.
@@ -1814,4 +2009,163 @@ describe("the real gate", () => {
       expect(await lingering()).toEqual([]);
     });
   });
+
+  // The control for the bridge checks: silent on the page as built, loud on the same page or the same
+  // viewer made wrong, one fault at a time, through the very checks the gate runs.
+  test("the bridge checks are silent on the page as built and name each fault put into the page or the viewer", async () => {
+    const playwright = await loadPlaywright(process.env);
+    if (playwright === null) {
+      expect(describeMissing(process.env)).toContain("PLAYWRIGHT_CORE");
+      return;
+    }
+    await withTempDir(async (tmp) => {
+      const pageDir = join(tmp, "page");
+      const built = run(
+        process.execPath,
+        ["--no-env-file", join(import.meta.dir, "review-page.ts"), "demo", pageDir],
+        { cwd: join(import.meta.dir, "..") },
+      );
+      if (built.code !== 0) {
+        // The builder has no demo mode (yet), so there is no page to try the checks on.
+        expect(built.code).toBeGreaterThan(0);
+        return;
+      }
+      const parsed = readReview(readFileSync(join(pageDir, "review.json"), "utf8"));
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const standIn = createStandIn();
+      const server = startServer(pageDir, standIn);
+      let browser: PwBrowser | undefined;
+      try {
+        try {
+          browser = await playwright.chromium.launch({
+            headless: true,
+            executablePath: chromiumPath(process.env),
+          });
+        } catch (e) {
+          // Playwright loads but no Chromium starts here: the real gate's test says why.
+          expect(failure(e).length).toBeGreaterThan(0);
+          return;
+        }
+        const phone = runNamed("phone-light");
+        const context = await browser.newContext(contextOptions(phone));
+        context.setDefaultTimeout(10_000);
+        await context.addInitScript(KIT);
+        const ctx: Ctx = {
+          page: await context.newPage(),
+          run: phone,
+          review: parsed.review,
+          origin: server.origin,
+          out: tmp,
+          steps: new Set<string>(),
+          audits: [],
+          failed: [],
+          standIn,
+          server,
+          fault: {},
+        };
+        const check = async (id: string): Promise<Verdict> => {
+          const entry = BRIDGE_CHECKS.find(([name]) => name === id);
+          if (entry === undefined) throw new Error(`no bridge check ${id}`);
+          return entry[1](ctx);
+        };
+        // The page as built passes every check.
+        for (const [id] of BRIDGE_CHECKS) {
+          const v = await check(id);
+          expect([id, v.detail, v.ok]).toEqual([id, v.detail, true]);
+        }
+        // Each fault, put in through the viewer (what it does) or through the page (what it is made of).
+        interface Fault {
+          readonly id: string;
+          readonly what: string;
+          readonly viewer?: Partial<StandInOptions>;
+          readonly page?: (path: string, text: string) => string;
+          readonly fragment: string;
+        }
+        const faults: readonly Fault[] = [
+          {
+            id: "bridge-ticks",
+            what: "the viewer never takes a write",
+            viewer: { drop: ["state-set"] },
+            fragment: "the viewer holds 0 ticks",
+          },
+          {
+            id: "bridge-ticks",
+            what: "the viewer cannot read or store",
+            viewer: { fail: { "state-set": "unavailable" } },
+            fragment: "the viewer holds 0 ticks",
+          },
+          {
+            id: "bridge-new-version",
+            what: "a build whose hash ignores the content",
+            page: (path, text) => (path === "/review.json" ? constantHashes(text) : text),
+            fragment: "kept its tick although its diff changed",
+          },
+          {
+            id: "bridge-not-saved",
+            what: "a page that never says Not saved",
+            page: (path, text) => (path === "/index.html" ? withoutSaveNotes(text) : text),
+            fragment: "never said Not saved",
+          },
+          {
+            id: "bridge-conflict",
+            what: "a viewer that conflicts on every write",
+            viewer: { conflicts: 100 },
+            fragment: "error:conflict, error:conflict",
+          },
+          {
+            id: "bridge-comment",
+            what: "the viewer never takes a comment",
+            viewer: { drop: ["comment-create"] },
+            fragment: "the viewer keeps 0 comments",
+          },
+          {
+            id: "bridge-comment",
+            what: "the viewer is slow to take a comment and the page waits for it",
+            viewer: { fail: { "comment-create": "too_large" } },
+            fragment: "never settled as kept",
+          },
+          {
+            id: "bridge-focus",
+            what: "a page that ignores the viewer's request to show lines",
+            page: (path, text) =>
+              path === "/index.html"
+                ? text.replace('case "comment-focus":', 'case "comment-focus-ignored":')
+                : text,
+            fragment: "no line was marked",
+          },
+          {
+            id: "bridge-unanswered",
+            what: "a viewer that answers a write after all",
+            viewer: { drop: [] },
+            fragment: "never said Not saved",
+          },
+        ];
+        for (const fault of faults) {
+          ctx.fault = fault.viewer ?? {};
+          const rewrite = fault.page;
+          server.setRewrite(rewrite ?? null);
+          const v = await check(fault.id);
+          ctx.fault = {};
+          server.setRewrite(null);
+          expect([fault.what, v.ok]).toEqual([fault.what, false]);
+          expect([fault.what, v.detail.includes(fault.fragment), v.detail]).toEqual([
+            fault.what,
+            true,
+            v.detail,
+          ]);
+        }
+        // The faults taken away, the checks pass again.
+        for (const id of ["bridge-ticks", "bridge-comment"]) {
+          const v = await check(id);
+          expect([id, v.detail, v.ok]).toEqual([id, v.detail, true]);
+        }
+        await context.close();
+      } finally {
+        await browser?.close().catch(() => undefined);
+        server.stop();
+      }
+      expect(await lingering()).toEqual([]);
+    });
+  }, 1_800_000);
 });
