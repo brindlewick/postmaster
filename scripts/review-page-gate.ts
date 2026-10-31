@@ -19,7 +19,8 @@
 // the split view; the plain run checks that nothing hidden is displayed. Every run but the plain
 // one also checks the rows of a diff (diff-layout): no sign column and no number column, the code
 // starting within 16 px of the left edge, and each line's number on a faint layer behind the code,
-// below it in stacking order, centered, never taking a tap, and staying put as the code scrolls.
+// below it in stacking order, left aligned a small fixed distance from the left edge of the row,
+// never taking a tap, and staying at the left edge of what is shown as the code scrolls.
 //
 // Screenshots and report.json go into --out (default: a new temporary folder).
 //
@@ -1123,7 +1124,15 @@ export const MAX_CODE_OFFSET = 16;
 /** The alpha of the line number behind the code: seen, and never as loud as the code over it. */
 export const NUMBER_ALPHA_MIN = 0.15;
 export const NUMBER_ALPHA_MAX = 0.5;
-/** How far the middle of a number may be from the middle of its box or its row, in pixels. */
+/**
+ * How far in from the left edge of its row the left edge of a line number is, in pixels: clear of
+ * the 3 px edge in a stronger colour that added and removed rows have, and nearer the edge than
+ * the code starts.
+ */
+export const NUMBER_INSET = 6;
+/** How far the left edge of a number may be from NUMBER_INSET, in pixels. */
+const INSET_SLACK = 2;
+/** How far the middle of a number may be from the middle of its row, down the page, in pixels. */
 const CENTRE_SLACK = 2;
 
 /** One diff row as the page draws it, measured at the moment the box is at its scroll position. */
@@ -1146,8 +1155,9 @@ export interface DiffRowFacts {
   numberAlign: string;
   /** The alpha of the number's colour, 1 when it is opaque. */
   numberAlpha: number;
-  /** The middle of the number's text, in window pixels. */
-  numberX: number;
+  /** The left edge of the number's text, in window pixels. */
+  numberLeft: number;
+  /** The middle of the number's text, down the page. */
   numberY: number;
   /** The middle of the row, down the page. */
   rowY: number;
@@ -1164,25 +1174,40 @@ export interface DiffLayoutFacts {
 /** The z-index as a number: no z-index set sits level with 0. */
 const stackLevel = (z: string): number => (z === "auto" ? 0 : Number(z));
 
-/** After a sideways scroll of the box: it moved, and every number is still in the middle of what is shown. */
+const px = (n: number): string => `${Math.round(n * 10) / 10}px`;
+
+/** How far in from the left edge of its box the left edge of a row's number is. */
+const insetOf = (r: DiffRowFacts, boxLeft: number): number => r.numberLeft - boxLeft;
+
+/** The row whose number starts farthest from NUMBER_INSET, or undefined when every number is in place. */
+function strayedNumber(rows: readonly DiffRowFacts[], boxLeft: number): DiffRowFacts | undefined {
+  const off = (r: DiffRowFacts): number => Math.abs(insetOf(r, boxLeft) - NUMBER_INSET);
+  const worst = rows.reduce<DiffRowFacts | undefined>(
+    (a, r) => (a === undefined || off(r) > off(a) ? r : a),
+    undefined,
+  );
+  return worst !== undefined && off(worst) > INSET_SLACK ? worst : undefined;
+}
+
+/** After a sideways scroll of the box: it moved, and every number is still at the left edge of what is shown. */
 function scrollProblems(scrolled: DiffLayoutFacts): string[] {
   if (scrolled.box.scrollLeft <= 0) return ["the box did not scroll sideways when it was asked to"];
-  const middle = scrolled.box.left + scrolled.box.width / 2;
-  const worst = Math.max(0, ...scrolled.rows.map((r) => Math.abs(r.numberX - middle)));
-  return worst > CENTRE_SLACK
-    ? [
-        `after the box scrolled sideways by ${Math.round(scrolled.box.scrollLeft)}px a number is ${Math.round(worst)}px off the middle of the box`,
-      ]
-    : [];
+  const strayed = strayedNumber(scrolled.rows, scrolled.box.left);
+  return strayed === undefined
+    ? []
+    : [
+        `after the box scrolled sideways by ${Math.round(scrolled.box.scrollLeft)}px a number starts ${px(insetOf(strayed, scrolled.box.left))} from the left edge of the box, not ${NUMBER_INSET}px`,
+      ];
 }
 
 /**
  * The rows of a diff are the code and nothing in front of it: no sign column, no number column. The
- * number of each line sits on a faint layer behind the code (below it in stacking order, centered
- * across the box and down the row, never taking a tap), and the code starts within MAX_CODE_OFFSET
- * of the left edge of the window (of its own box, when a tree pane sits beside it). `scrolled` is
- * the same measurement after the box was scrolled sideways, or null when the box does not scroll:
- * the number stays in the middle of what is shown.
+ * number of each line sits on a faint layer behind the code (below it in stacking order, left
+ * aligned NUMBER_INSET px in from the left edge of the row and centered down the row, never taking
+ * a tap), and the code starts within MAX_CODE_OFFSET of the left edge of the window (of its own
+ * box, when a tree pane sits beside it). The left edge of a row is the left edge of the box.
+ * `scrolled` is the same measurement after the box was scrolled sideways, or null when the box
+ * does not scroll: the number stays NUMBER_INSET px in from the left edge of what is shown.
  */
 export function diffLayoutVerdict(
   at: DiffLayoutFacts,
@@ -1193,20 +1218,19 @@ export function diffLayoutVerdict(
   const first = rows[0];
   if (first === undefined) return fail("no diff rows to check");
   const of = (n: number): string => `${n} of ${plural(rows.length, "row", "rows")}`;
-  const px = (n: number): string => `${Math.round(n * 10) / 10}px`;
   const biggest = (read: (r: DiffRowFacts) => number): number => Math.max(...rows.map(read));
-  const middle = box.left + box.width / 2;
   const offset = (r: DiffRowFacts): number => r.codeLeft - (windowEdge ? 0 : box.left);
   const signs = rows.filter((r) => r.parts.includes("sg")).length;
   const misshapen = rows.filter((r) => r.parts.join(" ") !== "n c");
   const wrongText = rows.filter((r) => r.numberText !== r.line);
   const level = rows.find((r) => stackLevel(r.numberZ) >= stackLevel(r.codeZ));
   const events = rows.find((r) => r.numberEvents !== "none");
-  const align = rows.find((r) => r.numberAlign !== "center");
+  // "start" is the left in a page written left to right, which this page is.
+  const align = rows.find((r) => r.numberAlign !== "left" && r.numberAlign !== "start");
   const taking = rows.filter((r) => r.tap === "number").length;
   const strong = rows.find((r) => r.numberAlpha > NUMBER_ALPHA_MAX);
   const faint = rows.find((r) => r.numberAlpha < NUMBER_ALPHA_MIN);
-  const across = biggest((r) => Math.abs(r.numberX - middle));
+  const strayed = strayedNumber(rows, box.left);
   const down = biggest((r) => Math.abs(r.numberY - r.rowY));
   const gutter = biggest((r) => r.gutter);
   const problems = [
@@ -1236,8 +1260,12 @@ export function diffLayoutVerdict(
       ? []
       : [`the number takes taps (pointer-events ${events.numberEvents})`]),
     ...(taking > 0 ? [`a tap on the middle of the number lands on it in ${of(taking)}`] : []),
-    ...(align === undefined ? [] : [`the number is text-align ${align.numberAlign}, not center`]),
-    ...(across > CENTRE_SLACK ? [`the number is ${px(across)} off the middle of the box`] : []),
+    ...(align === undefined ? [] : [`the number is text-align ${align.numberAlign}, not left`]),
+    ...(strayed === undefined
+      ? []
+      : [
+          `the number starts ${px(insetOf(strayed, box.left))} from the left edge of its row, not ${NUMBER_INSET}px`,
+        ]),
     ...(down > CENTRE_SLACK ? [`the number is ${px(down)} off the middle of its row`] : []),
     ...(strong === undefined
       ? []
@@ -1250,7 +1278,7 @@ export function diffLayoutVerdict(
   const pinned = scrolled === null ? "" : ", pinned while the box scrolls sideways";
   return problems.length === 0
     ? pass(
-        `${plural(rows.length, "row", "rows")}: no sign or number column, code from ${px(biggest(offset))}, numbers centered on a layer behind it at alpha ${first.numberAlpha}${pinned}`,
+        `${plural(rows.length, "row", "rows")}: no sign or number column, code from ${px(biggest(offset))}, numbers left aligned ${NUMBER_INSET}px in on a layer behind it at alpha ${first.numberAlpha}${pinned}`,
       )
     : fail(problems.join("; "));
 }
@@ -1606,12 +1634,15 @@ window.__gate = (() => {
       const cr = c ? c.getBoundingClientRect() : rr;
       const cs = c ? getComputedStyle(c) : null;
       const ns = n ? getComputedStyle(n) : null;
+      // The text of the number: its left edge is where it starts; a tap is tried at its middle.
+      let edge = 0;
       let x = 0;
       let y = 0;
       if (n) {
         const range = document.createRange();
         range.selectNodeContents(n);
         const t = range.getBoundingClientRect();
+        edge = t.left;
         x = t.left + t.width / 2;
         y = t.top + t.height / 2;
       }
@@ -1627,7 +1658,7 @@ window.__gate = (() => {
         numberEvents: ns ? ns.pointerEvents : "auto",
         numberAlign: ns ? ns.textAlign : "start",
         numberAlpha: ns ? alphaOf(ns.color) : 1,
-        numberX: x,
+        numberLeft: edge,
         numberY: y,
         rowY: rr.top + rr.height / 2,
         tap: !hit ? "none" : n.contains(hit) ? "number" : r.contains(hit) ? "row" : "other",
@@ -2074,9 +2105,9 @@ async function checkWrap(ctx: Ctx): Promise<Verdict> {
 
 /**
  * On the file with the longest line: the rows are the code and a faint number on a layer behind it,
- * with nothing in front of the code, and the number stays in the middle of the box while the box
- * scrolls sideways. In a single-pane run the code starts within MAX_CODE_OFFSET of the window's
- * edge; beside a tree pane, of its own box.
+ * with nothing in front of the code, and the number stays NUMBER_INSET px in from the left edge of
+ * the box while the box scrolls sideways. In a single-pane run the code starts within
+ * MAX_CODE_OFFSET of the window's edge; beside a tree pane, of its own box.
  */
 async function checkDiffLayout(ctx: Ctx): Promise<Verdict> {
   const { page } = ctx;

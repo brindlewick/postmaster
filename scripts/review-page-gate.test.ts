@@ -41,6 +41,7 @@ import {
   MAX_CODE_OFFSET,
   NUMBER_ALPHA_MAX,
   NUMBER_ALPHA_MIN,
+  NUMBER_INSET,
   navVerdict,
   openAfterBackVerdict,
   openFileVerdict,
@@ -228,6 +229,23 @@ describe("the width where the page splits", () => {
 
   test("the scripts have one width query and it is WIDE_FROM", () => {
     expect(widthsIn(manifest.js)).toEqual([WIDE_FROM]);
+  });
+});
+
+describe("how far in from the left edge of its row a line number starts", () => {
+  const sheet = join(import.meta.dir, "..", "skills", "review-pages", "page", "css", "60-file.css");
+  // The token the stylesheet pads the number with, in pixels, once for every place that sets it.
+  const gapsIn = (css: string): number[] =>
+    [...css.matchAll(/--numgap:[ \t]*([0-9.]+)px/gu)].map((m) => Number(m[1]));
+
+  test("the file stylesheet sets the token once and it is NUMBER_INSET", () => {
+    expect(gapsIn(readFileSync(sheet, "utf8"))).toEqual([NUMBER_INSET]);
+  });
+
+  test("the reading of the token finds one where there is one and none where there is none", () => {
+    expect(gapsIn(".code { --gap: 8px; --numgap: 7px; }")).toEqual([7]);
+    expect(gapsIn(".code { --gap: 8px; }")).toEqual([]);
+    expect(gapsIn(".r .n { padding-left: var(--numgap); }")).toEqual([]);
   });
 });
 
@@ -1168,8 +1186,9 @@ describe("verdicts on a wide screen", () => {
 });
 
 describe("the diff rows", () => {
-  // A row as the page should draw it: the number on a faint layer below the code, nothing in front
-  // of the code, the code starting 8 px from the left edge.
+  // A row as the page should draw it: the number on a faint layer below the code, left aligned
+  // NUMBER_INSET px in from the left edge of its row, nothing in front of the code, the code
+  // starting 8 px from the left edge.
   const row = (over: Partial<DiffRowFacts> = {}): DiffRowFacts => ({
     line: "20",
     parts: ["n", "c"],
@@ -1179,9 +1198,9 @@ describe("the diff rows", () => {
     numberZ: "0",
     codeZ: "1",
     numberEvents: "none",
-    numberAlign: "center",
+    numberAlign: "left",
     numberAlpha: 0.22,
-    numberX: 195,
+    numberLeft: NUMBER_INSET,
     numberY: 300,
     rowY: 300,
     tap: "row",
@@ -1192,11 +1211,12 @@ describe("the diff rows", () => {
     ({ box, rows }) satisfies DiffLayoutFacts;
   const verdict = (rows?: readonly DiffRowFacts[]) => diffLayoutVerdict(facts(rows), null, true);
 
-  test("a number on a layer below the code, with nothing in front of the code, passes", () => {
+  test("a left aligned number on a layer below the code, with nothing in front of the code, passes", () => {
     const v = verdict();
     expect(v.ok).toBe(true);
     expect(v.detail).toContain("2 rows");
     expect(v.detail).toContain("8px");
+    expect(v.detail).toContain("left aligned");
   });
 
   test("a page with no rows to look at fails, so the check cannot pass on nothing", () => {
@@ -1232,15 +1252,22 @@ describe("the diff rows", () => {
     expect(far.detail).toContain("16px");
   });
 
-  test("beside a tree pane the code is counted from the left edge of its own box", () => {
-    // The box starts at 360 px and is 390 px wide, so its middle is at 555 px.
-    const beside = { ...facts([row({ codeLeft: 368, numberX: 555 })]), box: { ...box, left: 360 } };
+  test("beside a tree pane the code and the number are counted from the left edge of their own box", () => {
+    // The box starts at 360 px, so that is the left edge the number's distance is counted from.
+    const at = 360 + NUMBER_INSET;
+    const beside = {
+      ...facts([row({ codeLeft: 368, numberLeft: at })]),
+      box: { ...box, left: 360 },
+    };
     expect(diffLayoutVerdict(beside, null, false).ok).toBe(true);
     expect(diffLayoutVerdict(beside, null, true).ok).toBe(false);
-    const late = { ...beside, rows: [row({ codeLeft: 380, numberX: 555 })] };
+    const late = { ...beside, rows: [row({ codeLeft: 380, numberLeft: at })] };
     const v = diffLayoutVerdict(late, null, false);
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("20px");
+    // A number placed from the edge of the window is at the wrong place in its own box.
+    const strayed = { ...beside, rows: [row({ codeLeft: 368, numberLeft: NUMBER_INSET })] };
+    expect(diffLayoutVerdict(strayed, null, false).ok).toBe(false);
   });
 
   test("the number must be below the code in stacking order", () => {
@@ -1268,16 +1295,39 @@ describe("the diff rows", () => {
     expect(verdict([row({ tap: "none" })]).ok).toBe(true);
   });
 
-  test("the number is the row's own line, centered across the box and down the row", () => {
+  test("the number is left aligned, a small fixed distance in from the left edge of its row", () => {
+    // Clear of the 3 px edge in a stronger colour, and nearer the edge than the code may start.
+    expect(NUMBER_INSET).toBeGreaterThan(4);
+    expect(NUMBER_INSET).toBeLessThan(MAX_CODE_OFFSET);
+    expect(verdict([row({ numberLeft: NUMBER_INSET + 1.5 })]).ok).toBe(true);
+    expect(verdict([row({ numberLeft: NUMBER_INSET - 1.5 })]).ok).toBe(true);
+    // Flush with the edge, or in by far more, is not a small fixed padding.
+    const flush = verdict([row({ numberLeft: 0 })]);
+    expect(flush.ok).toBe(false);
+    expect(flush.detail).toContain("starts 0px from the left edge of its row");
+    const deep = verdict([row({ numberLeft: 40 })]);
+    expect(deep.ok).toBe(false);
+    expect(deep.detail).toContain("starts 40px from the left edge of its row");
+    expect(deep.detail).toContain(`not ${NUMBER_INSET}px`);
+    // A centered number, in the middle of the box, is named twice: by its alignment and by where it
+    // starts.
+    const middle = verdict([row({ numberAlign: "center", numberLeft: 187 })]);
+    expect(middle.ok).toBe(false);
+    expect(middle.detail).toContain("text-align center");
+    expect(middle.detail).toContain("starts 187px from the left edge of its row");
+    // Right aligned fails; "start" reads as left in a page written left to right, so it passes.
+    const right = verdict([row({ numberAlign: "right", numberLeft: 360 })]);
+    expect(right.ok).toBe(false);
+    expect(right.detail).toContain("text-align right");
+    expect(verdict([row({ numberAlign: "start" })]).ok).toBe(true);
+  });
+
+  test("the number is the row's own line and sits in the middle of its row, down the page", () => {
     const wrongText = verdict([row({ numberText: "19" })]);
     expect(wrongText.ok).toBe(false);
     expect(wrongText.detail).toContain("19");
     expect(verdict([row({ numberText: null })]).ok).toBe(false);
-    expect(verdict([row({ numberAlign: "right" })]).ok).toBe(false);
-    expect(verdict([row({ numberX: 196.5 })]).ok).toBe(true);
-    const left = verdict([row({ numberX: 40 })]);
-    expect(left.ok).toBe(false);
-    expect(left.detail).toContain("middle of the box");
+    expect(verdict([row({ numberY: 301.5 })]).ok).toBe(true);
     const high = verdict([row({ numberY: 291 })]);
     expect(high.ok).toBe(false);
     expect(high.detail).toContain("middle of its row");
@@ -1306,14 +1356,23 @@ describe("the diff rows", () => {
     expect(v.detail).toContain("3 of 4 rows");
   });
 
-  test("on a box that scrolls sideways the number stays in the middle of what is shown", () => {
+  test("on a box that scrolls sideways the number stays at the left edge of what is shown", () => {
     const wide = { ...box, scrolls: true };
+    // The code moved 200 px to the left under the number; the number did not move.
     const still = { box: { ...wide, scrollLeft: 200 }, rows: [row({ codeLeft: -192 })] };
     expect(diffLayoutVerdict({ box: wide, rows: facts().rows }, still, true).ok).toBe(true);
-    const drifted = { box: { ...wide, scrollLeft: 200 }, rows: [row({ numberX: -5 })] };
+    // A number that scrolled away with the code.
+    const drifted = {
+      box: { ...wide, scrollLeft: 200 },
+      rows: [row({ numberLeft: NUMBER_INSET - 200 })],
+    };
     const gone = diffLayoutVerdict({ box: wide, rows: facts().rows }, drifted, true);
     expect(gone.ok).toBe(false);
     expect(gone.detail).toContain("scrolled sideways");
+    expect(gone.detail).toContain("from the left edge of the box");
+    // A number that stayed in the middle of the box is not at the left edge of it.
+    const middle = { box: { ...wide, scrollLeft: 200 }, rows: [row({ numberLeft: 187 })] };
+    expect(diffLayoutVerdict({ box: wide, rows: facts().rows }, middle, true).ok).toBe(false);
     const stuck = { box: { ...wide, scrollLeft: 0 }, rows: [row()] };
     const unmoved = diffLayoutVerdict({ box: wide, rows: facts().rows }, stuck, true);
     expect(unmoved.ok).toBe(false);
@@ -1719,14 +1778,20 @@ describe("the real gate", () => {
           return diffLayoutVerdict(at, scrolled, true);
         };
         const clean = await measure("");
+        expect(clean.detail).toContain("left aligned");
         expect(clean.detail).toContain("pinned while the box scrolls sideways");
         expect(clean.ok).toBe(true);
         const faults: readonly (readonly [string, string])[] = [
-          [".r .c { padding-left: 60px }", "from the left edge"],
+          [".r .c { padding-left: 60px }", "at most 16px"],
           [".r .n { margin-right: 0; width: 40px }", "into its row"],
           [".r .n { z-index: 2 }", "stacking order"],
           [".r .n { pointer-events: auto }", "pointer-events"],
-          [".r .n { text-align: left }", "text-align left"],
+          // Not left aligned: centered in the box, at the right, flush with the edge of the row, and
+          // in by far more than a small padding.
+          [".r .n { text-align: center }", "text-align center"],
+          [".r .n { text-align: right }", "text-align right"],
+          [".r .n { padding-left: 0 }", "starts 0px from the left edge of its row"],
+          [".r .n { padding-left: 40px }", "starts 40px from the left edge of its row"],
           [".r .n { color: rgba(28, 34, 48, .9) }", "too strong"],
           [".r .n { color: rgba(28, 34, 48, .05) }", "too faint"],
           [

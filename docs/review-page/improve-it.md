@@ -53,8 +53,9 @@ inlines a transpiled copy with its `export` keywords removed, so it is written o
 - Keep the rules the gate holds: 44 px targets, 13 px text, no horizontal page scroll, no control cut
   off by the window or by a box around it, both themes, only the allowed external loads. A diff row
   is the code and nothing in front of it (the code starts within 16 px of the left edge), with the
-  line number on a faint layer behind it; the number's colour is the token `--lnum`, and the gate
-  keeps its alpha between 0.15 and 0.5.
+  line number on a faint layer behind it, left aligned `--numgap` in from the left edge of the row
+  (the gate holds it to `NUMBER_INSET`, and a test fails when the two differ); the number's colour
+  is the token `--lnum`, and the gate keeps its alpha between 0.15 and 0.5.
 - Keep the one width that matters, 1200 px: below it the page shows one screen at a time, from it the
   tree is a left pane. It is written in `css/80-wide.css`, in `js/09-nav.js` and as `WIDE_FROM` in
   `scripts/review-page-gate.ts`, and a test in `scripts/review-page-gate.test.ts` fails when the

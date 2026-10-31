@@ -2,7 +2,8 @@
    line. The diff scrolls sideways inside its own box; the page never does. A row is the code and
    nothing in front of it, so the code starts a few pixels from the edge of the screen: no sign column
    and no number column. The colour of a row says added or removed, with a thin edge in a stronger
-   colour at the left. The row's line number is faint, centered, on a layer behind the code. */
+   colour at the left. The row's line number is faint, left aligned a few pixels in from the left
+   edge of the row, on a layer behind the code. */
 .file-empty { margin: 0; padding: 32px 16px; text-align: center; color: var(--muted); font-size: 15px; }
 .file-card { background: var(--panel); border-block: 1px solid var(--rule); }
 .file-head { display: flex; align-items: flex-start; padding: 2px 4px 8px 2px; border-bottom: 1px solid var(--rule); }
@@ -12,11 +13,11 @@
 .file-foot { display: flex; gap: 8px; padding: 10px 12px 72px; border-top: 1px solid var(--rule); }
 .file-foot .btn { flex: 2 1 0; }
 .file-foot .btn.quiet { flex: 1 1 0; }
-.code { --gap: 8px; font: 13.5px/1.55 var(--font-code); padding-block: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; background: var(--panel); }
+.code { --gap: 8px; --numgap: 6px; font: 13.5px/1.55 var(--font-code); padding-block: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; background: var(--panel); }
 .rows { min-width: 100%; width: max-content; }
 .rows.wrap { width: auto; }
 .r { display: flex; isolation: isolate; background: var(--panel); cursor: pointer; scroll-margin-top: 150px; }
-.r .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: var(--codew, 100%); margin-right: calc(var(--codew, 100%) * -1); display: grid; align-content: center; text-align: center; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.r .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: var(--codew, 100%); margin-right: calc(var(--codew, 100%) * -1); padding-left: var(--numgap); display: grid; align-content: center; text-align: left; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .r .c { position: relative; z-index: 1; flex: 1 0 auto; min-width: 0; white-space: pre; padding: 3px var(--gap); }
 .rows.wrap .r .c { flex: 1 1 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .r.add { background: var(--add); } .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
