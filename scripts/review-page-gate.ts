@@ -2600,7 +2600,7 @@ async function checkBridgeComment(ctx: Ctx): Promise<Verdict> {
     atOnce: first === undefined ? null : { text: first.text, save: first.save },
     stored,
     settled,
-    reloaded: reloaded.map((t) => ({ text: t.text, save: t.save })),
+    reloaded: reloaded.map((t) => ({ text: t.text, save: t.save, note: t.note })),
   });
 }
 

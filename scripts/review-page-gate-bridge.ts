@@ -194,8 +194,12 @@ export interface CommentFacts {
   }[];
   /** The save state of the comment on the page once the viewer answered. */
   readonly settled: string | null;
-  /** The comments under the file's lines after the viewer was reloaded. */
-  readonly reloaded: readonly { readonly text: string; readonly save: string }[];
+  /** The comments under the file's lines after the viewer was reloaded, with what is said beside each. */
+  readonly reloaded: readonly {
+    readonly text: string;
+    readonly save: string;
+    readonly note: string;
+  }[];
 }
 
 /** A comment shows at once, reaches the viewer as a line anchor, settles as kept, and is there after a reload. */
@@ -203,6 +207,7 @@ export function commentVerdict(f: CommentFacts): Verdict {
   const stored = f.stored[0];
   const anchor = stored?.anchor ?? {};
   const there = f.reloaded.filter((t) => t.text === f.typed && t.save === "kept").length;
+  const said = f.reloaded.find((t) => t.text === f.typed && t.note !== "")?.note;
   const problems = [
     ...(f.atOnce === null ? ["the comment was not on the page right after Save"] : []),
     ...(f.atOnce !== null && f.atOnce.save !== "queued" && f.atOnce.save !== "sending"
@@ -243,6 +248,7 @@ export function commentVerdict(f: CommentFacts): Verdict {
       : there === 0
         ? ["after a reload the comment is not on the page"]
         : [`after a reload the comment shows ${there} times`]),
+    ...(said === undefined ? [] : [`after a reload the page says "${said}" beside the comment`]),
   ];
   return judged(
     problems,

@@ -6,6 +6,7 @@ import {
 } from "./01-core.js";
 import { fileKind, item, reviewedFile } from "./02-data.js";
 import { barOffset, openFile, scrollToEl } from "./09-nav.js";
+import { cutText } from "../../../../scripts/lib/page-bridge.ts";
 import { commentNote, paintSaveNotes, submitBridgeComment } from "./10-bridge.js";
 
 let drawn = -1;
@@ -258,12 +259,22 @@ function whoWrote(x) {
   return "You";
 }
 
+// A comment the viewer keeps may have been left on an earlier version: its quote is the text of its lines
+// then, so lines that read differently now say the comment is about something that has changed.
+function movedSince(c) {
+  if (c.source !== "bridge" || c.save !== "kept" || c.quote === "") return false;
+  return cutText(selectedText(c), 2000) !== c.quote;
+}
+
 // The text of the lines a selection covers on its side of the diff, one line to a row, as the comment's quote.
 function selectedText(sel) {
   const lines = [];
   for (let n = sel.from; n <= sel.to; n++) {
     const row = lineEl(sel.side, n);
-    if (row) lines.push(row.querySelector(".c").textContent);
+    if (row) {
+      const code = row.querySelector(".c");
+      lines.push(code.dataset.blank ? "" : code.textContent);
+    }
   }
   return lines.join("\n");
 }
@@ -314,6 +325,7 @@ export function paintComments() {
       m.append(x.text);
       if (x.source === "bridge") m.dataset.save = x.save;
       if (said !== null && said !== "Saving") m.append(el("span", "cnote", said));
+      if (movedSince(x)) m.append(el("span", "cnote", "The lines have changed since this comment was left."));
       th.append(m);
     };
     add(c);

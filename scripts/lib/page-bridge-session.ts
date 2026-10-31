@@ -130,8 +130,8 @@ export interface SessionStep {
   readonly effects: readonly Effect[];
 }
 
-const NOTE_TICKS = "Not saved. Ticks last until you close this page.";
-const NOTE_COMMENTS = "Not saved. Comments last until you close this page.";
+const NOTE_TICKS = "Not saved. Ticks may be lost when you close this page.";
+const NOTE_COMMENTS = "Not saved. Comments are lost when you close this page.";
 
 /** The line shown when the viewer refuses a tick or a comment for a reason the reader can act on. */
 function refusalLine(code: "too_large" | "bad_message", scope: "ticks" | "comments"): string {
