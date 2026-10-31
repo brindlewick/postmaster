@@ -241,14 +241,18 @@ and the draft's body, and build with:
 <tool>/scripts/run story-page build <repo> <story-dir> <story-dir> --ticket-body <ticket.json> --keep-picture
 ```
 
-Keep the story's files, its picture and its link in that folder, beside the draft; record the
-published link in `link.txt` beside the page, and never put it in the ticket's text, which
-becomes public. Give the story's link with the document's link or path in one message. The
-document stays where the user comments and edits; the story is for reading. When the brief
-says no story, skip the story and show the draft as above.
+Keep the story's files, its picture and its link in that folder, beside the draft. Publish the
+built `index.html` to the slug `story-<repo>-<ticket>` as the publishing section of the
+review-pages skill says, record the link it printed in `link.txt` beside the page, and never put
+it in the ticket's text, which becomes public. Give the story's title and link with the
+document's link or path in one message. The document stays where the user comments and edits;
+the story is for reading, and a comment left on it is read with
+`<tool>/scripts/run pages comments story-<repo>-<ticket> --project <repo>`, answered in the chat
+and closed with `<tool>/scripts/run pages close <id> --project <repo>`.
+When the brief says no story, skip the story and show the draft as above.
 
 Before any message that says the draft changed, bring the story up to date and republish it
-to the same link, so the story at that link already shows the change when the user reads it:
+to the same slug, so the story at that link already shows the change when the user reads it:
 rewrite the ticket file from the draft, add or reword the story's sections for the changed
 criteria, and check whether the built story still matches:
 
@@ -261,9 +265,10 @@ keeps the opening picture unless the title changed, and a new title draws a new 
 at a newly drawn picture, its lettering included, before publishing; a kept picture was
 already looked at.
 
-When no story can be made — your harness cannot publish a page, or the build stops because
-the picture adapter is missing or fails — show the draft as above and say in one line why
-there is no story. A story the builder refuses for its content is yours to fix, not a reason
+When no story can be made, because no publish command is set (check before building, since the
+picture counts against a limit: `<tool>/scripts/run pages status --project <repo>` exits 2) or
+because the build stops when the picture adapter is missing or fails, show the draft as above and
+say in one line why there is no story. A story the builder refuses for its content is yours to fix, not a reason
 to skip it.
 
 Keep the ticket short. Change it for a defect or a decision the user makes, and carry every plain

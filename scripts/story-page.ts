@@ -1388,7 +1388,7 @@ export function stepsHtml(p: PageParts): string {
     .join("\n");
 }
 
-/** The story page: one HTML fragment with its data inline, for an artifact. */
+/** The story page: one HTML fragment with its data inline, the one file to publish. */
 export function pageHtml(p: PageParts, diagramCss: string[]): string {
   const { story, steps } = p;
   const N = steps.length;

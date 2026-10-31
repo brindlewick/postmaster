@@ -1,8 +1,8 @@
 # The review page
 
-A private page a person reads a code change on. It is made for a phone and works on an iPad and a
-desktop. `scripts/run review-page change` builds it from a git range, a session publishes it as an
-Artifact, and the reader ticks files off as reviewed and comments on lines. The skill that sessions
+A page a person reads a code change on. It is made for a phone and works on an iPad and a
+desktop. `scripts/run review-page change` builds it from a git range, a session publishes it with
+`scripts/run pages publish`, and the reader ticks files off as reviewed and comments on lines. The skill that sessions
 follow is [`skills/review-pages/SKILL.md`](../skills/review-pages/SKILL.md); this document says what
 the reader gets and points to the three that hold the detail.
 
@@ -63,14 +63,15 @@ within 1.5 seconds keeps its state between visits and stores the line comments i
   where the frame allows it) and says "Not saved". A page with the `db` capability keeps them in its
   database.
 
-The page's side is `scripts/lib/page-bridge*.ts`; the contract is not kept in this repository.
+The page's side is `scripts/lib/page-bridge*.ts`; the contract is [Page bridge v1](page-bridge.md).
 
 ## Where the detail is
 
 1. [Make a review page](review-page/make-a-page.md): the build command and its inputs, the summary
    file, and the layout config that groups the files, describes them and ties the rulings to lines.
 2. [Check, publish and rebuild](review-page/check-publish-rebuild.md): the render gate, publishing
-   as an Artifact, reading and answering comments, and rebuilding when the head moves.
+   with the person's own `[pages]` commands, reading and answering comments, and rebuilding when
+   the head moves.
 3. [How the page is made, and how to improve it](review-page/improve-it.md): the files behind the
    page, the tests and goldens, and how to add a tab, a grouping rule or a purpose.
 
@@ -84,9 +85,10 @@ scripts/run review-page change <dir> --base <base> --head <full sha> --summary <
 scripts/run review-page-gate <dir>
 ```
 
-Then publish `<dir>/index.html` with the Artifact tool and, when the reader has commented, read and
-answer the comments there. To see the page without a change of your own, build the demo, an
-invented sample repository:
+Then publish `<dir>/publish.html`, the page with its data inside it, with
+`scripts/run pages publish <dir>/publish.html --slug <slug> --marks` and, when the reader has
+commented, read and answer the comments with `scripts/run pages comments <slug>`. To see the page
+without a change of your own, build the demo, an invented sample repository:
 
 ```sh
 scripts/run review-page demo <dir>

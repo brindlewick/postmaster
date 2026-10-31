@@ -10,7 +10,7 @@
 //   scripts/run story-change check <repo> <story-dir>
 //
 // build reads <story-dir>/story.json and the files it names, and writes <out-dir>/index.html (the
-// page to publish as an Artifact), <out-dir>/preview-light.html and <out-dir>/preview-dark.html
+// page to publish), <out-dir>/preview-light.html and <out-dir>/preview-dark.html
 // (the page in a local skeleton, for the render check) and prints the coverage on one line. check
 // runs every test build runs and writes nothing, so a story file can be corrected without building.
 // Both name every problem they find, not only the first. Every text the page shows has its email

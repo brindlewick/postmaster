@@ -29,7 +29,7 @@ The reasoning behind each step is in the wiki: [the ticket](wiki/concepts/ticket
 
 ## Ticket and code reviews, told as a story
 
-With Claude Code, postmaster can publish a ticket, or a finished change, as one scrolling page made for a phone. Each acceptance criterion gets a section: the ticket's words, a drawing, then the code, with the lines the step is about lit. You read a ticket's story before you sign it off, and a change's story when you review it. Changed lines that no step shows are listed at the end, so nothing is hidden. The pages are private to you on claude.ai.
+Postmaster can build a ticket, or a finished change, as one scrolling page made for a phone. Each acceptance criterion gets a section: the ticket's words, a drawing, then the code, with the lines the step is about lit. You read a ticket's story before you sign it off, and a change's story when you review it. Changed lines that no step shows are listed at the end, so nothing is hidden. Each page is one file. Postmaster publishes it with the command your own `[pages]` settings name, to the page host you use ([the pages contract](docs/pages-contract.md) says what a host does); with none set, the page is built and stays a file on your machine.
 
 <img src="docs/stories.gif" alt="Two story pages scrolling. A ticket's story opens on a picture, then shows one criterion in the ticket's words, a drawing of where the change will go, and today's code with one call marked. A change's story follows: a drawing of what the change does, the new function, and the command, with the lines each step is about lit.">
 
