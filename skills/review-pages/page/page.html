@@ -1,0 +1,94 @@
+<title>@@TITLE@@</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@600;700&family=Red+Hat+Mono:wght@400;500&family=Red+Hat+Text:wght@400;500;600&display=swap">
+<style>
+@@CSS@@
+</style>
+
+<div class="app" id="app" data-screen="overview" data-tab="overview">
+  <header class="hdr" id="hdr">
+    <div class="hdr-tabs" id="hdr-tabs">
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview" aria-selected="true">Overview</button>
+        <button type="button" class="tab" role="tab" id="tab-tree" data-tab="tree" aria-selected="false">Tree</button>
+        <button type="button" class="tab" role="tab" id="tab-order" data-tab="order" aria-selected="false">Order</button>
+      </nav>
+      <button type="button" class="prog" id="prog" aria-label="Files reviewed, open the file list"><b id="prog-n">0</b><span class="prog-sep">/</span><span id="prog-t">0</span></button>
+    </div>
+    <div class="hdr-file" id="hdr-file" hidden>
+      <button type="button" class="hbtn back" id="back"><span class="chev-l" aria-hidden="true"></span><span id="back-label">Tree</span></button>
+      <button type="button" class="filebtn" id="filebtn" aria-haspopup="dialog" aria-expanded="false" aria-label="Find a file"><span class="pn" id="pos"></span><span class="pl" id="fname"></span></button>
+      <button type="button" class="hbtn" id="prev" aria-label="Previous file">&#8249;</button>
+      <button type="button" class="hbtn" id="next" aria-label="Next file">&#8250;</button>
+    </div>
+    <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+  </header>
+
+  <main class="main" id="main">
+    <section class="screen" id="screen-overview" aria-label="Overview">
+      <div class="ov">
+        <header class="ov-top">
+          <p class="eyebrow" id="ov-eyebrow">Review</p>
+          <h1 id="ov-title">Loading the review&#8230;</h1>
+          <p class="meta" id="ov-meta"></p>
+        </header>
+        <div class="card start" id="ov-start"></div>
+        <div class="card prose" id="ov-body"></div>
+        <div id="ov-rulings"></div>
+        <details class="card ticketbox" id="ov-ticket"><summary>The ticket as signed off</summary><div class="prose" id="ov-ticket-body"></div></details>
+        <div class="card" id="ov-chat">
+          <div class="chat-row" id="vrow"><span class="grow" id="state">Your verdict goes in your chat with the session. Tap a line in a diff to comment on it.</span><button class="btn quiet" type="button" id="copy">Copy for chat</button></div>
+          <textarea class="copyout" id="copyout" rows="3" hidden aria-label="Text to paste into your chat"></textarea>
+        </div>
+        <p class="note" id="ov-note"></p>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-tree" aria-label="File tree" hidden>
+      <div class="tree-tools" id="tree-tools">
+        <input type="search" id="tree-q" class="search" placeholder="Search the tree" aria-label="Search the tree" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+        <div class="tree-btns">
+          <button type="button" class="btn quiet" id="tree-expand">Expand all</button>
+          <button type="button" class="btn quiet" id="tree-collapse">Collapse all</button>
+        </div>
+        <p class="tree-sum" id="tree-sum"></p>
+      </div>
+      <ul class="tree" id="tree" role="tree" aria-label="Changed files"></ul>
+      <p class="tree-empty" id="tree-empty" hidden>No file matches. Try fewer words.</p>
+    </section>
+
+    <section class="screen" id="screen-order" aria-label="Review order" hidden>
+      <p class="order-intro" id="order-intro">Files in the order worth reading them: the most important group first.</p>
+      <div class="order" id="order-list"></div>
+    </section>
+
+    <section class="screen" id="screen-file" aria-label="File" hidden>
+      <p class="file-empty" id="file-empty">Choose a file in the tree to read its diff.</p>
+      <article class="file-card" id="file-card" hidden>
+        <div class="file-head" id="file-head"></div>
+        <div class="code" id="file-code"></div>
+        <div class="file-foot" id="file-foot">
+          <button class="btn" type="button" id="done-next">Reviewed, next file</button>
+          <button class="btn quiet" type="button" id="done-back">Back</button>
+        </div>
+      </article>
+    </section>
+  </main>
+</div>
+
+<div class="find" id="find" role="dialog" aria-modal="true" aria-label="Find a file" hidden>
+  <div class="find-bar">
+    <input type="search" id="find-q" class="search" placeholder="Search names and purposes" aria-label="Search files" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+    <button type="button" class="hbtn txt" id="find-close">Close</button>
+  </div>
+  <p class="find-count" id="find-count"></p>
+  <div class="find-list" id="find-list"></div>
+  <p class="find-none" id="find-none" hidden>No file matches. Try fewer words.</p>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script>
+@@SCRIPT@@
+</script>

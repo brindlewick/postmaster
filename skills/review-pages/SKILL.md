@@ -1,6 +1,6 @@
 ---
 name: review-pages
-description: Show the user a change, or code named by a ticket, on a private claude.ai page made for a phone and an iPad. A review page has tabs for the ticket, the change's summary, the diff and the files as they stand, and takes comments on lines that the session reads and answers. A code viewer shows ticket-linked code files in colour at the lines the ticket cites. A story page tells a finished change, or a ticket, as one scroll: the change drawn first, then shown in code beside the ticket's words. Use it when the user reviews a change with automatic merging off, or opens files named in a ticket, and to tell a finished change in the order of the ticket's criteria. Claude Code only, until the dashboard shows changes.
+description: Show the user a change, or code named by a ticket, on a private claude.ai page made for a phone and an iPad. A review page opens on an overview (the summary and the open rulings with links to their lines), has a tab with the file tree of the whole change, a tab that orders the files by importance with a plain purpose each, and a diff screen with reviewed ticks and comments on lines that the session reads and answers. A code viewer shows ticket-linked code files in colour at the lines the ticket cites. A story page tells a finished change, or a ticket, as one scroll: the change drawn first, then shown in code beside the ticket's words. Use it when the user reviews a change with automatic merging off, or opens files named in a ticket, and to tell a finished change in the order of the ticket's criteria. Claude Code only, until the dashboard shows changes.
 ---
 
 # Review pages
@@ -13,28 +13,55 @@ repository the change belongs to.
 
 ## A review page for a change
 
-1. Build its data into a folder of your scratchpad:
-   - a pull request: `<tool>/scripts/run review-page change <dir> --pr <number>`. The title,
-     its text as the summary, and the ticket it names (`#<n>, <title>`) come from GitHub.
-   - a run's branch before its pull request: `<tool>/scripts/run review-page change <dir>
-     --base <base> --head <branch> --ticket <n> --summary <file>`, the summary
-     being what the card says the change does.
-   It prints one line with the files, lines and chunks, and how many email addresses it removed.
-2. Before the first publish, read `review.json` and search the chunks for home paths, host
+A phone-first page: an overview, a Tree tab with the file tree of the whole change (folders with
+their file and line counts, a search box, full width below 1200 px), an Order tab with the files by
+importance and a plain purpose each, and a diff screen reached by tapping a file, with Back, previous
+and next, reviewed ticks and a comment box under a tapped line. It shows one screen at a time below
+1200 px, a folded-out phone and a tablet included, and a tree pane beside the file from 1200 px.
+What the reader gets, and where the detail is: [the review page](../../docs/review-page.md).
+
+1. Write the summary in a Markdown file in your scratchpad: what the change does, how the files are
+   grouped, where to look first, then the questions for the reader as a numbered list under a
+   heading with "rulings", "decisions" or "open questions" in it. Plain words, no bold, no dashes,
+   a few words of definition for any jargon.
+2. Where the default grouping does not fit, or the page should carry purposes, "read closely" marks
+   and rulings with links to lines, write a layout config in a JSON file in your scratchpad. The keys
+   are in [Make a review page](../../docs/review-page/make-a-page.md).
+3. Build the page into a folder of your scratchpad:
+   - a pull request: `<tool>/scripts/run review-page change <dir> --pr <number>`. The title, its text as
+     the summary, and the ticket it names (`#<n>, <title>`) come from GitHub.
+   - a run's branch before its pull request: `<tool>/scripts/run review-page change <dir> --base <base>
+     --head <full sha> --summary <file> --layout <file> --page-title <name>`. Pin the head to a full
+     SHA. A ticket that is not a GitHub issue has its text in a Markdown file, given with
+     `--ticket-body <file>`.
+   It prints one line: the files, groups, lines and chunks, how many addresses it removed, how many
+   purposes came from the heuristics (write the rest in the layout) and how many files are withheld.
+   The builder fails, naming the text, when a ruling's link no longer finds its line.
+4. Look at it before publishing: `<tool>/scripts/run review-page-gate <dir>` serves the page and
+   checks it in a headless browser at widths from 390 to 1440 px (one screen at a time below
+   1200 px, two panes from it), in light and dark, then writes screenshots. Read what it prints,
+   look at the 390 px and the 904 px screenshots, and fix what it names. The browser it needs and
+   its checks are in
+   [Check, publish and rebuild](../../docs/review-page/check-publish-rebuild.md).
+5. Before the first publish, read `review.json` and search the chunks for home paths, host
    names, private addresses and anything private. The builder removes email addresses and
-   nothing else; publish nothing private.
-3. Publish `<dir>/index.html` with the Artifact tool, `capabilities: {"db": {}}`, and `files`
-   mapping `review.json` and each `chunks/<k>.json` to their paths. Then, at once, stop the watch
-   on it (ArtifactComments, `action: watch`, `on: false`), as `AGENTS.md` says.
-4. Give the user the link as `https://claude.ai/code/artifact/<uuid>`: read `review.json` back
-   with the Artifact tool's `read` and `path`, and take the uuid from the folder it is saved in.
-5. When the user says they have commented, read the comments: ArtifactData `list` of the
+   nothing else, and shows an environment file by its name only; publish nothing private.
+6. Publish `<dir>/index.html` with the Artifact tool, private, `capabilities: {"db": {}}`, an `icon`
+   of `code`, and `files` mapping `review.json` and each `chunks/<k>.json` to their paths. The
+   page's `<title>` is its name. Then, at once, stop the watch on it (ArtifactComments,
+   `action: watch`, `on: false`), as `AGENTS.md` says.
+7. Give the user the link as `https://claude.ai/code/artifact/<uuid>`, with the page's exact title:
+   read `review.json` back with the Artifact tool's `read` and `path`, and take the uuid from the
+   folder it is saved in.
+8. When the user says they have commented, read the comments: ArtifactData `list` of the
    collection `comments`. Each has `path`, `side` (`new` or `old`), `from`, `to`, `text` and
    `at`. Answer each one on the page with ArtifactData `set` in `comments`, `doc_id`
    `reply-<its id>`, data `{replyTo, path, side, from, to, by: "claude", text, at}`; the reply
    shows under the comment without a reload. Then act on what they asked in the conversation.
-6. The verdict comes in the chat. The page has no verdict control and shows no checks or review
-   findings, by the user's choice.
+9. When the head moves, build again into the same folder with the same `--key` and publish the same
+   file path: the link stays, ticks stay on the files whose diff did not change.
+10. The verdict comes in the chat. The page has no verdict control and shows no checks or review
+    findings, by the user's choice.
 
 ## A code viewer for a ticket's files
 
@@ -44,8 +71,8 @@ repository the change belongs to.
    the blob; the Docs connector's `topic.uploads` and `topic.tabs` say how. Link each tab from
    the ticket with a tab chip.
 2. Code files go in one viewer: `<tool>/scripts/run review-page files <dir> <ref> <path>...`
-   writes `index.html`, `files.json` and `files/<k>.txt`. Read them as step 2 above says, then
-   publish `index.html` with `capabilities: {"comments": {}}` and `files` mapping `files.json`
+   writes `index.html`, `files.json` and `files/<k>.txt`. Read them as step 5 of the review page
+   says, then publish `index.html` with `capabilities: {"comments": {}}` and `files` mapping `files.json`
    and each `files/<k>.txt`, and stop the watch at once.
 3. Link each file from the ticket at the lines it cites:
    `https://claude.ai/code/artifact/<uuid>#f<k>-L<a>-L<b>`, where `f<k>` is the file's `id` in
@@ -78,7 +105,7 @@ repository the change belongs to.
    at every drawing in every state in `sheet.html`, at phone width in light and dark,
    before publishing. Rebuild, for a newly drawn picture, if a word comes out wrong.
 4. Read `index.html` back for home paths, host names, private addresses and anything
-   private, as step 2 of the review page says: the builder removes email addresses and
+   private, as step 5 of the review page says: the builder removes email addresses and
    nothing else.
 5. Publish `index.html` as one file with no capabilities (`{}`), and no files beside
    it — the picture and the data are inline — then stop the watch on it at once, as
@@ -126,9 +153,9 @@ merged. The review page stays the place for comments on lines.
    and dark, with every drawing in every state. Nothing scrolls sideways, the fonts load and the
    console is clean.
 5. Read `index.html` back for home paths, host names, private addresses and anything private, as
-   step 2 of the review page says: the builder removes email addresses and nothing else.
+   step 5 of the review page says: the builder removes email addresses and nothing else.
 6. Publish `index.html` as one file with no capabilities (`{}`), then stop the watch on it at
-   once, as `AGENTS.md` says, and give the user the link as step 4 of the review page says.
+   once, as `AGENTS.md` says, and give the user the link as step 7 of the review page says.
 7. The page is for reading: it takes no comments and has no verdict.
 
 ## Never

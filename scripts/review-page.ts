@@ -1,19 +1,31 @@
 // Build the data a review page or a code viewer page shows, for a session to publish as a
 // private artifact. skills/review-pages/SKILL.md says how a page is published and how its
-// comments are read and answered.
+// comments are read and answered; docs/review-page.md says what the page is, and
+// docs/review-page/improve-it.md how it is made and improved.
 //
-//   scripts/run review-page change <out-dir> --pr <number>
-//   scripts/run review-page change <out-dir> --base <ref> --head <ref> [--ticket <number>] [--title <text>]
-//                  [--summary <file>]
+//   scripts/run review-page change <out-dir> --pr <number> [options]
+//   scripts/run review-page change <out-dir> --base <ref> --head <ref> [--ticket <number>]
+//                  [--title <text>] [--ticket-body <file>] [--summary <file>] [options]
+//   scripts/run review-page demo <out-dir> [options]
 //   scripts/run review-page files <out-dir> <ref> <path>...
 //
+// options:  --layout <file>      a layout config (JSON) merged over the default one
+//           --purposes <file>    a JSON object of file path to one-line purpose
+//           --page-title <name>  the page's name, which is the artifact's title (default Code Review)
+//           --key <name>         prefix of what the page keeps in the reader's browser (default review-page)
+//
 // change: diffs the head against its merge base with the base, as GitHub does, and writes
-// <out-dir>/index.html (the review page, titled for its ticket), review.json and chunks/<k>.json.
-// With --pr, the title, the summary (the pull request's text), the base and the head come from
-// `gh api` on the repository's origin. With --ticket, or a pull request titled "#<n>, <title>",
-// the ticket's text comes from that issue. --summary is a Markdown file containing the change's
-// summary. Files are grouped by their first folder, top-level files first, and the
-// page loads a file's diff and text only when it is opened.
+// <out-dir>/index.html (the phone-first review page, assembled from skills/review-pages/page),
+// review.json and chunks/<k>.json. Files are grouped by importance, ordered and described by the
+// layout (skills/review-pages/page/layout.default.json, then --layout and --purposes), and the page
+// loads a file's diff only when it is opened. With --pr, the title, the summary (the pull request's
+// text), the base and the head come from `gh api` on the repository's origin. With --ticket, or a
+// pull request titled "#<n>, <title>", the ticket's text comes from that issue; --ticket-body is a
+// Markdown file holding the ticket's text instead, for a ticket that is not a GitHub issue.
+// --summary is a Markdown file containing the change's summary.
+//
+// demo: builds the same page for an invented sample repository made in a temporary folder, so a
+// session can see the page, and the page's own tests have a fixed input.
 //
 // files: writes the code viewer, files.json and files/<k>.txt, one per path as it stands at <ref>.
 //
@@ -21,22 +33,37 @@
 // with line numbers unchanged. Run it from the repository the change belongs to.
 //
 //   exit 0  written; one summary line is printed
-//   exit 1  usage, or git or gh failed
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+//   exit 1  usage, a layout that does not parse or names what the change lacks, or git or gh failed
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { langOf, scrub } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
+import { assemblePage } from "./lib/review-assemble.ts";
+import { loadPageAssets } from "./lib/review-assets.ts";
+import {
+  type ChangedFile,
+  EMPTY_LAYOUT,
+  type LayoutConfig,
+  mergeLayout,
+  parseLayoutPartial,
+} from "./lib/review-layout.ts";
+import { buildReviewData, type ChangeText, packChunks } from "./lib/review-model.ts";
+import { createSampleRepo, SAMPLE_LAYOUT, SAMPLE_SUMMARY } from "./lib/review-sample.ts";
 
-export { langOf, scrub };
+export { langOf, packChunks, scrub };
 
 export const USAGE = [
-  "usage: review-page.ts change <out-dir> --pr <number>",
-  "       review-page.ts change <out-dir> --base <ref> --head <ref> [--ticket <number>] [--title <text>] [--summary <file>]",
+  "usage: review-page.ts change <out-dir> --pr <number> [options]",
+  "       review-page.ts change <out-dir> --base <ref> --head <ref> [--ticket <number>] [--title <text>] [--ticket-body <file>] [--summary <file>] [options]",
+  "       review-page.ts demo <out-dir> [options]",
   "       review-page.ts files <out-dir> <ref> <path>...",
+  "options: --layout <file>  --purposes <file>  --page-title <name>  --key <name>",
 ].join("\n");
 
 const CHUNK_BYTES = 1_500_000;
-const TEMPLATES = join(import.meta.dir, "..", "skills", "review-pages");
+const TOOL = join(import.meta.dir, "..");
+const TEMPLATES = join(TOOL, "skills", "review-pages");
 
 /** Lines in a file's text: a final newline ends the last line rather than starting one. */
 export function lineCount(text: string): number {
@@ -44,14 +71,7 @@ export function lineCount(text: string): number {
   return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
-export interface Change {
-  path: string;
-  old: string | null;
-  status: string;
-  add: number;
-  del: number;
-  binary: boolean;
-}
+export type Change = ChangedFile;
 
 /** git diff --numstat -M and --name-status -M, read together. */
 export function parseChanges(numstat: string, nameStatus: string): Change[] {
@@ -90,52 +110,34 @@ export function parseChanges(numstat: string, nameStatus: string): Change[] {
   return changes;
 }
 
-/** Group by first folder, top-level files first, each group and its files in path order. */
-export function groupChanges(changes: Change[]): {
-  order: { title: string }[];
-  files: (Change & { group: number })[];
-} {
-  const folder = (p: string): string => (p.includes("/") ? (p.split("/")[0] ?? "") : "");
-  const names = [...new Set(changes.map((c) => folder(c.path)))].sort((a, b) =>
-    a === "" ? -1 : b === "" ? 1 : a.localeCompare(b),
-  );
-  const order = names.map((n) => ({ title: n === "" ? "Top level" : `${n}/` }));
-  const files = [...changes]
-    .sort(
-      (a, b) =>
-        names.indexOf(folder(a.path)) - names.indexOf(folder(b.path)) ||
-        a.path.localeCompare(b.path),
-    )
-    .map((c) => ({ ...c, group: names.indexOf(folder(c.path)) }));
-  return { order, files };
-}
-
-/** The chunk each item goes in: a new chunk once the next item would pass the limit. */
-export function packChunks(sizes: number[], limit: number): number[] {
-  const out: number[] = [];
-  let k = 0;
-  let size = 0;
-  for (const n of sizes) {
-    if (size > 0 && size + n > limit) {
-      k += 1;
-      size = 0;
-    }
-    out.push(k);
-    size += n;
-  }
-  return out;
-}
-
 /** The template with its title replaced. */
 export function titled(template: string, title: string): string {
   const safe = title.replace(/[<>&]/gu, "");
   return template.replace(/<title>[^<]*<\/title>/u, `<title>${safe}</title>`);
 }
 
+/** The default layout, then each extra config merged over it, in order; the problems they carry. */
+export function layoutFrom(extra: readonly unknown[]): {
+  layout: LayoutConfig;
+  problems: string[];
+} {
+  const defaults: unknown = JSON.parse(
+    readFileSync(join(TEMPLATES, "page", "layout.default.json"), "utf8"),
+  );
+  let layout = EMPTY_LAYOUT;
+  const problems: string[] = [];
+  for (const raw of [defaults, ...extra]) {
+    const parsed = parseLayoutPartial(raw);
+    problems.push(...parsed.problems);
+    layout = mergeLayout(layout, parsed.over);
+  }
+  return { layout, problems };
+}
+
 // ---------- edges ----------
 
-function git(args: string[]): string {
-  const r = run("git", args);
+function git(args: string[], cwd?: string): string {
+  const r = run("git", args, cwd === undefined ? {} : { cwd });
   if (r.code !== 0) throw new Error(`git ${args.join(" ")}: ${r.err.trim() || `exit ${r.code}`}`);
   return r.out;
 }
@@ -149,6 +151,96 @@ function gh(path: string): Record<string, unknown> {
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+function readJson(path: string, what: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    throw new Error(`${what} ${path}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+function extraLayouts(args: string[]): unknown[] {
+  const layoutFile = flag(args, "--layout");
+  const purposesFile = flag(args, "--purposes");
+  return [
+    ...(layoutFile ? [readJson(layoutFile, "layout")] : []),
+    ...(purposesFile ? [{ purposes: readJson(purposesFile, "purposes") }] : []),
+  ];
+}
+
+interface Facts {
+  pr: number | null;
+  ticket: number | null;
+  title: string;
+  ticketBody: string;
+  body: string;
+  mergedAt: string | null;
+  base: string;
+  head: string;
+}
+
+/** Build the page for the change between two refs of the repository at `cwd`. */
+function buildFrom(out: string, args: string[], facts: Facts, extra: unknown[], cwd?: string) {
+  const { layout, problems } = layoutFrom(extra);
+  if (problems.length > 0) throw new Error(`layout: ${problems.join("; ")}`);
+  const mb = git(["merge-base", facts.base, facts.head], cwd).trim();
+  const changes = parseChanges(
+    git(["diff", "--numstat", "-M", mb, facts.head], cwd),
+    git(["diff", "--name-status", "-M", mb, facts.head], cwd),
+  );
+  // Only a file a ruling points into is read whole: its text resolves the ruling's lines.
+  const wanted = new Set(layout.rulings.flatMap((r) => r.links.map((l) => l.path)));
+  let removed = 0;
+  const inputs = changes.map((f): ChangeText => {
+    const paths = f.old ? [f.old, f.path] : [f.path];
+    const diff = f.binary
+      ? { text: "", removed: 0 }
+      : scrub(git(["diff", "-U3", "-M", mb, facts.head, "--", ...paths], cwd));
+    const text =
+      wanted.has(f.path) && f.status !== "D" && !f.binary
+        ? scrub(git(["show", `${facts.head}:${f.path}`], cwd))
+        : null;
+    removed += diff.removed + (text ? text.removed : 0);
+    return { change: f, diff: diff.text, text: text ? text.text : null };
+  });
+  const key = flag(args, "--key");
+  const built = buildReviewData({
+    inputs,
+    layout,
+    meta: {
+      pr: facts.pr,
+      ticket: facts.ticket,
+      ticketTitle: facts.title || `${facts.head.slice(0, 7)} against ${mb.slice(0, 7)}`,
+      ticketBody: scrub(facts.ticketBody).text,
+      body: scrub(facts.body).text,
+      mergedAt: facts.mergedAt,
+      base: mb,
+      head: facts.head,
+      redactions: removed,
+      ...(key === undefined ? {} : { storageKey: key }),
+    },
+    chunkBytes: CHUNK_BYTES,
+  });
+  if (built.problems.length > 0) throw new Error(`layout: ${built.problems.join("; ")}`);
+  mkdirSync(join(out, "chunks"), { recursive: true });
+  for (const name of readdirSync(join(out, "chunks"))) {
+    if (/^[0-9]+\.json$/u.test(name)) rmSync(join(out, "chunks", name));
+  }
+  built.chunks.forEach((items, k) => {
+    writeFileSync(join(out, "chunks", `${k}.json`), JSON.stringify(items));
+  });
+  writeFileSync(join(out, "review.json"), JSON.stringify(built.review));
+  const pageTitle = flag(args, "--page-title") ?? "Code Review";
+  writeFileSync(
+    join(out, "index.html"),
+    assemblePage({ ...loadPageAssets(TOOL), title: pageTitle }),
+  );
+  const files = built.review.files;
+  const heuristic = files.filter((f) => f.purposeSource === "heuristic").length;
+  const withheld = files.filter((f) => f.withheld !== undefined).length;
+  return `review page for ${facts.head.slice(0, 7)}: ${files.length} files in ${built.review.groups.length} groups, +${built.review.additions} -${built.review.deletions}, ${built.chunks.length} chunk(s), ${removed} address(es) removed, ${heuristic} purpose(s) from the heuristics, ${withheld} withheld, in ${out}`;
 }
 
 function buildChange(out: string, args: string[]): string {
@@ -181,66 +273,47 @@ function buildChange(out: string, args: string[]): string {
     ticketBody = String(issue.body ?? "");
     if (!title) title = String(issue.title ?? "");
   }
+  const ticketFile = flag(args, "--ticket-body");
+  if (ticketFile) ticketBody = readFileSync(ticketFile, "utf8");
   const summaryFile = flag(args, "--summary");
   if (summaryFile) body = readFileSync(summaryFile, "utf8");
-  const mb = git(["merge-base", base, head]).trim();
-  const changes = parseChanges(
-    git(["diff", "--numstat", "-M", mb, head]),
-    git(["diff", "--name-status", "-M", mb, head]),
+  return buildFrom(
+    out,
+    args,
+    { pr, ticket: ticket ? Number(ticket) : null, title, ticketBody, body, mergedAt, base, head },
+    extraLayouts(args),
   );
-  const { order, files } = groupChanges(changes);
-  let removed = 0;
-  const items = files.map((f, i) => {
-    const paths = f.old ? [f.old, f.path] : [f.path];
-    const diff = f.binary
-      ? { text: "", removed: 0 }
-      : scrub(git(["diff", "-U3", "-M", mb, head, "--", ...paths]));
-    const text = f.status === "D" || f.binary ? null : scrub(git(["show", `${head}:${f.path}`]));
-    removed += diff.removed + (text ? text.removed : 0);
-    return { i, diff: diff.text, text: text ? text.text : null };
-  });
-  const chunkOf = packChunks(
-    items.map((it) => JSON.stringify(it).length),
-    CHUNK_BYTES,
-  );
-  mkdirSync(join(out, "chunks"), { recursive: true });
-  const chunks = new Map<number, unknown[]>();
-  items.forEach((it, i) => {
-    const k = chunkOf[i] ?? 0;
-    chunks.set(k, [...(chunks.get(k) ?? []), it]);
-  });
-  for (const [k, list] of chunks)
-    writeFileSync(join(out, "chunks", `${k}.json`), JSON.stringify(list));
-  const additions = files.reduce((n, f) => n + f.add, 0);
-  const deletions = files.reduce((n, f) => n + f.del, 0);
-  const review = {
-    pr,
-    ticket: ticket ? Number(ticket) : null,
-    ticketTitle: title || `${head.slice(0, 7)} against ${mb.slice(0, 7)}`,
-    ticketBody: scrub(ticketBody).text,
-    body: scrub(body).text,
-    mergedAt,
-    base: mb,
-    head,
-    additions,
-    deletions,
-    changedFiles: files.length,
-    order,
-    redactions: removed,
-    files: files.map((f, i) => ({
-      ...f,
-      lang: langOf(f.path),
-      chunk: chunkOf[i] ?? 0,
-      lines: items[i]?.text == null ? null : lineCount(items[i]?.text ?? ""),
-    })),
-  };
-  writeFileSync(join(out, "review.json"), JSON.stringify(review));
-  const name = ticket ? `#${ticket} review` : `${head.slice(0, 7)} review`;
-  writeFileSync(
-    join(out, "index.html"),
-    titled(readFileSync(join(TEMPLATES, "review-page.html"), "utf8"), name),
-  );
-  return `review page for ${name.replace(/ review$/u, "")}: ${files.length} files, +${additions} -${deletions}, ${chunks.size} chunk(s), ${removed} address(es) removed, in ${out}`;
+}
+
+function buildDemo(out: string, args: string[]): string {
+  const parent = mkdtempSync(join(tmpdir(), "review-demo-"));
+  try {
+    const repo = createSampleRepo(parent);
+    const given = (name: string): boolean => args.includes(name);
+    const pageArgs = [
+      ...(given("--page-title") ? [] : ["--page-title", "Mobile Review Demo"]),
+      ...(given("--key") ? [] : ["--key", "review-demo"]),
+      ...args,
+    ];
+    return buildFrom(
+      out,
+      pageArgs,
+      {
+        pr: null,
+        ticket: null,
+        title: "Gift wrapping in the cart",
+        ticketBody: "",
+        body: SAMPLE_SUMMARY,
+        mergedAt: null,
+        base: repo.base,
+        head: repo.head,
+      },
+      [SAMPLE_LAYOUT, ...extraLayouts(args)],
+      repo.dir,
+    );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
 }
 
 function buildFiles(out: string, ref: string, paths: string[]): string {
@@ -270,6 +343,10 @@ export function main(args: string[]): number {
   try {
     if (mode === "change" && out) {
       console.log(buildChange(out, rest));
+      return 0;
+    }
+    if (mode === "demo" && out) {
+      console.log(buildDemo(out, rest));
       return 0;
     }
     if (mode === "files" && out && rest[0]) {

@@ -1,0 +1,48 @@
+/* The overview: title, the reviewer's progress, the summary, the rulings, the ticket. It is one
+   column that fills a phone and keeps to a reading width, centered, on anything wider. */
+.ov { box-sizing: border-box; max-width: 880px; margin-inline: auto; padding: 14px 16px 72px; }
+.ov-top { display: grid; gap: 4px; margin-bottom: 12px; }
+.eyebrow { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ex-ink); }
+.ov h1 { margin: 0; font-family: var(--font-display); font-size: 22px; line-height: 1.25; text-wrap: balance; }
+.meta { margin: 0; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.meta b { color: var(--add-ink); font-weight: 600; }
+.meta i { color: var(--del-ink); font-style: normal; font-weight: 600; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+.start .k { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.start .big-n { margin: 2px 0 10px; font: 700 26px/1.2 var(--font-display); font-variant-numeric: tabular-nums; }
+.start .big-n small { font: 500 16px var(--font-ui); color: var(--muted); }
+.start .btn { margin-bottom: 8px; }
+.start .btn:last-child { margin-bottom: 0; }
+.bar-track { height: 8px; border-radius: 99px; background: var(--rule); overflow: hidden; margin-bottom: 14px; }
+.bar-track i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .25s ease; }
+.prose { max-width: 72ch; overflow-wrap: anywhere; font-size: 16px; line-height: 1.55; }
+.prose h3 { margin: 22px 0 8px; font: 700 18px/1.3 var(--font-display); }
+.prose > :first-child { margin-top: 0; }
+.prose p, .prose ul, .prose ol { margin: 0 0 12px; }
+.prose ul, .prose ol { padding-left: 22px; }
+.prose li { margin-bottom: 6px; }
+.prose code { font-family: var(--font-code); font-size: .9em; background: var(--accent-soft); padding: 0 4px; border-radius: 4px; overflow-wrap: anywhere; }
+.prose table { border-collapse: collapse; font-size: 14px; }
+.prose th, .prose td { border: 1px solid var(--rule); padding: 4px 8px; text-align: left; }
+.tablewrap { overflow-x: auto; margin: 0 0 12px; }
+.quote { margin: 0 0 12px; font-family: var(--font-code); font-size: 13px; background: var(--bg); border: 1px solid var(--rule); border-radius: 8px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ovh { margin: 22px 0 8px; font: 700 19px/1.3 var(--font-display); text-wrap: balance; }
+.ruling { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+.rhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.rbadge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 13px; font-weight: 700; background: var(--ex); color: var(--ex-ink); }
+.rbadge.decided { background: var(--accent-soft); color: var(--accent); }
+.rtitle { margin: 0 0 6px; font: 700 17px/1.3 var(--font-display); text-wrap: balance; }
+.rtext { margin: 0 0 12px; font-size: 15.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.rlinks { display: grid; gap: 8px; }
+.lnk { display: grid; gap: 1px; min-height: 44px; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); text-decoration: none; font-weight: 600; font-size: 15px; overflow-wrap: anywhere; cursor: pointer; }
+.lnk small { font: 400 13px var(--font-code); color: var(--muted); overflow-wrap: anywhere; }
+.ticketbox > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; font-weight: 700; cursor: pointer; list-style: none; }
+.ticketbox > summary::-webkit-details-marker { display: none; }
+.ticketbox > summary::after { content: ""; flex: none; width: 9px; height: 9px; margin: -3px 4px 0 0; border: solid var(--gutter); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .15s ease; }
+.ticketbox[open] > summary::after { transform: rotate(-135deg); margin-top: 3px; }
+.ticketbox[open] > summary { margin-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.note { margin: 0; font-size: 14px; color: var(--muted); }
+.chat-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.chat-row .grow { flex: 1 1 220px; font-size: 14px; color: var(--muted); }
+.copyout { width: 100%; box-sizing: border-box; margin-top: 8px; font: 400 14px var(--font-code); }
+@media (prefers-reduced-motion: reduce) { .bar-track i, .ticketbox > summary::after { transition: none; } }

@@ -1,0 +1,26 @@
+{
+  "shell": "page.html",
+  "css": [
+    "css/10-tokens.css",
+    "css/20-header.css",
+    "css/30-overview.css",
+    "css/40-tree.css",
+    "css/50-order.css",
+    "css/60-file.css",
+    "css/70-find.css",
+    "css/80-wide.css"
+  ],
+  "modules": ["scripts/lib/review-tree.ts"],
+  "js": [
+    "js/01-core.js",
+    "js/02-data.js",
+    "js/03-ticks.js",
+    "js/04-diff.js",
+    "js/05-tree.js",
+    "js/06-order.js",
+    "js/07-overview.js",
+    "js/08-find.js",
+    "js/09-nav.js",
+    "js/10-boot.js"
+  ]
+}
