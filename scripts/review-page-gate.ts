@@ -16,7 +16,10 @@
 // controls cut off by the window or by a box around them, and the fonts. Single-pane runs (under
 // WIDE_FROM) also drive the tree, Back, a tap right after Back, the browser's back, Next and
 // Previous, ticks, the comment box, Wrap, the file list and the ruling links; two-pane runs check
-// the split view; the plain run checks that nothing hidden is displayed.
+// the split view; the plain run checks that nothing hidden is displayed. Every run but the plain
+// one also checks the rows of a diff (diff-layout): no sign column and no number column, the code
+// starting within 16 px of the left edge, and each line's number on a faint layer behind the code,
+// below it in stacking order, centered, never taking a tap, and staying put as the code scrolls.
 //
 // Screenshots and report.json go into --out (default: a new temporary folder).
 //
@@ -1113,6 +1116,145 @@ export function splitVerdict(f: SplitFacts): Verdict {
     : fail(problems.join("; "));
 }
 
+// ---------- the rows of a diff ----------
+
+/** How far the code of a diff may start from the left edge of its window, in pixels. */
+export const MAX_CODE_OFFSET = 16;
+/** The alpha of the line number behind the code: seen, and never as loud as the code over it. */
+export const NUMBER_ALPHA_MIN = 0.15;
+export const NUMBER_ALPHA_MAX = 0.5;
+/** How far the middle of a number may be from the middle of its box or its row, in pixels. */
+const CENTRE_SLACK = 2;
+
+/** One diff row as the page draws it, measured at the moment the box is at its scroll position. */
+export interface DiffRowFacts {
+  /** The line the row stands for (its data-line). */
+  line: string;
+  /** The class of each child of the row, in order: n is a line number, c the code, anything else a column. */
+  parts: readonly string[];
+  /** The text of the number that is shown, or null when the row shows none. */
+  numberText: string | null;
+  /** Pixels between the left edge of the row and the left edge of its code column: what sits in front of the code. */
+  gutter: number;
+  /** Where the code starts: the left edge of the code column's content, in window pixels. */
+  codeLeft: number;
+  /** The z-index of the number and of the code ("auto" when none is set). */
+  numberZ: string;
+  codeZ: string;
+  /** The number's pointer-events and text-align. */
+  numberEvents: string;
+  numberAlign: string;
+  /** The alpha of the number's colour, 1 when it is opaque. */
+  numberAlpha: number;
+  /** The middle of the number's text, in window pixels. */
+  numberX: number;
+  numberY: number;
+  /** The middle of the row, down the page. */
+  rowY: number;
+  /** What a tap on the middle of the number reaches: the number itself, the row (or what is in it), something else, or nothing on screen. */
+  tap: "number" | "row" | "other" | "none";
+}
+
+/** The code box, and the rows looked at in it, at one scroll position. */
+export interface DiffLayoutFacts {
+  box: { left: number; width: number; scrollLeft: number; scrolls: boolean };
+  rows: readonly DiffRowFacts[];
+}
+
+/** The z-index as a number: no z-index set sits level with 0. */
+const stackLevel = (z: string): number => (z === "auto" ? 0 : Number(z));
+
+/** After a sideways scroll of the box: it moved, and every number is still in the middle of what is shown. */
+function scrollProblems(scrolled: DiffLayoutFacts): string[] {
+  if (scrolled.box.scrollLeft <= 0) return ["the box did not scroll sideways when it was asked to"];
+  const middle = scrolled.box.left + scrolled.box.width / 2;
+  const worst = Math.max(0, ...scrolled.rows.map((r) => Math.abs(r.numberX - middle)));
+  return worst > CENTRE_SLACK
+    ? [
+        `after the box scrolled sideways by ${Math.round(scrolled.box.scrollLeft)}px a number is ${Math.round(worst)}px off the middle of the box`,
+      ]
+    : [];
+}
+
+/**
+ * The rows of a diff are the code and nothing in front of it: no sign column, no number column. The
+ * number of each line sits on a faint layer behind the code (below it in stacking order, centered
+ * across the box and down the row, never taking a tap), and the code starts within MAX_CODE_OFFSET
+ * of the left edge of the window (of its own box, when a tree pane sits beside it). `scrolled` is
+ * the same measurement after the box was scrolled sideways, or null when the box does not scroll:
+ * the number stays in the middle of what is shown.
+ */
+export function diffLayoutVerdict(
+  at: DiffLayoutFacts,
+  scrolled: DiffLayoutFacts | null,
+  windowEdge: boolean,
+): Verdict {
+  const { rows, box } = at;
+  const first = rows[0];
+  if (first === undefined) return fail("no diff rows to check");
+  const of = (n: number): string => `${n} of ${plural(rows.length, "row", "rows")}`;
+  const px = (n: number): string => `${Math.round(n * 10) / 10}px`;
+  const biggest = (read: (r: DiffRowFacts) => number): number => Math.max(...rows.map(read));
+  const middle = box.left + box.width / 2;
+  const offset = (r: DiffRowFacts): number => r.codeLeft - (windowEdge ? 0 : box.left);
+  const signs = rows.filter((r) => r.parts.includes("sg")).length;
+  const misshapen = rows.filter((r) => r.parts.join(" ") !== "n c");
+  const wrongText = rows.filter((r) => r.numberText !== r.line);
+  const level = rows.find((r) => stackLevel(r.numberZ) >= stackLevel(r.codeZ));
+  const events = rows.find((r) => r.numberEvents !== "none");
+  const align = rows.find((r) => r.numberAlign !== "center");
+  const taking = rows.filter((r) => r.tap === "number").length;
+  const strong = rows.find((r) => r.numberAlpha > NUMBER_ALPHA_MAX);
+  const faint = rows.find((r) => r.numberAlpha < NUMBER_ALPHA_MIN);
+  const across = biggest((r) => Math.abs(r.numberX - middle));
+  const down = biggest((r) => Math.abs(r.numberY - r.rowY));
+  const gutter = biggest((r) => r.gutter);
+  const problems = [
+    ...(signs > 0 ? [`${of(signs)} hold a sign column (sg) in front of the code`] : []),
+    ...(misshapen[0] === undefined
+      ? []
+      : [
+          `${of(misshapen.length)} are not one number layer and the code column alone (found: ${misshapen[0].parts.join(" ") || "nothing"})`,
+        ]),
+    ...(gutter > ONE_PIXEL
+      ? [`the code starts ${px(gutter)} into its row, behind a column in front of it`]
+      : []),
+    ...(biggest(offset) > MAX_CODE_OFFSET
+      ? [`the code starts ${px(biggest(offset))} from the left edge, at most ${MAX_CODE_OFFSET}px`]
+      : []),
+    ...(wrongText[0] === undefined
+      ? []
+      : [
+          `${of(wrongText.length)} show a number that is not the row's line (line ${wrongText[0].line} shows ${wrongText[0].numberText ?? "none"})`,
+        ]),
+    ...(level === undefined
+      ? []
+      : [
+          `the number is not below the code in stacking order (z-index ${level.numberZ} against ${level.codeZ})`,
+        ]),
+    ...(events === undefined
+      ? []
+      : [`the number takes taps (pointer-events ${events.numberEvents})`]),
+    ...(taking > 0 ? [`a tap on the middle of the number lands on it in ${of(taking)}`] : []),
+    ...(align === undefined ? [] : [`the number is text-align ${align.numberAlign}, not center`]),
+    ...(across > CENTRE_SLACK ? [`the number is ${px(across)} off the middle of the box`] : []),
+    ...(down > CENTRE_SLACK ? [`the number is ${px(down)} off the middle of its row`] : []),
+    ...(strong === undefined
+      ? []
+      : [`the number is too strong (alpha ${strong.numberAlpha}, at most ${NUMBER_ALPHA_MAX})`]),
+    ...(faint === undefined
+      ? []
+      : [`the number is too faint (alpha ${faint.numberAlpha}, at least ${NUMBER_ALPHA_MIN})`]),
+    ...(scrolled === null ? [] : scrollProblems(scrolled)),
+  ];
+  const pinned = scrolled === null ? "" : ", pinned while the box scrolls sideways";
+  return problems.length === 0
+    ? pass(
+        `${plural(rows.length, "row", "rows")}: no sign or number column, code from ${px(biggest(offset))}, numbers centered on a layer behind it at alpha ${first.numberAlpha}${pinned}`,
+      )
+    : fail(problems.join("; "));
+}
+
 // ---------- the page server ----------
 
 export interface PageServer {
@@ -1196,6 +1338,8 @@ export const GATE_FUNCTIONS = [
   "visibleFile",
   "panes",
   "wrapState",
+  "boxSized",
+  "diffLayout",
 ] as const;
 
 type GateFunction = (typeof GATE_FUNCTIONS)[number];
@@ -1422,8 +1566,79 @@ window.__gate = (() => {
       fileLeft: f ? f.getBoundingClientRect().left : 0, backShown: shown($("#back")) };
   };
 
+  // The page measures the code box once the browser has laid it out (--codew, the width of what the box
+  // shows); the layers behind the code are as wide as that. True once it has.
+  const boxSized = () => {
+    const c = $("#file-code");
+    return !!c && c.style.getPropertyValue("--codew") !== "";
+  };
+  // The alpha of a computed colour: rgba(r, g, b, a) or a colour function with "/ a"; 1 when there is none.
+  const alphaOf = (color) => {
+    const m = /^rgba\(.*,[ \t]*([0-9.]+)\)$/u.exec(color) || /\/[ \t]*([0-9.]+)[ \t]*\)$/u.exec(color);
+    return m ? Number(m[1]) : 1;
+  };
+  // The rows of the open diff that are on screen below the header: up to five changed and five unchanged,
+  // measured with the code box scrolled to "left" pixels when it scrolls (a number).
+  const diffLayout = (left) => {
+    const code = $("#file-code");
+    if (!code) return { box: { left: 0, width: 0, scrollLeft: 0, scrolls: false }, rows: [] };
+    const scrolls = code.scrollWidth > code.clientWidth;
+    if (scrolls && typeof left === "number") {
+      const was = code.style.scrollBehavior;
+      code.style.scrollBehavior = "auto";
+      code.scrollLeft = left;
+      code.style.scrollBehavior = was;
+    }
+    const b = code.getBoundingClientRect();
+    const h = $("#hdr");
+    const top = h ? h.getBoundingClientRect().bottom : 0;
+    const onScreen = all(".r", code).filter((r) => {
+      const t = r.getBoundingClientRect();
+      return t.top >= top && t.bottom <= innerHeight;
+    });
+    const changed = (r) => r.classList.contains("add") || r.classList.contains("del");
+    const sample = onScreen.filter(changed).slice(0, 5).concat(onScreen.filter((r) => !changed(r)).slice(0, 5));
+    const measured = sample.map((r) => {
+      const kids = Array.from(r.children);
+      const n = kids.find((k) => k.classList.contains("n") && shown(k)) || null;
+      const c = kids.find((k) => k.classList.contains("c")) || null;
+      const rr = r.getBoundingClientRect();
+      const cr = c ? c.getBoundingClientRect() : rr;
+      const cs = c ? getComputedStyle(c) : null;
+      const ns = n ? getComputedStyle(n) : null;
+      let x = 0;
+      let y = 0;
+      if (n) {
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        const t = range.getBoundingClientRect();
+        x = t.left + t.width / 2;
+        y = t.top + t.height / 2;
+      }
+      const hit = n ? document.elementFromPoint(x, y) : null;
+      return {
+        line: r.dataset.line || "",
+        parts: kids.map((k) => k.className || k.localName),
+        numberText: n ? n.textContent.trim() : null,
+        gutter: cr.left - rr.left,
+        codeLeft: cs ? cr.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth) : cr.left,
+        numberZ: ns ? ns.zIndex : "auto",
+        codeZ: cs ? cs.zIndex : "auto",
+        numberEvents: ns ? ns.pointerEvents : "auto",
+        numberAlign: ns ? ns.textAlign : "start",
+        numberAlpha: ns ? alphaOf(ns.color) : 1,
+        numberX: x,
+        numberY: y,
+        rowY: rr.top + rr.height / 2,
+        tap: !hit ? "none" : n.contains(hit) ? "number" : r.contains(hit) ? "row" : "other",
+      };
+    });
+    return { box: { left: b.left, width: b.width, scrollLeft: code.scrollLeft, scrolls }, rows: measured };
+  };
+
   return { screens, header, audit, fonts, edges, rows, tree, collapsed, fileFacts, fileReady, box, composer,
-    progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes, wrapState };
+    progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes, wrapState,
+    boxSized, diffLayout };
 })();
 `;
 
@@ -1455,6 +1670,8 @@ const POLL_MS = 50;
 /** How many files from the top of the tree are tried when a check needs a file with enough lines. */
 const FILES_TRIED = 12;
 const SCROLL_TARGET = 300;
+/** How far a code box is scrolled sideways where a check needs it moved. */
+const SIDEWAYS_PX = 200;
 /**
  * Back goes through the browser's history, and the page shows the list itself if the step has not
  * arrived within 400 ms. The helpers that move around the page wait that window out after every
@@ -1833,7 +2050,7 @@ async function openWidest(ctx: Ctx): Promise<string | undefined> {
 /** The code box of the file with the longest line scrolls by itself, and the page does not. */
 async function checkSideways(ctx: Ctx): Promise<Verdict> {
   const name = await openWidest(ctx);
-  const verdict = sidewaysVerdict(await gate<BoxFacts>(ctx.page, "box", 200));
+  const verdict = sidewaysVerdict(await gate<BoxFacts>(ctx.page, "box", SIDEWAYS_PX));
   return name === undefined ? verdict : { ...verdict, detail: `${name}: ${verdict.detail}` };
 }
 
@@ -1853,6 +2070,28 @@ async function checkWrap(ctx: Ctx): Promise<Verdict> {
   await tap(page, "#wrap");
   const again = await gate<WrapState>(page, "wrapState");
   return wrapVerdict(first, tapped, again);
+}
+
+/**
+ * On the file with the longest line: the rows are the code and a faint number on a layer behind it,
+ * with nothing in front of the code, and the number stays in the middle of the box while the box
+ * scrolls sideways. In a single-pane run the code starts within MAX_CODE_OFFSET of the window's
+ * edge; beside a tree pane, of its own box.
+ */
+async function checkDiffLayout(ctx: Ctx): Promise<Verdict> {
+  const { page } = ctx;
+  const name = await openWidest(ctx);
+  if (name === undefined && (await openFileWithRows(ctx, 1)) === null) {
+    return fail("no file in the tree opened with a diff");
+  }
+  await until(page, "window.__gate.boxSized()", "the code box to be measured");
+  const at = await gate<DiffLayoutFacts>(page, "diffLayout", 0);
+  const scrolled = at.box.scrolls
+    ? await gate<DiffLayoutFacts>(page, "diffLayout", SIDEWAYS_PX)
+    : null;
+  if (scrolled !== null) await gate<DiffLayoutFacts>(page, "diffLayout", 0);
+  const verdict = diffLayoutVerdict(at, scrolled, ctx.run.width < WIDE_FROM);
+  return name === undefined ? verdict : { ...verdict, detail: `${name}: ${verdict.detail}` };
 }
 
 async function checkFind(ctx: Ctx): Promise<Verdict> {
@@ -1899,6 +2138,7 @@ const PHONE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
   ["prev-next", checkPrevNext],
   ["tick", checkTick],
   ["comment-box", checkComposer],
+  ["diff-layout", checkDiffLayout],
   ["sideways", checkSideways],
   ["wrap-toggle", checkWrap],
   ["find-sheet", checkFind],
@@ -1946,7 +2186,12 @@ async function runChecks(ctx: Ctx): Promise<Check[]> {
     ...(await visit(ctx, "order")),
     ...(single ? await visitFile(ctx) : []),
   ];
-  const split = single ? [] : [await attempt("split", () => checkSplit(ctx))];
+  const split = single
+    ? []
+    : [
+        await attempt("split", () => checkSplit(ctx)),
+        await attempt("diff-layout", () => checkDiffLayout(ctx)),
+      ];
   const fonts = plain ? [] : [await attempt("fonts", () => checkFonts(ctx))];
   const driven: Check[] = [];
   if (single && !plain) {

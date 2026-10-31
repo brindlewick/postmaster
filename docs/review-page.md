@@ -31,8 +31,12 @@ Three tabs and a file screen.
   through the files in the order of the list the reader came from: tree order from the tree, review
   order from the order or the overview. A button at the end of the file ticks it as reviewed and
   opens the next. Code scrolls sideways inside its own box and never moves the page; Wrap, in the
-  file's head, folds long lines instead. Tapping a line opens a comment box under it; tapping a
-  second line extends the range.
+  file's head, folds long lines instead. A row is the code and nothing in front of it, so the code
+  starts 8 px from the edge of the screen: there is no sign column and no number column. Added and
+  removed lines are told apart by their colour and a 3 px edge in a stronger colour at the left of
+  the row, and each line's number is a faint layer behind the code, centered across the box and
+  down the row, that stays in the middle of what is shown as the code scrolls. Tapping anywhere on
+  a row opens a comment box under it; tapping a second line extends the range.
 
 Below 1200 px the page shows one screen at a time, however wide the screen is: a phone, a
 folded-out phone and a tablet all read a file at its full width. From 1200 px up (a laptop or a

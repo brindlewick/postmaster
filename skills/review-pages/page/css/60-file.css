@@ -1,5 +1,8 @@
 /* The file screen: the file's head, its unified diff, and the comment box that opens under a tapped
-   line. The diff scrolls sideways inside its own box; the page never does. */
+   line. The diff scrolls sideways inside its own box; the page never does. A row is the code and
+   nothing in front of it, so the code starts a few pixels from the edge of the screen: no sign column
+   and no number column. The colour of a row says added or removed, with a thin edge in a stronger
+   colour at the left. The row's line number is faint, centered, on a layer behind the code. */
 .file-empty { margin: 0; padding: 32px 16px; text-align: center; color: var(--muted); font-size: 15px; }
 .file-card { background: var(--panel); border-block: 1px solid var(--rule); }
 .file-head { display: flex; align-items: flex-start; padding: 2px 4px 8px 2px; border-bottom: 1px solid var(--rule); }
@@ -9,29 +12,25 @@
 .file-foot { display: flex; gap: 8px; padding: 10px 12px 72px; border-top: 1px solid var(--rule); }
 .file-foot .btn { flex: 2 1 0; }
 .file-foot .btn.quiet { flex: 1 1 0; }
-.code { font: 13.5px/1.55 var(--font-code); padding-block: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; background: var(--panel); }
+.code { --gap: 8px; font: 13.5px/1.55 var(--font-code); padding-block: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; background: var(--panel); }
 .rows { min-width: 100%; width: max-content; }
 .rows.wrap { width: auto; }
-.r { display: flex; background: var(--panel); padding-block: 3px; cursor: pointer; scroll-margin-top: 150px; }
-.r .n { flex: none; position: sticky; left: 0; z-index: 1; box-sizing: border-box; width: calc(var(--nd, 3) * 1ch + 1.6ch); padding: 0 1ch 0 0; text-align: right; background: inherit; color: var(--muted); user-select: none; -webkit-user-select: none; font-variant-numeric: tabular-nums; }
-.r > .n:first-child { display: none; }
-.r.del > .n:first-child { display: block; }
-.r.del > .n:nth-child(2) { display: none; }
-.r .sg { flex: none; position: sticky; left: calc(var(--nd, 3) * 1ch + 1.6ch); z-index: 1; width: 2ch; text-align: center; background: inherit; color: var(--gutter); user-select: none; -webkit-user-select: none; }
-.r .c { flex: 1 0 auto; min-width: 0; white-space: pre; padding-right: 16px; }
+.r { display: flex; isolation: isolate; background: var(--panel); cursor: pointer; scroll-margin-top: 150px; }
+.r .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: var(--codew, 100%); margin-right: calc(var(--codew, 100%) * -1); display: grid; align-content: center; text-align: center; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.r .c { position: relative; z-index: 1; flex: 1 0 auto; min-width: 0; white-space: pre; padding: 3px var(--gap); }
 .rows.wrap .r .c { flex: 1 1 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.r.add { background: var(--add); } .r.add .sg { color: var(--add-ink); }
-.r.del { background: var(--del); } .r.del .sg { color: var(--del-ink); }
+.r.add { background: var(--add); } .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
+.r.del { background: var(--del); } .r.del > .n { box-shadow: inset 3px 0 0 var(--del-ink); }
 .r.sel { background: var(--mark); } .r.sel > .n { box-shadow: inset 3px 0 0 var(--mark-edge); }
-.r.flag { background: var(--accent-soft); box-shadow: inset 4px 0 0 var(--accent); } .r.flag > .n { box-shadow: inset 4px 0 0 var(--accent); }
-.hunk { position: sticky; left: 0; box-sizing: border-box; width: var(--codew, 100%); padding: 4px 12px; font-size: 13px; color: var(--muted); background: var(--accent-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
-.status { position: sticky; left: 0; box-sizing: border-box; width: var(--codew, 100%); padding: 14px 12px; font-size: 14.5px; color: var(--muted); }
+.r.flag { background: var(--accent-soft); } .r.flag > .n { box-shadow: inset 4px 0 0 var(--accent); }
+.hunk { position: sticky; left: 0; box-sizing: border-box; width: var(--codew, 100%); padding: 4px var(--gap); font-size: 13px; color: var(--muted); background: var(--accent-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+.status { position: sticky; left: 0; box-sizing: border-box; width: var(--codew, 100%); padding: 14px var(--gap); font-size: 14.5px; color: var(--muted); }
 .more { position: sticky; left: 0; display: block; box-sizing: border-box; width: var(--codew, 100%); min-height: 44px; font-size: 15px; color: var(--accent); background: var(--accent-soft); border: 0; cursor: pointer; }
-.thread { position: sticky; left: 0; box-sizing: border-box; width: calc(var(--codew, 100%) - 20px); margin: 6px 10px 8px; display: grid; gap: 6px; font-family: var(--font-ui); white-space: normal; }
-.cm { background: var(--bg); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 6px 10px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thread { position: sticky; left: 0; box-sizing: border-box; width: calc(var(--codew, 100%) - 12px); margin: 6px 6px 8px; display: grid; gap: 6px; font-family: var(--font-ui); white-space: normal; }
+.cm { background: var(--bg); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 6px 8px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cm.claude { border-left-color: var(--ok); }
 .cm .who { display: block; font-size: 13px; color: var(--muted); font-weight: 600; }
-.composer { position: sticky; left: 0; box-sizing: border-box; width: calc(var(--codew, 100%) - 20px); display: grid; gap: 8px; margin: 8px 10px 10px; padding: 12px; background: var(--panel); border: 2px solid var(--accent); border-radius: 12px; font-family: var(--font-ui); white-space: normal; scroll-margin-block: 150px 24px; }
+.composer { position: sticky; left: 0; box-sizing: border-box; width: calc(var(--codew, 100%) - 12px); display: grid; gap: 8px; margin: 8px 6px 10px; padding: 10px; background: var(--panel); border: 2px solid var(--accent); border-radius: 12px; font-family: var(--font-ui); white-space: normal; scroll-margin-block: 150px 24px; }
 .composer label { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 .composer textarea { box-sizing: border-box; width: 100%; min-height: 6em; padding: 10px 12px; font: 400 16px/1.4 var(--font-ui); color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 10px; resize: vertical; }
 .mhint { margin: 0; font-size: 13.5px; color: var(--muted); }

@@ -25,6 +25,13 @@ either, previous and next, ticks that do not survive a reload, the comment box, 
 collapse and the ruling links; from 1200 px it fails on the split layout (the tree at the left, the
 file beside it, no Back button).
 
+Every run but the plain one also looks at the rows of a diff (`diff-layout`), on the file with the
+longest line, and fails on a sign column or a number column in front of the code, on code that
+starts more than 16 px from the left edge (of the window, or of its own box beside the tree), and on
+a line number that is not a faint layer behind the code: below it in stacking order, centered across
+the box and down the row, never taking a tap, between 0.15 and 0.5 alpha, and still in the middle of
+the box after the box is scrolled sideways.
+
 Screenshots and `report.json` go to `--out` (default: a new temporary folder). `--quick` keeps 390
 px light and dark, 1199 px light, 1200 px light and the plain run, so both sides of the 1200 px
 split are always looked at. Exit 0 means every check passed, 1 means a check failed (the problems

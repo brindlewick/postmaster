@@ -20,6 +20,9 @@ import {
   contextOptions,
   type Deps,
   describeMissing,
+  type DiffLayoutFacts,
+  type DiffRowFacts,
+  diffLayoutVerdict,
   edgeVerdict,
   expandVerdict,
   failure,
@@ -35,6 +38,9 @@ import {
   KIT,
   loadPlaywright,
   matrix,
+  MAX_CODE_OFFSET,
+  NUMBER_ALPHA_MAX,
+  NUMBER_ALPHA_MIN,
   navVerdict,
   openAfterBackVerdict,
   openFileVerdict,
@@ -62,6 +68,7 @@ import {
   treeSearchVerdict,
   treeVisibleVerdict,
   USAGE,
+  type Verdict,
   WIDE_FROM,
   type WrapState,
   widestFile,
@@ -209,7 +216,7 @@ describe("the width where the page splits", () => {
     js: string[];
   };
   // A width condition of a media query, in a stylesheet or in matchMedia("...").
-  const QUERY = /\((?:min|max)-width:\s*([0-9.]+)px\)/gu;
+  const QUERY = /\((?:min|max)-width:[ \t\r\n\f]*([0-9.]+)px\)/gu;
   const widthsIn = (files: readonly string[]): number[] =>
     files.flatMap((file) =>
       [...readFileSync(join(page, file), "utf8").matchAll(QUERY)].map((m) => Number(m[1])),
@@ -1160,6 +1167,160 @@ describe("verdicts on a wide screen", () => {
   });
 });
 
+describe("the diff rows", () => {
+  // A row as the page should draw it: the number on a faint layer below the code, nothing in front
+  // of the code, the code starting 8 px from the left edge.
+  const row = (over: Partial<DiffRowFacts> = {}): DiffRowFacts => ({
+    line: "20",
+    parts: ["n", "c"],
+    numberText: "20",
+    gutter: 0,
+    codeLeft: 8,
+    numberZ: "0",
+    codeZ: "1",
+    numberEvents: "none",
+    numberAlign: "center",
+    numberAlpha: 0.22,
+    numberX: 195,
+    numberY: 300,
+    rowY: 300,
+    tap: "row",
+    ...over,
+  });
+  const box = { left: 0, width: 390, scrollLeft: 0, scrolls: false };
+  const facts = (rows: readonly DiffRowFacts[] = [row(), row({ line: "21", numberText: "21" })]) =>
+    ({ box, rows }) satisfies DiffLayoutFacts;
+  const verdict = (rows?: readonly DiffRowFacts[]) => diffLayoutVerdict(facts(rows), null, true);
+
+  test("a number on a layer below the code, with nothing in front of the code, passes", () => {
+    const v = verdict();
+    expect(v.ok).toBe(true);
+    expect(v.detail).toContain("2 rows");
+    expect(v.detail).toContain("8px");
+  });
+
+  test("a page with no rows to look at fails, so the check cannot pass on nothing", () => {
+    const v = diffLayoutVerdict(facts([]), null, true);
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("no diff rows");
+  });
+
+  test("a sign column fails and is named, so does a number element beside the first", () => {
+    const sign = verdict([row({ parts: ["n", "sg", "c"] })]);
+    expect(sign.ok).toBe(false);
+    expect(sign.detail).toContain("sg");
+    const twice = verdict([row({ parts: ["n", "n", "sg", "c"] })]);
+    expect(twice.ok).toBe(false);
+    expect(twice.detail).toContain("n n sg c");
+    expect(verdict([row({ parts: ["c"] })]).ok).toBe(false);
+    expect(verdict([row({ parts: ["c", "n"] })]).ok).toBe(false);
+  });
+
+  test("anything in front of the code fails, with how wide it is", () => {
+    const v = verdict([row({ gutter: 53, codeLeft: 53 })]);
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("53px");
+    expect(verdict([row({ gutter: 0.8 })]).ok).toBe(true);
+  });
+
+  test("the code starts at most 16 px from the left edge of the window", () => {
+    expect(MAX_CODE_OFFSET).toBe(16);
+    expect(verdict([row({ codeLeft: 16 })]).ok).toBe(true);
+    const far = verdict([row({ codeLeft: 17 })]);
+    expect(far.ok).toBe(false);
+    expect(far.detail).toContain("17px");
+    expect(far.detail).toContain("16px");
+  });
+
+  test("beside a tree pane the code is counted from the left edge of its own box", () => {
+    // The box starts at 360 px and is 390 px wide, so its middle is at 555 px.
+    const beside = { ...facts([row({ codeLeft: 368, numberX: 555 })]), box: { ...box, left: 360 } };
+    expect(diffLayoutVerdict(beside, null, false).ok).toBe(true);
+    expect(diffLayoutVerdict(beside, null, true).ok).toBe(false);
+    const late = { ...beside, rows: [row({ codeLeft: 380, numberX: 555 })] };
+    const v = diffLayoutVerdict(late, null, false);
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("20px");
+  });
+
+  test("the number must be below the code in stacking order", () => {
+    expect(verdict([row({ numberZ: "-1", codeZ: "auto" })]).ok).toBe(true);
+    expect(verdict([row({ numberZ: "auto", codeZ: "1" })]).ok).toBe(true);
+    for (const [numberZ, codeZ] of [
+      ["1", "auto"],
+      ["1", "1"],
+      ["auto", "auto"],
+      ["2", "1"],
+    ] as const) {
+      const v = verdict([row({ numberZ, codeZ })]);
+      expect([numberZ, codeZ, v.ok]).toEqual([numberZ, codeZ, false]);
+      expect(v.detail).toContain("stacking order");
+    }
+  });
+
+  test("the number never takes a tap", () => {
+    const events = verdict([row({ numberEvents: "auto" })]);
+    expect(events.ok).toBe(false);
+    expect(events.detail).toContain("pointer-events");
+    const landed = verdict([row({ tap: "number" })]);
+    expect(landed.ok).toBe(false);
+    expect(landed.detail).toContain("tap");
+    expect(verdict([row({ tap: "none" })]).ok).toBe(true);
+  });
+
+  test("the number is the row's own line, centered across the box and down the row", () => {
+    const wrongText = verdict([row({ numberText: "19" })]);
+    expect(wrongText.ok).toBe(false);
+    expect(wrongText.detail).toContain("19");
+    expect(verdict([row({ numberText: null })]).ok).toBe(false);
+    expect(verdict([row({ numberAlign: "right" })]).ok).toBe(false);
+    expect(verdict([row({ numberX: 196.5 })]).ok).toBe(true);
+    const left = verdict([row({ numberX: 40 })]);
+    expect(left.ok).toBe(false);
+    expect(left.detail).toContain("middle of the box");
+    const high = verdict([row({ numberY: 291 })]);
+    expect(high.ok).toBe(false);
+    expect(high.detail).toContain("middle of its row");
+  });
+
+  test("the number is faint: seen, and never as loud as the code over it", () => {
+    expect(NUMBER_ALPHA_MIN).toBeLessThan(NUMBER_ALPHA_MAX);
+    expect(verdict([row({ numberAlpha: NUMBER_ALPHA_MIN })]).ok).toBe(true);
+    expect(verdict([row({ numberAlpha: NUMBER_ALPHA_MAX })]).ok).toBe(true);
+    const loud = verdict([row({ numberAlpha: 0.9 })]);
+    expect(loud.ok).toBe(false);
+    expect(loud.detail).toContain("too strong");
+    const faint = verdict([row({ numberAlpha: 0.05 })]);
+    expect(faint.ok).toBe(false);
+    expect(faint.detail).toContain("too faint");
+  });
+
+  test("problems of many rows are one line each, counted", () => {
+    const v = verdict([
+      row({ parts: ["n", "sg", "c"] }),
+      row({ parts: ["n", "sg", "c"] }),
+      row({ parts: ["n", "sg", "c"] }),
+      row(),
+    ]);
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("3 of 4 rows");
+  });
+
+  test("on a box that scrolls sideways the number stays in the middle of what is shown", () => {
+    const wide = { ...box, scrolls: true };
+    const still = { box: { ...wide, scrollLeft: 200 }, rows: [row({ codeLeft: -192 })] };
+    expect(diffLayoutVerdict({ box: wide, rows: facts().rows }, still, true).ok).toBe(true);
+    const drifted = { box: { ...wide, scrollLeft: 200 }, rows: [row({ numberX: -5 })] };
+    const gone = diffLayoutVerdict({ box: wide, rows: facts().rows }, drifted, true);
+    expect(gone.ok).toBe(false);
+    expect(gone.detail).toContain("scrolled sideways");
+    const stuck = { box: { ...wide, scrollLeft: 0 }, rows: [row()] };
+    const unmoved = diffLayoutVerdict({ box: wide, rows: facts().rows }, stuck, true);
+    expect(unmoved.ok).toBe(false);
+    expect(unmoved.detail).toContain("did not scroll");
+  });
+});
+
 describe("the helpers that run inside the page", () => {
   test("they are valid JavaScript and define every function the gate calls", () => {
     expect(() => new Bun.Transpiler({ loader: "js" }).transformSync(KIT)).not.toThrow();
@@ -1386,19 +1547,29 @@ describe("the real gate", () => {
         const idsOf = (name: string): string[] =>
           report.runs.find((r) => r.name === name)?.checks.map((c) => c.id) ?? [];
         for (const name of ["phone-light", "w755-light", "w823-light", "w904-light"]) {
-          for (const id of ["tree-visible", "open-file", "wrap-toggle", "clipped-controls"]) {
+          for (const id of [
+            "tree-visible",
+            "open-file",
+            "wrap-toggle",
+            "clipped-controls",
+            "diff-layout",
+          ]) {
             expect(idsOf(name)).toContain(id);
           }
           expect(idsOf(name)).not.toContain("split");
         }
         for (const name of ["w1024-light", "w1199-light"]) {
           expect(idsOf(name)).toContain("tree-visible");
+          expect(idsOf(name)).toContain("diff-layout");
           expect(idsOf(name)).not.toContain("split");
         }
         for (const name of ["w1200-light", "desk-light", "desk-dark"]) {
           expect(idsOf(name)).toContain("split");
+          expect(idsOf(name)).toContain("diff-layout");
           expect(idsOf(name)).not.toContain("tree-visible");
         }
+        // The plain run is only audited: it does not look at the rows.
+        expect(idsOf("phone-plain")).not.toContain("diff-layout");
         expect(await lingering()).toEqual([]);
       } catch (e) {
         if (!(e instanceof BrowserUnavailable)) throw e;
@@ -1478,6 +1649,98 @@ describe("the real gate", () => {
         expect(boxed.map((c) => c.el)).toContain("button#wrap.wrapbtn");
         // The probe taken away, the page is clean again.
         expect(await clipped("")).toEqual([]);
+        await context.close();
+      } finally {
+        await browser?.close().catch(() => undefined);
+        server.stop();
+      }
+      expect(await lingering()).toEqual([]);
+    });
+  });
+
+  // The control for the diff-layout check: silent on the page as built, loud on the same page made
+  // wrong with a style, one fault at a time, through the one command (window.__gate.diffLayout)
+  // that the gate uses.
+  test("the diff-layout check is silent on the built page and names each fault put into it", async () => {
+    const playwright = await loadPlaywright(process.env);
+    if (playwright === null) {
+      expect(describeMissing(process.env)).toContain("PLAYWRIGHT_CORE");
+      return;
+    }
+    await withTempDir(async (tmp) => {
+      const pageDir = join(tmp, "page");
+      const built = run(
+        process.execPath,
+        ["--no-env-file", join(import.meta.dir, "review-page.ts"), "demo", pageDir],
+        { cwd: join(import.meta.dir, "..") },
+      );
+      if (built.code !== 0) {
+        // The builder has no demo mode (yet), so there is no page to try the check on.
+        expect(built.code).toBeGreaterThan(0);
+        return;
+      }
+      const server = startServer(pageDir);
+      let browser: PwBrowser | undefined;
+      try {
+        try {
+          browser = await playwright.chromium.launch({
+            headless: true,
+            executablePath: chromiumPath(process.env),
+          });
+        } catch (e) {
+          // Playwright loads but no Chromium starts here: the real gate's test says why.
+          expect(failure(e).length).toBeGreaterThan(0);
+          return;
+        }
+        const context = await browser.newContext(contextOptions(runNamed("phone-light")));
+        await context.addInitScript(KIT);
+        const page = await context.newPage();
+        await page.goto(`${server.origin}/index.html`, { waitUntil: "load", timeout: 45_000 });
+        const wait = (expression: string): Promise<unknown> =>
+          page.waitForFunction(expression, undefined, { timeout: 30_000, polling: 50 });
+        await wait('document.querySelectorAll("#tree .trow.file").length > 0');
+        await page.click("#tab-tree");
+        await wait("window.__gate.screens().tree");
+        await page.click("#tree li.trow.file button.tgo");
+        await wait("window.__gate.fileReady()");
+        // The page sizes the layers behind the code from the box once the browser has laid it out.
+        await wait("window.__gate.boxSized()");
+        // The fault's style goes at the very end of the body, after the page's own style element, so
+        // that it wins a tie. The box is measured at rest and scrolled sideways, as the gate does.
+        const measure = async (css: string): Promise<Verdict> => {
+          await page.evaluate(
+            `document.getElementById("probe")?.remove(); const s = document.createElement("style"); s.id = "probe"; s.textContent = ${JSON.stringify(css)}; document.body.append(s)`,
+          );
+          const at = (await page.evaluate("window.__gate.diffLayout(0)")) as DiffLayoutFacts;
+          const scrolled = at.box.scrolls
+            ? ((await page.evaluate("window.__gate.diffLayout(200)")) as DiffLayoutFacts)
+            : null;
+          await page.evaluate("window.__gate.diffLayout(0)");
+          return diffLayoutVerdict(at, scrolled, true);
+        };
+        const clean = await measure("");
+        expect(clean.detail).toContain("pinned while the box scrolls sideways");
+        expect(clean.ok).toBe(true);
+        const faults: readonly (readonly [string, string])[] = [
+          [".r .c { padding-left: 60px }", "from the left edge"],
+          [".r .n { margin-right: 0; width: 40px }", "into its row"],
+          [".r .n { z-index: 2 }", "stacking order"],
+          [".r .n { pointer-events: auto }", "pointer-events"],
+          [".r .n { text-align: left }", "text-align left"],
+          [".r .n { color: rgba(28, 34, 48, .9) }", "too strong"],
+          [".r .n { color: rgba(28, 34, 48, .05) }", "too faint"],
+          [
+            ".r { position: relative } .r .n { position: absolute; left: 0; top: 0; bottom: 0; margin: 0 }",
+            "scrolled sideways",
+          ],
+        ];
+        for (const [css, fragment] of faults) {
+          const v = await measure(css);
+          expect([css, v.ok]).toEqual([css, false]);
+          expect([css, v.detail.includes(fragment)]).toEqual([css, true]);
+        }
+        // The faults taken away, the page is clean again.
+        expect((await measure("")).ok).toBe(true);
         await context.close();
       } finally {
         await browser?.close().catch(() => undefined);

@@ -73,16 +73,16 @@ function diffRows(f, hunks, into) {
       const x = flat[k];
       if (x.hunk) { frag.append(el("div", "hunk", x.hunk)); continue; }
       const l = x.l;
+      const isNew = l.n != null;
+      const line = String(isNew ? l.n : l.o);
       const r = el("div", `r${l.t === "+" ? " add" : l.t === "-" ? " del" : ""}`);
-      r.id = `l-${l.n != null ? "n" : "o"}${l.n != null ? l.n : l.o}`;
-      r.dataset.side = l.n != null ? "new" : "old";
-      r.dataset.line = String(l.n != null ? l.n : l.o);
-      r.append(
-        el("span", "n", l.o != null ? String(l.o) : ""),
-        el("span", "n", l.n != null ? String(l.n) : ""),
-        el("span", "sg", l.t === " " ? "" : l.t),
-        runs(el("span", "c"), x.runs),
-      );
+      r.id = `l-${isNew ? "n" : "o"}${line}`;
+      r.dataset.side = isNew ? "new" : "old";
+      r.dataset.line = line;
+      // The line number is a faint layer behind the code (css/60-file.css), not a column in front of it.
+      const number = el("span", "n", line);
+      number.setAttribute("aria-hidden", "true");
+      r.append(number, runs(el("span", "c"), x.runs));
       frag.append(r);
     }
     into.append(frag);
@@ -115,11 +115,7 @@ export async function renderFile(fi) {
     else if (f.binary) rows.append(el("div", "status", "A binary file: nothing to show."));
     else if (!it.diff.trim()) rows.append(el("div", "status", f.status === "R" ? "Renamed, with no change to its text." : "No change to show."));
     else {
-      const hunks = parseDiff(it.diff);
-      let top = 0;
-      for (const h of hunks) for (const l of h.lines) top = Math.max(top, l.o || 0, l.n || 0);
-      rows.style.setProperty("--nd", String(Math.max(3, String(top).length)));
-      diffRows(f, hunks, rows);
+      diffRows(f, parseDiff(it.diff), rows);
     }
     watchBox(code);
     paintComments();
@@ -130,12 +126,14 @@ export async function renderFile(fi) {
   }
 }
 
+// --codew is the width of what the box shows. It is rounded down, so a layer that is this wide never
+// sticks out of a box whose width has a fraction.
 const boxWatcher = typeof ResizeObserver === "function"
-  ? new ResizeObserver((entries) => { for (const en of entries) en.target.style.setProperty("--codew", `${Math.round(en.contentRect.width)}px`); })
+  ? new ResizeObserver((entries) => { for (const en of entries) en.target.style.setProperty("--codew", `${Math.floor(en.contentRect.width)}px`); })
   : null;
 function watchBox(code) {
   if (boxWatcher) boxWatcher.observe(code);
-  else code.style.setProperty("--codew", `${code.clientWidth}px`);
+  else code.style.setProperty("--codew", `${Math.floor(code.getBoundingClientRect().width)}px`);
 }
 
 // ---------- links to lines ----------
