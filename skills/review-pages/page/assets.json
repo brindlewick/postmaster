@@ -13,6 +13,7 @@
   ],
   "modules": [
     "scripts/lib/review-tree.ts",
+    "scripts/lib/review-source.ts",
     "scripts/lib/page-bridge.ts",
     "scripts/lib/page-bridge-requests.ts",
     "scripts/lib/page-bridge-state.ts",

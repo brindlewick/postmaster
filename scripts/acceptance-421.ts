@@ -1,9 +1,9 @@
 // Oracle helpers for #421: one command keeps a project's experiments, a
-// private live page shows them, the postmaster keeps both current, and the
-// README states the design goal. The tests spawn scripts/run and git as
-// subprocesses over scratch repositories, and run the page's own script in a
-// fresh process with a stub store and stub document; nothing here imports
-// the change.
+// published page shows them, the postmaster keeps both current,
+// and the README states the design goal. The tests spawn scripts/run and git
+// as subprocesses over scratch repositories, and run the page's own script in
+// a fresh process with its inline rows and a stub document; nothing here
+// imports the change.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,9 +101,9 @@ export function utcDate(offsetDays: number): string {
 
 // --- the page, run as it ships ------------------------------------------------
 // The harness reads the page file, takes its one inline script, and runs it
-// in a fresh process with a stub window whose store answers from canned rows
-// and a stub document that captures what the page mounts. The page must reach
-// nothing else: no fetch, no storage, no location.
+// in a fresh process with a stub document whose data block holds canned rows
+// (or the block the built page carries) and that captures what the page
+// mounts. The page must reach nothing else: no fetch, no storage, no location.
 
 export interface PageDoc {
   id: string;
@@ -112,8 +112,7 @@ export interface PageDoc {
 
 export interface PageRender {
   first: string | null;
-  second: string | null;
-  collection: string | null;
+  asOf: string | null;
 }
 
 const HARNESS = [
@@ -131,48 +130,37 @@ const HARNESS = [
   '  if (!els.has(id)) els.set(id, { innerHTML: "", textContent: "" });',
   "  return els.get(id);",
   "}",
+  'const open = \'<script type="application/json" id="experiments-data">\';',
+  "const at = html.indexOf(open);",
+  "if (at >= 0) el('experiments-data').textContent = html.slice(at + open.length, html.indexOf('</' + 'script>', at));",
+  "else if (params.docs !== null) el('experiments-data').textContent = JSON.stringify({",
+  "  asOf: '2026-10-30 14:05 UTC',",
+  "  rows: Object.fromEntries(params.docs.map((d) => [d.id, d.row])),",
+  "});",
   "const documentStub = {",
   '  readyState: "complete",',
   "  getElementById: (id) => el(id),",
   "  addEventListener: () => {},",
   "};",
-  "let snapshotCb = null;",
-  "let collectionName = null;",
-  "const direct = { onSnapshot: (cb) => { snapshotCb = cb; } };",
-  "const dbStub = {",
-  "  collection: (name) => {",
-  "    collectionName = name;",
-  "    return { onSnapshot: direct.onSnapshot, orderBy: () => direct };",
-  "  },",
-  "};",
-  "const useResult = params.docs === null ? null : dbStub;",
-  "const windowStub = { claude: { use: async () => useResult } };",
-  'new Function("window", "document", code)(windowStub, documentStub);',
-  "const sleep = (ms) => new Promise((r) => setTimeout(r, ms));",
-  "const snap = (docs) => ({ docs: docs.map((d) => ({ id: d.id, data: () => d.row })) });",
-  "await sleep(100);",
-  "if (snapshotCb && params.docs !== null) snapshotCb(snap(params.docs));",
-  "await sleep(50);",
+  'new Function("window", "document", code)({}, documentStub);',
+  "await new Promise((r) => setTimeout(r, 50));",
   'const first = els.has("app") ? els.get("app").innerHTML : null;',
-  "if (snapshotCb && params.second !== null) snapshotCb(snap(params.second));",
-  "await sleep(50);",
-  'const second = els.has("app") ? els.get("app").innerHTML : null;',
-  "console.log(JSON.stringify({ first, second, collection: collectionName }));",
+  'const asOf = els.has("asof") ? els.get("asof").textContent : null;',
+  "console.log(JSON.stringify({ first, asOf }));",
   "",
 ].join("\n");
 
 /**
- * Mount the page against canned rows: docs null stands for a store the
- * page's request resolves to nothing. A second snapshot, when given, lands
- * on the already open page, with no reload between the two.
+ * Mount the page: the template against canned rows, docs null standing for a
+ * page built with no data; or, given a built page's path, that page as built.
  */
-export function renderPage(docs: PageDoc[] | null, second?: PageDoc[]): PageRender {
+export function renderPage(docs: PageDoc[] | null, built?: string): PageRender {
   const dir = tempDir();
   try {
     const harness = join(dir, "harness.mjs");
     const params = join(dir, "params.json");
     writeFileSync(harness, HARNESS);
-    writeFileSync(params, JSON.stringify({ page: PAGE, docs, second: second ?? null }));
+    writeFileSync(params, JSON.stringify({ page: built ?? PAGE, docs }));
     const r = run(process.execPath, [harness, params]);
     if (r.code !== 0) {
       throw new Error(`page harness: exit ${r.code}\n--- out ---\n${r.out}\n--- err ---\n${r.err}`);
@@ -182,7 +170,7 @@ export function renderPage(docs: PageDoc[] | null, second?: PageDoc[]): PageRend
       const u = v[k];
       return u === null ? null : str(u);
     };
-    return { first: text("first"), second: text("second"), collection: text("collection") };
+    return { first: text("first"), asOf: text("asOf") };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

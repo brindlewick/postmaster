@@ -60,11 +60,18 @@ scripts/run host run-state [--watch] <dispatch>                     # look at a 
 scripts/run coachman-contract <base> <head>                         # whether a change touches the contract, by file
 scripts/run runs-watch <run-root> [--timeout <seconds>]              # wait until a run needs the postmaster
 scripts/run handoff-check <handoff-file>                            # a leg may end only on exit 0
-scripts/run review-page change|demo|files …                       # the data behind a review page or code viewer
+scripts/run review-page change|demo|files …                       # a review page or code viewer, each with the one file to publish
 scripts/run review-page-gate <page-dir>                           # check a built review page in a headless browser
+scripts/run pages publish|comments|close|slug|status …              # publish a page with your own [pages] commands; read and close its comments
 scripts/run wiki-lint                                             # the wiki's rules, run not remembered
 scripts/run fixture new|score|hidden …                              # a run on a fixture app, scored against a known outcome
 ```
+
+Pages (the review page, the code viewer, the story pages and the experiments page) are published
+with the commands your `[pages]` settings name, in the machine config or in a project's
+`.postmaster/settings.toml`, which `config.example.toml` and `settings.example.toml` show. The
+tool runs those commands and nothing else, and with no publish command set a page is built and not
+published. [The pages contract](pages-contract.md) says what a host does.
 
 Nothing shows a run on screen by itself. To look at one afterwards, run
 `scripts/run host run-state [--watch] <dispatch>`, where `<dispatch>` is the run's folder,

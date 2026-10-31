@@ -1,15 +1,46 @@
 ---
 name: review-pages
-description: Show the user a change, or code named by a ticket, on a private claude.ai page made for a phone and an iPad. A review page opens on an overview (the summary and the open rulings with links to their lines), has a tab with the file tree of the whole change, a tab that orders the files by importance with a plain purpose each, and a diff screen with reviewed ticks and comments on lines that the session reads and answers. A code viewer shows ticket-linked code files in colour at the lines the ticket cites. A story page tells a finished change, or a ticket, as one scroll: the change drawn first, then shown in code beside the ticket's words. Use it when the user reviews a change with automatic merging off, or opens files named in a ticket, and to tell a finished change in the order of the ticket's criteria. Claude Code only, until the dashboard shows changes.
+description: Show the user a change, or code named by a ticket, on a page made for a phone and an iPad. A review page opens on an overview (the summary and the open rulings with links to their lines), has a tab with the file tree of the whole change, a tab that orders the files by importance with a plain purpose each, and a diff screen with reviewed ticks and comments on lines. A code viewer shows ticket-linked code files in colour at the lines the ticket cites. A story page tells a finished change, or a ticket, as one scroll: the change drawn first, then shown in code beside the ticket's words. Each page is one file, published with the publish command the person's [pages] settings name. Use it when the user reviews a change with automatic merging off, or opens files named in a ticket, and to tell a finished change in the order of the ticket's criteria.
 ---
 
 # Review pages
 
-Two pages the user shaped in #214 ("Research: review a change in an artifact page instead of in
-code-server"): a **review page** for a change, and a **code viewer** for code files a ticket names.
-Both are private artifacts that only Claude Code can publish. `<tool>` below is the postmaster
-repository: the folder two above this file once its link is resolved. Run the builder from the
-repository the change belongs to.
+A **review page** for a change, a **code viewer** for code files a ticket names, and **story
+pages**, shaped with the user in #214. Every page is one self-contained HTML file. `<tool>`
+below is the postmaster repository: the folder two above this file once its link is resolved.
+Run a builder from the repository the change belongs to; `<repo>` is that repository.
+
+## Publishing a page
+
+A page is published with `<tool>/scripts/run pages publish`, which runs the publish command the
+person's `[pages]` settings name ([the pages contract](../../docs/pages-contract.md)) and no
+other. This skill names no host and no host's command, and never publishes any other way.
+
+- Before building a page the user will want to read, check that a publish command is set:
+  `<tool>/scripts/run pages status --project <repo>` exits 2 when none is. Then build the page if
+  it is still wanted, say in one line that nothing can be published because `publish` is not set
+  in `[pages]`, and give the file's path.
+- Publish: `<tool>/scripts/run pages publish <file> --slug <slug> --project <repo>`, with
+  `--marks` for a page whose reader ticks files or comments on lines (the review page). It
+  prints `Title: <title>` and the page's link on the next line; give the user both, exactly as
+  printed. Publishing to a slug that exists adds that page's next version, so a rebuilt page
+  goes to the slug it had.
+- Slugs, from `<tool>/scripts/run pages slug <word>...`: `review-<repo>-<number>` for a review
+  page (the pull request's number, else the ticket's, else the head's first seven characters),
+  `code-<repo>-<sha>` for a code viewer, `story-<repo>-<ticket>` for a story page, where
+  `<repo>` is the repository's folder name.
+- Comments: when the user says they have commented, read the open ones with
+  `<tool>/scripts/run pages comments <slug> --project <repo>`. Each has its id, where it points
+  and its words. Answer each one in the chat, act on what it asks, and close it with
+  `<tool>/scripts/run pages close <id> --project <repo>` once answered. When the command says
+  it cannot read comments for this host, say so and ask the user what they wrote.
+- The tool says nothing about ticks being kept unless the person's settings say the host keeps
+  them (`state`); do not promise it either.
+- A page is for the user alone: never share it, and never write its link into a repository or
+  into text that becomes public.
+- Before the first publish, read the page for home paths, host names, private addresses and
+  anything private. The builders remove email addresses and nothing else, and show an
+  environment file by its name only; publish nothing private.
 
 ## A review page for a change
 
@@ -34,51 +65,39 @@ What the reader gets, and where the detail is: [the review page](../../docs/revi
      --head <full sha> --summary <file> --layout <file> --page-title <name>`. Pin the head to a full
      SHA. A ticket that is not a GitHub issue has its text in a Markdown file, given with
      `--ticket-body <file>`.
-   It prints one line: the files, groups, lines and chunks, how many addresses it removed, how many
-   purposes came from the heuristics (write the rest in the layout) and how many files are withheld.
-   The builder fails, naming the text, when a ruling's link no longer finds its line.
+   It prints the files, groups, lines and chunks, how many addresses it removed, how many
+   purposes came from the heuristics (write the rest in the layout) and how many files are withheld,
+   then the page to publish: `<dir>/publish.html`, the page with its data inside it. `index.html`
+   beside it is the same page loading its data from `review.json` and `chunks/`, which the next step
+   checks. The builder fails, naming the text, when a ruling's link no longer finds its line.
 4. Look at it before publishing: `<tool>/scripts/run review-page-gate <dir>` serves the page and
    checks it in a headless browser at widths from 390 to 1440 px (one screen at a time below
    1200 px, two panes from it), in light and dark, then writes screenshots. Read what it prints,
    look at the 390 px and the 904 px screenshots, and fix what it names. The browser it needs and
    its checks are in
    [Check, publish and rebuild](../../docs/review-page/check-publish-rebuild.md).
-5. Before the first publish, read `review.json` and search the chunks for home paths, host
-   names, private addresses and anything private. The builder removes email addresses and
-   nothing else, and shows an environment file by its name only; publish nothing private.
-6. Publish `<dir>/index.html` with the Artifact tool, private, `capabilities: {"db": {}}`, an `icon`
-   of `code`, and `files` mapping `review.json` and each `chunks/<k>.json` to their paths. The
-   page's `<title>` is its name. Then, at once, stop the watch on it (ArtifactComments,
-   `action: watch`, `on: false`), as `AGENTS.md` says.
-7. Give the user the link as `https://claude.ai/code/artifact/<uuid>`, with the page's exact title:
-   read `review.json` back with the Artifact tool's `read` and `path`, and take the uuid from the
-   folder it is saved in.
-8. When the user says they have commented, read the comments: ArtifactData `list` of the
-   collection `comments`. Each has `path`, `side` (`new` or `old`), `from`, `to`, `text` and
-   `at`. Answer each one on the page with ArtifactData `set` in `comments`, `doc_id`
-   `reply-<its id>`, data `{replyTo, path, side, from, to, by: "claude", text, at}`; the reply
-   shows under the comment without a reload. Then act on what they asked in the conversation.
-9. When the head moves, build again into the same folder with the same `--key` and publish the same
-   file path: the link stays, ticks stay on the files whose diff did not change.
-10. The verdict comes in the chat. The page has no verdict control and shows no checks or review
-    findings, by the user's choice.
+5. Read `<dir>/publish.html` for anything private, as the previous section says, then publish it
+   with `--marks` to the slug `review-<repo>-<number>`.
+6. When the user says they have commented, read and answer the comments as the previous section
+   says. A line comment carries its file, its side (`new` or `old`) and its lines.
+7. When the head moves, build again into the same folder with the same `--key` and publish the
+   new `publish.html` to the same slug: the link stays, and where the host keeps ticks they stay
+   on the files whose diff did not change.
+8. The verdict comes in the chat. The page has no verdict control and shows no checks or review
+   findings, by the user's choice.
 
 ## A code viewer for a ticket's files
 
-1. Markdown files the ticket names go in the ticket's Claude Docs document as tabs, placed whole by
-   upload so the text is exact: upload each file to the document's artifact (Artifact `publish`
-   with `url`, `asset: true`), create a blob from it in the document, and fill a new tab from
-   the blob; the Docs connector's `topic.uploads` and `topic.tabs` say how. Link each tab from
-   the ticket with a tab chip.
-2. Code files go in one viewer: `<tool>/scripts/run review-page files <dir> <ref> <path>...`
-   writes `index.html`, `files.json` and `files/<k>.txt`. Read them as step 5 of the review page
-   says, then publish `index.html` with `capabilities: {"comments": {}}` and `files` mapping `files.json`
-   and each `files/<k>.txt`, and stop the watch at once.
-3. Link each file from the ticket at the lines it cites:
-   `https://claude.ai/code/artifact/<uuid>#f<k>-L<a>-L<b>`, where `f<k>` is the file's `id` in
-   `files.json`.
-4. A comment from the viewer is pinned to its first line and starts with the file and the
-   lines. When the user says they have commented, read it with ArtifactComments `read`.
+1. Build one viewer for the files the ticket names, code and Markdown alike:
+   `<tool>/scripts/run review-page files <dir> <ref> <path>...`. It writes `<dir>/index.html`
+   with every file inside it, the one file to publish. Read it for anything private, then publish
+   it to the slug `code-<repo>-<sha>`.
+2. Link each file from the ticket at the lines it cites, with the page's link and
+   `#f<k>-L<a>-L<b>`, where `f<k>` is the file's id (`f0` for the first path given, `f1` for the
+   second). The link opens the page at those lines, lit. Put the links in the ticket's draft or
+   document, never in text that becomes public.
+3. The viewer takes no comment box of its own: the user comments on selected text where the host
+   takes comments, and the session reads them as the publishing section says.
 
 ## A story page for a ticket
 
@@ -105,13 +124,14 @@ What the reader gets, and where the detail is: [the review page](../../docs/revi
    at every drawing in every state in `sheet.html`, at phone width in light and dark,
    before publishing. Rebuild, for a newly drawn picture, if a word comes out wrong.
 4. Read `index.html` back for home paths, host names, private addresses and anything
-   private, as step 5 of the review page says: the builder removes email addresses and
+   private, as the publishing section says: the builder removes email addresses and
    nothing else.
-5. Publish `index.html` as one file with no capabilities (`{}`), and no files beside
-   it — the picture and the data are inline — then stop the watch on it at once, as
-   `AGENTS.md` says.
-6. The page is for reading: it takes no comments and has no verdict. The user answers in
-   the chat and edits the ticket in its document, as now.
+5. Publish `index.html`, which holds the picture and the data inside it, to the slug
+   `story-<repo>-<ticket>`, as the publishing section says. Without `--marks`: the page has
+   no ticks.
+6. The page is for reading: it has no verdict. The user answers in the chat and edits the
+   ticket in its document, as now; a comment left on the page is read and answered as the
+   publishing section says.
 
 ## A story page for a finished change
 
@@ -153,10 +173,11 @@ merged. The review page stays the place for comments on lines.
    and dark, with every drawing in every state. Nothing scrolls sideways, the fonts load and the
    console is clean.
 5. Read `index.html` back for home paths, host names, private addresses and anything private, as
-   step 5 of the review page says: the builder removes email addresses and nothing else.
-6. Publish `index.html` as one file with no capabilities (`{}`), then stop the watch on it at
-   once, as `AGENTS.md` says, and give the user the link as step 7 of the review page says.
-7. The page is for reading: it takes no comments and has no verdict.
+   the publishing section says: the builder removes email addresses and nothing else.
+6. Publish `index.html` to the slug `story-<repo>-<ticket>`, as the publishing section says, and
+   give the user the title and the link as it prints them.
+7. The page is for reading and has no verdict; a comment left on it is read and answered as the
+   publishing section says.
 
 ## Never
 

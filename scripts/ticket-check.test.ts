@@ -205,6 +205,7 @@ beforeAll(() => {
     "data.ts",
     "text.ts",
     "effective-config.ts",
+    "pages-host.ts",
     "pr-size.ts",
     "sources.ts",
   ]) {

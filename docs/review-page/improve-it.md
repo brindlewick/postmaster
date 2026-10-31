@@ -18,6 +18,8 @@ scripts/lib/page-bridge*.ts     the page's side of the page bridge: messages and
 scripts/lib/page-bridge-stand-in.ts  a stand-in for the viewer, for the render gate (not inlined)
 scripts/lib/review-layout.ts    grouping, ordering, purposes and rulings (pure)
 scripts/lib/review-model.ts     review.json and the chunks (pure)
+scripts/lib/review-source.ts    where the page takes its data from: its own blocks, else the files (pure; also inlined)
+scripts/lib/page-text.ts        address removal, languages, and the data blocks of a one-file page (pure)
 scripts/lib/review-assemble.ts  the shell, stylesheets and scripts into one file (pure)
 scripts/lib/review-assets.ts    reads the assets (the edge)
 scripts/review-page.ts          the command (git and gh, files written)
@@ -30,8 +32,14 @@ Oxlint checks them one by one. The builder takes the import and export lines off
 files, in the order of `assets.json`, as one script; a test checks that every import names a file of
 the manifest and a name that file exports.
 
-The page is one HTML file plus `review.json` (the files, groups, rulings and summary) and
-`chunks/<k>.json` (the diffs, loaded when a file is opened). `review.json` has a `version` (now 2);
+The page is one HTML file, `index.html`, plus `review.json` (the files, groups, rulings and summary)
+and `chunks/<k>.json` (the diffs, loaded when a file is opened). `publish.html` is the same page with
+that data inside it, in a block `review-data` and a block `review-chunk-<k>` for each chunk, which the
+page reads first, and in the document the gate checks pages in (a doctype, a viewport and no body
+margin, `scripts/lib/page-skeleton.ts`), so a host that serves the file as it is shows it as the gate
+saw it. It is the one file to publish, and a test holds it to `index.html` plus the data files and
+that skeleton, byte for byte. The render gate checks `index.html`, which a browser loads with its data files
+beside it. `review.json` has a `version` (now 2);
 each file in it carries `sig`, a short hash of its path and diff that keys its tick in the browser,
 and `hash`, the SHA-256 of what the page shows of it, which keys its tick in the page bridge.
 The builder keeps no clock, random id or machine path in any output, so two builds of the same range

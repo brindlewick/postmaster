@@ -1,5 +1,5 @@
-// Build the data a review page or a code viewer page shows, for a session to publish as a
-// private artifact. skills/review-pages/SKILL.md says how a page is published and how its
+// Build the data a review page or a code viewer page shows, for a session to publish with
+// `scripts/run pages publish`. skills/review-pages/SKILL.md says how a page is published and how its
 // comments are read and answered; docs/review-page.md says what the page is, and
 // docs/review-page/improve-it.md how it is made and improved.
 //
@@ -11,23 +11,25 @@
 //
 // options:  --layout <file>      a layout config (JSON) merged over the default one
 //           --purposes <file>    a JSON object of file path to one-line purpose
-//           --page-title <name>  the page's name, which is the artifact's title (default Code Review)
+//           --page-title <name>  the page's name, which is its title on the host (default Code Review)
 //           --key <name>         prefix of what the page keeps in the reader's browser (default review-page)
 //
 // change: diffs the head against its merge base with the base, as GitHub does, and writes
 // <out-dir>/index.html (the phone-first review page, assembled from skills/review-pages/page),
-// review.json and chunks/<k>.json. Files are grouped by importance, ordered and described by the
-// layout (skills/review-pages/page/layout.default.json, then --layout and --purposes), and the page
-// loads a file's diff only when it is opened. With --pr, the title, the summary (the pull request's
-// text), the base and the head come from `gh api` on the repository's origin. With --ticket, or a
-// pull request titled "#<n>, <title>", the ticket's text comes from that issue; --ticket-body is a
-// Markdown file holding the ticket's text instead, for a ticket that is not a GitHub issue.
-// --summary is a Markdown file containing the change's summary.
+// review.json and chunks/<k>.json, which index.html loads, and <out-dir>/publish.html: the same page
+// with that data inside it and in a complete document, the one file to publish. Files are grouped by
+// importance, ordered and described by the layout (skills/review-pages/page/layout.default.json, then
+// --layout and --purposes), and the page loads a file's diff only when it is opened. With --pr, the
+// title, the summary (the pull request's text), the base and the head come from `gh api` on the
+// repository's origin. With --ticket, or a pull request titled "#<n>, <title>", the ticket's text comes
+// from that issue; --ticket-body is a Markdown file holding the ticket's text instead, for a ticket
+// that is not a GitHub issue. --summary is a Markdown file containing the change's summary.
 //
 // demo: builds the same page for an invented sample repository made in a temporary folder, so a
 // session can see the page, and the page's own tests have a fixed input.
 //
-// files: writes the code viewer, files.json and files/<k>.txt, one per path as it stands at <ref>.
+// files: writes the code viewer as one file, <out-dir>/index.html, with each path as it stands at <ref>
+// inside it (the files are f0, f1, ... in the order given), the one file to publish.
 //
 // Either way, an email address outside the reserved example domains becomes <address removed>,
 // with line numbers unchanged. Run it from the repository the change belongs to.
@@ -37,7 +39,8 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { langOf, scrub } from "./lib/page-text.ts";
+import { inSkeleton } from "./lib/page-skeleton.ts";
+import { dataBlock, langOf, scrub, withData } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
 import { assemblePage } from "./lib/review-assemble.ts";
 import { loadPageAssets } from "./lib/review-assets.ts";
@@ -49,6 +52,7 @@ import {
   parseLayoutPartial,
 } from "./lib/review-layout.ts";
 import { buildReviewData, type ChangeText, packChunks } from "./lib/review-model.ts";
+import { chunkBlockId, reviewBlockId } from "./lib/review-source.ts";
 import { createSampleRepo, SAMPLE_LAYOUT, SAMPLE_SUMMARY } from "./lib/review-sample.ts";
 
 export { langOf, packChunks, scrub };
@@ -243,14 +247,23 @@ function buildFrom(out: string, args: string[], facts: Facts, extra: unknown[], 
   });
   writeFileSync(join(out, "review.json"), JSON.stringify(built.review));
   const pageTitle = flag(args, "--page-title") ?? "Code Review";
+  const page = assemblePage({ ...loadPageAssets(TOOL), title: pageTitle });
+  writeFileSync(join(out, "index.html"), page);
+  // The same page with its data inside it, in the document the gate checks it in: the one file to
+  // publish, for a host that stores one file and serves it as it is.
   writeFileSync(
-    join(out, "index.html"),
-    assemblePage({ ...loadPageAssets(TOOL), title: pageTitle }),
+    join(out, "publish.html"),
+    inSkeleton(
+      withData(page, [
+        dataBlock(reviewBlockId(), built.review),
+        ...built.chunks.map((items, k) => dataBlock(chunkBlockId(k), items)),
+      ]),
+    ),
   );
   const files = built.review.files;
   const heuristic = files.filter((f) => f.purposeSource === "heuristic").length;
   const withheld = files.filter((f) => f.withheld !== undefined).length;
-  return `review page for ${facts.head.slice(0, 7)}: ${files.length} files in ${built.review.groups.length} groups, +${built.review.additions} -${built.review.deletions}, ${built.chunks.length} chunk(s), ${removed} address(es) removed, ${heuristic} purpose(s) from the heuristics, ${withheld} withheld, in ${out}`;
+  return `review page for ${facts.head.slice(0, 7)}: ${files.length} files in ${built.review.groups.length} groups, +${built.review.additions} -${built.review.deletions}, ${built.chunks.length} chunk(s), ${removed} address(es) removed, ${heuristic} purpose(s) from the heuristics, ${withheld} withheld, in ${out}\npage to publish: ${join(out, "publish.html")}`;
 }
 
 function buildChange(out: string, args: string[]): string {
@@ -329,23 +342,23 @@ function buildDemo(out: string, args: string[]): string {
 function buildFiles(out: string, ref: string, paths: string[]): string {
   if (paths.length === 0) throw new Error(USAGE);
   const sha = git(["rev-parse", "--verify", `${ref}^{commit}`]).trim();
-  mkdirSync(join(out, "files"), { recursive: true });
   let removed = 0;
   const files = paths.map((p, k) => {
     const t = scrub(git(["show", `${sha}:${p}`]));
     removed += t.removed;
-    const src = `files/${k}.txt`;
-    writeFileSync(join(out, src), t.text);
-    return { id: `f${k}`, path: p, lang: langOf(p), src, lines: lineCount(t.text) };
+    return { id: `f${k}`, path: p, lang: langOf(p), lines: lineCount(t.text), text: t.text };
   });
   const title =
     paths.length === 1 ? (paths[0] ?? "Code") : `${paths.length} files at ${sha.slice(0, 7)}`;
-  writeFileSync(join(out, "files.json"), JSON.stringify({ title, ref: sha, files }));
-  writeFileSync(
-    join(out, "index.html"),
-    titled(readFileSync(join(TEMPLATES, "viewer.html"), "utf8"), "Code"),
+  const html = inSkeleton(
+    withData(titled(readFileSync(join(TEMPLATES, "viewer.html"), "utf8"), "Code"), [
+      dataBlock("files-data", { title, ref: sha, files }),
+    ]),
   );
-  return `code viewer: ${files.length} file(s) at ${sha.slice(0, 7)}, ${removed} address(es) removed, in ${out}`;
+  mkdirSync(out, { recursive: true });
+  const page = join(out, "index.html");
+  writeFileSync(page, html);
+  return `code viewer: ${files.length} file(s) at ${sha.slice(0, 7)}, ${removed} address(es) removed, in ${out}\npage to publish: ${page}`;
 }
 
 export function main(args: string[]): number {

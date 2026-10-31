@@ -34,7 +34,7 @@
   color-scheme: dark;
 }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.5; margin: 0; }
-.app { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-inline: 16px; padding-block: 14px 110px; max-width: 1600px; margin: 0 auto; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-inline: 16px; padding-block: 14px 32px; max-width: 1600px; margin: 0 auto; }
 .top { display: grid; gap: 4px; }
 .eyebrow { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ex-ink); }
 h1 { margin: 0; font-family: var(--font-display); font-size: 21px; line-height: 1.25; text-wrap: balance; }
@@ -58,9 +58,11 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 21px; line-height: 
     <p class="eyebrow">Postmaster</p>
     <h1>Experiments</h1>
     <p class="meta">What this project is trying, and when to look.</p>
+    <p class="meta" id="asof"></p>
   </div>
   <div id="app"><p class="empty">Loading.</p></div>
 </div>
+<!-- page data -->
 <script>
 function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -114,16 +116,22 @@ function draw(mount, rows) {
   });
   mount.innerHTML = '<div class="deck">' + ordered.map(function (r) { return card(r, today); }).join("") + "</div>";
 }
-async function boot() {
+// The rows are inline, baked in by `run experiments page`; the page is republished after each change.
+function boot() {
   var mount = document.getElementById("app");
-  var db = null;
-  try { db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null; } catch (e) { db = null; }
-  if (!db) { mount.innerHTML = '<p class="empty">No experiments to show.</p>'; return; }
-  db.collection("experiments").onSnapshot(function (s) {
-    draw(mount, s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }));
-  }, function () {
+  var data = null;
+  try {
+    var node = document.getElementById("experiments-data");
+    data = node && node.textContent ? JSON.parse(node.textContent) : null;
+  } catch (e) { data = null; }
+  if (!data || typeof data.rows !== "object" || data.rows === null) {
     mount.innerHTML = '<p class="empty">No experiments to show.</p>';
-  });
+    return;
+  }
+  if (typeof data.asOf === "string" && data.asOf !== "") {
+    document.getElementById("asof").textContent = "As of " + data.asOf + ".";
+  }
+  draw(mount, Object.keys(data.rows).map(function (id) { return Object.assign({ id: id }, data.rows[id]); }));
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 </script>

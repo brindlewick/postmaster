@@ -1056,3 +1056,79 @@ describe("the pull request size settings", () => {
     }
   });
 });
+
+describe("the pages settings", () => {
+  const block =
+    '[pages]\npublish = "host-cli publish {file} --slug {slug}"\ncomments = "host-cli comments {slug} --all --json"\n';
+
+  function projectWith(name: string, shared: string | null, local: string | null): string {
+    const dir = at(name);
+    mkdirSync(dir, { recursive: true });
+    if (shared !== null) write(join(dir, ".postmaster", "project.toml"), shared);
+    if (local !== null) write(join(dir, ".postmaster", "settings.toml"), local);
+    return dir;
+  }
+
+  function refusal(fn: () => unknown): string {
+    try {
+      fn();
+    } catch (e) {
+      if (isDie(e)) return e.message;
+      throw e;
+    }
+    return "";
+  }
+
+  test("the person's file may hold a [pages] table, and it merges over the machine's key by key", () => {
+    const withPages = at("pages-machine.toml");
+    write(
+      withPages,
+      '[pages]\npublish = "host-cli publish {file} --slug {slug}"\nclose = "host-cli close {id}"\n',
+    );
+    const dir = projectWith("pages-merge", null, '[pages]\nclose = "other-cli close {id}"\n');
+    const merged = effectiveConfig(dir, loadMachine(withPages));
+    expect(merged.pages).toEqual({
+      publish: "host-cli publish {file} --slug {slug}",
+      close: "other-cli close {id}",
+    });
+  });
+
+  test("a [pages] table in the person's file is read, and writing one that does not read is refused", () => {
+    const dir = projectWith("pages-write", null, null);
+    const good = at("pages-good.toml");
+    write(good, block);
+    writeProfile(dir, "local", good);
+    expect(effectiveConfig(dir, {}).pages).toEqual({
+      publish: "host-cli publish {file} --slug {slug}",
+      comments: "host-cli comments {slug} --all --json",
+    });
+    const bad = at("pages-bad.toml");
+    write(bad, '[pages]\npublish = "host-cli publish {file} --slug {slug} --as {user}"\n');
+    expect(refusal(() => writeProfile(dir, "local", bad))).toBe(
+      "settings input.pages.publish uses {user}, which is not a placeholder of publish; it takes {file} and {slug}",
+    );
+  });
+
+  test("a table that is not a table, an unknown key and an unknown bridge each stop with the key named", () => {
+    const read = (text: string): string =>
+      refusal(() => validateCommon(parseTomlText(text) as Rec, "local project settings", true));
+    expect(read('pages = "host-cli"\n')).toBe("local project settings.pages must be a table");
+    expect(read("[pages]\nretries = 3\n")).toContain("local project settings.pages.retries");
+    expect(read('[pages]\nbridge = "page-bridge-v2"\n')).toContain(
+      "local project settings.pages.bridge",
+    );
+    expect(read(block)).toBe("");
+  });
+
+  test("the shared project file cannot carry [pages]: a command in a cloned repository is never run", () => {
+    const dir = projectWith("pages-shared", null, null);
+    const shared = at("pages-shared.toml");
+    write(shared, block);
+    expect(refusal(() => writeProfile(dir, "project", shared))).toBe(
+      "settings input has unsupported table or key: pages",
+    );
+    expect(refusal(() => inspect(projectWith("pages-shared-file", block, null)))).toBe(
+      "shared project settings has unsupported table or key: pages",
+    );
+  });
+});

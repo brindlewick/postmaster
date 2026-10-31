@@ -32,6 +32,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { parseTomlText } from "./data.ts";
+import { parsePages } from "./pages-host.ts";
 import { scriptsDir } from "./paths.ts";
 import { type Budget, budgetOf, draftsOn } from "./pr-size.ts";
 import { mkstempSync, run } from "./proc.ts";
@@ -553,7 +554,8 @@ const validateCheck = (name: string, specValue: unknown, where: string): void =>
 
 // The global config's top-level keys: what the person's file may override. `tracker`
 // is both a global table and a legacy project fact; `project` and `roles` are local
-// facts only, and `checks` stays with the shared file.
+// facts only, and `checks` stays with the shared file. `pages` names commands this
+// machine runs, so it is the machine's and the person's, never the shared file's.
 export const GLOBAL_KEYS = new Set([
   "projects_roots",
   "confine",
@@ -567,6 +569,7 @@ export const GLOBAL_KEYS = new Set([
   "ship",
   "notify",
   "sources",
+  "pages",
 ]);
 
 const CONFIG_TABLE_KEYS = new Set([
@@ -580,6 +583,7 @@ const CONFIG_TABLE_KEYS = new Set([
   "ship",
   "notify",
   "sources",
+  "pages",
 ]);
 
 const PROJECT_KEYS = [
@@ -722,6 +726,10 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
     if (Object.hasOwn(data, "sources")) {
       const read = readSources(data.sources, expandUser);
       if (read.problems.length > 0) fail(`${label}.${read.problems[0]}`);
+    }
+    if (Object.hasOwn(data, "pages")) {
+      const read = parsePages(data.pages);
+      if (!read.ok) fail(`${label}.${read.error}`);
     }
     if (Object.hasOwn(data, "confine")) {
       if (data.confine !== "on" && data.confine !== "off")
@@ -1393,7 +1401,7 @@ export const prSizeBudgetOf = (repo: string): Budget | null => {
 
 // --- writes ----------------------------------------------------------------------------------------
 // The folder's own ignore rules: run records, drafts, local verifiers, the
-// experiments record and the project's notes stay ignored whatever the user
+// experiments record and its page, and the project's notes stay ignored whatever the user
 // answers. The person's settings file is never ignored here: setup offers to
 // have git ignore it, and only the user's yes adds that rule (ignoreSettings).
 const IGNORE_RECORDS = [
@@ -1403,7 +1411,7 @@ const IGNORE_RECORDS = [
   "notes.md",
   "verifier/",
   "experiments.jsonl",
-  "experiments-page.url",
+  "experiments-page.html",
   ".gitignore",
 ] as const;
 
