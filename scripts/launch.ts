@@ -399,7 +399,7 @@ function buildForms(
       } else cmd.push("grok", "--prompt-file", prompt);
       cmd.push("-m", model);
       if (effort) cmd.push("--reasoning-effort", effort);
-      cmd.push("--max-turns", "1000", "--always-approve", "--output-format", "stream-json");
+      cmd.push("--max-turns", "1000", "--always-approve", "--output-format", "streaming-json");
       break;
     }
     case "agy": {
@@ -770,7 +770,7 @@ function findThreadId(text: string): string | null {
         return st.id.trim();
       }
     }
-    // pi and grok: id on a session record
+    // pi: id on a session record. A grok streaming-json stream has none; its sessionId is below.
     if (ev.type === "session" && typeof ev.id === "string" && ev.id.trim() !== "") {
       return ev.id.trim();
     }
