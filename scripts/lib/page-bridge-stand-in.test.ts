@@ -577,6 +577,6 @@ describe("the viewer page", () => {
   });
 
   test("the page and its script hold no em or en dash", () => {
-    expect(`${standInPage("/index.html")}${VIEWER_SCRIPT}`).not.toMatch(/[–—]/u);
+    expect(`${standInPage("/index.html")}${VIEWER_SCRIPT}`).not.toMatch(/[\u2013\u2014]/u);
   });
 });
