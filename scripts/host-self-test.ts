@@ -817,30 +817,6 @@ export function testStopFinishers(root: string): void {
   }
   rmSync(path, { force: true });
 }
-// A run tab's state pane runs a refresh loop that outlives the test: the
-// stub records each pane command's pid beside its output, and the loop dies
-// with its group. Only a command line showing run-state is killed, so a
-// reused pid is never mistaken for one.
-export function killStateLoops(stubDir: string): void {
-  let files: string[] = [];
-  try {
-    files = readdirSync(stubDir);
-  } catch {
-    return;
-  }
-  for (const file of files) {
-    if (!file.startsWith("pane-") || !file.endsWith(".pid")) continue;
-    const pid = Number(readFileSync(join(stubDir, file), "utf8").trim());
-    if (!Number.isInteger(pid) || pid <= 0) continue;
-    if (!processCommandLine(pid).includes("run-state")) continue;
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {}
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {}
-  }
-}
 function callText(
   args: string[],
   path: string,
@@ -1129,7 +1105,6 @@ async function makeHarness(
 }
 function resetHarness(root: string): void {
   testStopFinishers(root);
-  killStateLoops(join(root, "stub"));
   const dir = join(root, "stub");
   // Drain an in-flight stub call before clearing beneath it.
   withStubLock(dir, () => {
@@ -3082,7 +3057,7 @@ export async function runControls(): Promise<number> {
       const stylePane = kvOf(styleRun.out, "pane");
       const secPane = kvOf(secRun.out, "pane");
       await pass(
-        "a finished review round leaves no reviewer panes, and the run tab keeps its state pane",
+        "a finished review round leaves no reviewer panes, and the run tab keeps its first pane",
         () => {
           const st = herdrState();
           const panes = (st.spaces[roundSpace]?.panes ?? []).filter(
@@ -3150,7 +3125,7 @@ export async function runControls(): Promise<number> {
               ws: "w1",
               tab: "w1:t2",
               cwd: cwds[0]!,
-              tokens: { postmaster: "launch", role: "runstate" },
+              tokens: { postmaster: "launch" },
             },
           },
           tabs: {
@@ -4199,23 +4174,18 @@ export async function runControls(): Promise<number> {
         f.caller,
         { POSTMASTER_HOST: "herdr" },
       );
-      const g1state = calls(root, "herdr").filter(
-        (line) => line.startsWith("pane\trun\t") && line.includes("run-state"),
-      );
+      // The launch's own pane command is the positive control for the filter.
+      const g1paneRuns = calls(root, "herdr").filter((line) => line.startsWith("pane\trun\t"));
       await pass(
-        "a run launch lands and starts its state pane",
-        () => g1run.code === 0 && g1state.length === 1,
+        "a run launch lands and runs its own command in its pane",
+        () =>
+          g1run.code === 0 && g1paneRuns.filter((line) => line.includes("_run herdr")).length === 1,
         `${g1run.out}${g1run.err}`,
       );
       await pass(
-        "the state pane runs through the isolated entry",
-        () => g1state.length === 1 && (g1state[0] ?? "").includes("scripts/run"),
-        g1state.join("\n"),
-      );
-      await pass(
-        "not as a bare Bun call from the worktree",
-        () => g1state.length === 1 && !(g1state[0] ?? "").includes("host.ts"),
-        g1state.join("\n"),
+        "and starts no run-state loop in the run tab's first pane",
+        () => g1paneRuns.filter((line) => line.includes("host run-state")).length === 0,
+        g1paneRuns.join("\n"),
       );
       resetHarness(root);
       const g2dispatch = realpathSync(closeDispatch);
@@ -4238,7 +4208,7 @@ export async function runControls(): Promise<number> {
             ws: "w1",
             tab: "w1:t2",
             cwd: lunaReal,
-            tokens: { postmaster: "launch", role: "runstate" },
+            tokens: { postmaster: "launch" },
           },
           p1: {
             ws: "w1",
@@ -8625,7 +8595,7 @@ export async function live(): Promise<void> {
         root,
       );
       await pass(
-        "finished launches leave the tab with its state pane",
+        "finished launches leave the tab with its first pane",
         () => {
           const panes = liveHerdr("pane", "list", "--workspace", liveRunSpace);
           let held: Array<{ pane_id: string }> = [];
@@ -8645,28 +8615,6 @@ export async function live(): Promise<void> {
         },
         `${liveFin1.out}\n${liveFin1.err}\n${liveFin2.out}\n${liveFin2.err}`,
       );
-      await pass("the state pane shows the run", async () => {
-        const runtabs = readdir(join(root, "state", "runtabs"));
-        if (runtabs.length !== 1) return false;
-        const record = JSON.parse(
-          readFileSync(join(root, "state", "runtabs", runtabs[0]!), "utf8"),
-        ) as { pane?: string };
-        if (!record.pane) return false;
-        for (let i = 0; i < 30; i++) {
-          const screen = liveHerdr(
-            "pane",
-            "read",
-            record.pane,
-            "--source",
-            "recent-unwrapped",
-            "--lines",
-            "40",
-          ).out;
-          if (screen.includes("#1, Stop") && screen.includes("stage:")) return true;
-          await sleep(1000);
-        }
-        return false;
-      });
       const liveClose = liveHost(["close-run", liveRun], f.caller, root, {
         POSTMASTER_HOST: "herdr",
       });

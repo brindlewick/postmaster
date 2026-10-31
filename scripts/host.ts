@@ -10,8 +10,9 @@
 //   run host name <dispatch> review <lane> <lens> <round>
 //   run host name <dispatch> postmaster
 //   run host name <dispatch> role <text...>                          any other launch, by its role alone
-//   run host run-state [--watch] <dispatch>   the ticket, stage and wait, for the run tab's
-//                                         state pane; --watch reprints every 60 seconds
+//   run host run-state [--watch] <dispatch>   the ticket, stage and wait, read from the run's
+//                                         records, when a person asks; --watch reprints
+//                                         every 60 seconds; no launch starts it
 //   run host leg launch <dispatch> <worktree> <leg> <number> <prompt>
 //   run host leg takeover <dispatch> <worktree> <leg> <number> <prompt> --recorded
 //   run host leg takeover <dispatch> <worktree> <leg> <number> <prompt> --model <m> --effort <e>
@@ -594,9 +595,9 @@ function nameCmd(dispatch: string, ...args: string[]): string {
   return clean(parts.join(" · "));
 }
 
-// What the run tab's state pane shows while no lane runs: the ticket, the
+// What `run host run-state` shows a person looking at a run: the ticket, the
 // stage and what the run waits for, read from the run's records. It writes
-// nothing. With --watch it reprints every 60 seconds, for the pane.
+// nothing. With --watch it reprints every 60 seconds. No launch starts it.
 function runStateWaiting(dispatch: string, stage: string, pending: string[]): string {
   switch (stage) {
     case "dispatched":
@@ -1169,8 +1170,8 @@ function herdrRecordPlacement(
 // space, found again across launches and legs through this record. It lives
 // apart from the launch placements: it outlives every launch, from the run's
 // first placement to close-run, while each launch placement goes with its
-// launch. The state pane is the tab's first pane; it shows the run's state
-// and keeps the tab listed between launches.
+// launch. The tab's first pane runs nothing; it keeps the tab listed between
+// launches.
 function runTabDir(): string {
   return join(STATE, "runtabs");
 }
@@ -1253,14 +1254,11 @@ function fixtureLabel(copyRoot: string): string {
 
 // One fixture tab per copy: the tab the copy's own launches and its run's
 // launches share, found again across launches through this record, keyed by
-// the copy's root rather than a dispatch the copy's launches never carry. The
-// flag says a run launch has started the run-state loop in the tab's first
-// pane, so a second adoption never starts a second loop.
+// the copy's root rather than a dispatch the copy's launches never carry.
 interface FixTab {
   workspace: string;
   tab: string;
   pane: string;
-  stateloop: boolean;
 }
 function fixTabDir(): string {
   return join(STATE, "fixtabs");
@@ -1287,20 +1285,9 @@ function readFixTab(copyRoot: string): FixTab | null {
   )
     return null;
   if (!rec.workspace || !rec.tab || !rec.pane) return null;
-  return {
-    workspace: rec.workspace,
-    tab: rec.tab,
-    pane: rec.pane,
-    stateloop: rec.stateloop === true,
-  };
+  return { workspace: rec.workspace, tab: rec.tab, pane: rec.pane };
 }
-function writeFixTab(
-  copyRoot: string,
-  workspace: string,
-  tab: string,
-  pane: string,
-  stateloop: boolean,
-): boolean {
+function writeFixTab(copyRoot: string, workspace: string, tab: string, pane: string): boolean {
   const directory = fixTabDir();
   try {
     mkdirSync(directory, { recursive: true });
@@ -1312,7 +1299,7 @@ function writeFixTab(
     temporary = mkstempSync(directory, ".fixtab-");
     writeFileSync(
       temporary,
-      `${JSON.stringify({ workspace, tab, pane, root: realpathLoose(copyRoot), stateloop })}\n`,
+      `${JSON.stringify({ workspace, tab, pane, root: realpathLoose(copyRoot) })}\n`,
     );
     renameSync(temporary, fixTabPath(copyRoot));
     return true;
@@ -1817,7 +1804,7 @@ function herdrRunPlace(
   let anchor = placed.pane;
   let pane = splitRunPane(anchor, cwd);
   if (!pane) {
-    // The recorded state pane may be gone (closed by hand): split off
+    // The recorded first pane may be gone (closed by hand): split off
     // another run pane in the tab when one is live, and rebuild the tab
     // when none is. Whatever fails here runs in the background.
     anchor = runTabAnchor(source, placed.tab, placed.pane);
@@ -1837,10 +1824,10 @@ function herdrRunPlace(
   return finishRunLaunch(source, tab, pane, name, cwd, dispatch);
 }
 
-// Open the run's tab in the repository's space. Its first pane shows the
-// run's state while no lane runs and keeps the tab listed between launches;
-// close-run takes it with the tab. A failure rolls the tab back, so a failed
-// first placement leaves nothing a later close could refuse.
+// Open the run's tab in the repository's space. Its first pane runs nothing
+// and keeps the tab listed between launches; close-run takes it with the tab.
+// A failure rolls the tab back, so a failed first placement leaves nothing a
+// later close could refuse.
 function createRunTab(
   source: string,
   runName: string,
@@ -1878,14 +1865,11 @@ function createRunTab(
       runName,
       "--token",
       "postmaster=launch",
-      "--token",
-      "role=runstate",
     ]).code !== 0
   ) {
     rollbackRunTab(tab);
     return null;
   }
-  startStateLoop(rootPane, runPath, dispatch, tab);
   if (!writeRunTab(dispatch, source, tab, rootPane)) {
     rollbackRunTab(tab);
     return null;
@@ -1917,7 +1901,7 @@ function splitRunPane(anchor: string, cwd: string, env: string[] = []): string {
   return "";
 }
 
-// A live pane of the run's tab to split off: the recorded state pane when it
+// A live pane of the run's tab to split off: the recorded first pane when it
 // is live, else another pane run host opened there. Empty when the tab holds
 // no run pane at all, so the caller rebuilds it; the recorded pane when the
 // list cannot be read, for one retry on the same anchor.
@@ -2039,59 +2023,12 @@ function fixtureProjectSpace(): string {
   return source;
 }
 
-// Start the run-state loop in a tab's first pane: the pane shows the run's
-// state while no lane runs. A pane that will not take it keeps the tab listed
-// without the display; the launch still runs.
-function startStateLoop(pane: string, runPath: string, dispatch: string, tab: string): void {
-  // Through the isolated entry, never a bare Bun call: the pane starts in the
-  // synthesis worktree, and a bare call would load that project's .env and
-  // Bun config into this flow-owned loop.
-  const loop = `cd -- ${quote(runPath)} && ${quote(join(HERE, "run"))} host run-state --watch ${quote(dispatch)}`;
-  if (herdr(["pane", "run", pane, loop]).code !== 0)
-    warn(`could not start the run state pane in tab ${tab}; leaving it at its prompt`);
-}
-
-// A run launch adopting a fixture tab starts the run-state loop in the tab's
-// first pane and marks it a state pane, so a tab the copy's launches opened
-// first ends identical to one a run launch opened. The record carries the
-// flag, written before the loop starts, so a second adoption never starts a
-// second loop. Both tokens go together: the stub replaces where the server
-// merges, and the pane must keep its launch token either way.
-function adoptStateLoop(
-  current: FixTab,
-  copyRoot: string,
-  runPath: string,
-  dispatch: string,
-): void {
-  if (!dispatch || !runPath || current.stateloop) return;
-  if (!writeFixTab(copyRoot, current.workspace, current.tab, current.pane, true)) {
-    warn(`could not record the run state loop for fixture tab ${current.tab}; leaving it holding`);
-    return;
-  }
-  if (
-    herdr([
-      "pane",
-      "report-metadata",
-      current.pane,
-      "--source",
-      META,
-      "--token",
-      "postmaster=launch",
-      "--token",
-      "role=runstate",
-    ]).code !== 0
-  )
-    warn(`could not mark fixture tab ${current.tab}'s first pane as the run state pane`);
-  startStateLoop(current.pane, runPath, dispatch, current.tab);
-}
-
 // Open a fixture copy's one tab in the postmaster project's space. Its first
 // pane holds the tab from the first launch, whatever kind that launch is. A
 // failure rolls the tab back: it is brand new and unshared.
 function createFixtureTab(
   source: string,
   copyRoot: string,
-  dispatch: string,
   runPath: string,
 ): { tab: string; pane: string } | null {
   const label = fixtureLabel(copyRoot);
@@ -2131,16 +2068,10 @@ function createFixtureTab(
     rollbackRunTab(tab);
     return null;
   }
-  if (!writeFixTab(copyRoot, source, tab, holding, false)) {
+  if (!writeFixTab(copyRoot, source, tab, holding)) {
     rollbackRunTab(tab);
     return null;
   }
-  adoptStateLoop(
-    { workspace: source, tab, pane: holding, stateloop: false },
-    copyRoot,
-    runPath,
-    dispatch,
-  );
   return { tab, pane: holding };
 }
 
@@ -2158,14 +2089,13 @@ function obtainFixtureTab(
 ): { tab: string; pane: string } | null {
   const current = readFixTab(copyRoot);
   if (current && current.workspace === source && current.tab !== excludeTab) {
-    adoptStateLoop(current, copyRoot, runPath, dispatch);
     if (dispatch && !writeRunTab(dispatch, source, current.tab, current.pane)) {
       warn(`could not record the run tab for fixture tab ${current.tab}; the launch still runs`);
       return null;
     }
     return current;
   }
-  const created = createFixtureTab(source, copyRoot, dispatch, runPath);
+  const created = createFixtureTab(source, copyRoot, runPath);
   if (!created) return null;
   if (dispatch && !writeRunTab(dispatch, source, created.tab, created.pane)) {
     rollbackRunTab(created.tab);
@@ -6552,7 +6482,7 @@ function herdrCloseOnePlacement(
     console.log(`host=herdr: closed ${noun} pane ${pane}`);
     return 0;
   }
-  // A run tab holds every launch's pane beside the run's state pane: closing
+  // A run tab holds every launch's pane beside the tab's first pane: closing
   // one checkout's pane leaves the shared tab for the rest, by design rather
   // than as a refusal.
   if (ownership === "owned-shared") {
@@ -7080,7 +7010,7 @@ function runSpaceVerdict(infoText: string, panesText: string): string {
 }
 
 // Close the run's tab in the repository's space: only while every pane in it
-// carries the launch token — the state pane and settled launch panes do —
+// carries the launch token — the first pane and settled launch panes do —
 // and never the space around it. A tab already gone drops its record.
 function herdrCloseRunTab(dispatch: string, space: string, tab: string): number {
   const panes = herdr(["pane", "list", "--workspace", space]);

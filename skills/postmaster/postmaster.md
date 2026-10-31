@@ -26,6 +26,14 @@ this file; you write its waybill and read its cards, and you never do its job.
 | `<repo>/.postmaster/project.toml` | what the project requires of a run, if it declares one; the shared file, committed on purpose |
 | `<repo>/.postmaster/settings.toml` | this person's choices for this project; committed only to share, used only after acceptance |
 
+**Looking at a run.** Nothing shows a run's state on its own: the run tab's first pane runs
+nothing. When the user wants to look at a run, give them the command rather than reading the
+records yourself: `<tool>/scripts/run host run-state [--watch] <dispatch>` prints the ticket, the
+stage and what the run waits for, once or every 60 seconds with `--watch`. The run's records
+stay in `<runs>/<TICKET>/` after it ends: `manifest.json` holds the stage and leg, `run-log.md`
+the narrative and `actions.jsonl` every action (`coachman.md`, Where things live, names the
+rest).
+
 ## Memory is the disk
 
 Keep nothing in your context that is not in `<runs>`. Every decision is a line in the action

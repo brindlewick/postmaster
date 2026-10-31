@@ -56,6 +56,7 @@ scripts/run review-findings normalize|harvest …                   # native bug
 scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting … | detect|name|run|stop|close|stop-run|close-run|spawn|send|wait|read … # leg lifecycle, launch placement and teardown
 scripts/run view-stream < <events-file>                            # a harness's events, wrapped: what it says and runs, in full
 scripts/run runs-status <run-root>                                  # the postmaster's poll
+scripts/run host run-state [--watch] <dispatch>                     # look at a run: its ticket, stage and what it waits for
 scripts/run coachman-contract <base> <head>                         # whether a change touches the contract, by file
 scripts/run runs-watch <run-root> [--timeout <seconds>]              # wait until a run needs the postmaster
 scripts/run handoff-check <handoff-file>                            # a leg may end only on exit 0
@@ -64,5 +65,10 @@ scripts/run review-page-gate <page-dir>                           # check a buil
 scripts/run wiki-lint                                             # the wiki's rules, run not remembered
 scripts/run fixture new|score|hidden …                              # a run on a fixture app, scored against a known outcome
 ```
+
+Nothing shows a run on screen by itself. To look at one afterwards, run
+`scripts/run host run-state [--watch] <dispatch>`, where `<dispatch>` is the run's folder,
+`<project>/.postmaster/runs/<ticket>/`. That folder is the run's record: `manifest.json` has its
+stage, `run-log.md` its narrative and `actions.jsonl` every action it took.
 
 Back to the [README](../README.md).

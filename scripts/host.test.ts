@@ -81,7 +81,7 @@ const SECTIONS: Array<{ name: string; count: number }> = [
   { name: "review round 2 fixes, tmux (stub)", count: 1 },
   { name: "review round 4 fixes, Herdr (stub)", count: 16 },
   { name: "review round 4 fixes, tmux (stub)", count: 11 },
-  { name: "374 review round 1 fixes, Herdr (stub)", count: 8 },
+  { name: "374 review round 1 fixes, Herdr (stub)", count: 7 },
   { name: "teardown reads only the round records", count: 16 },
   { name: "interactive sessions", count: 20 },
   { name: "clerk close", count: 6 },
@@ -1253,6 +1253,51 @@ test("run-state reports an abandoned run as complete, not unknown", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("run-state --watch prints the run's state and keeps running until it is stopped", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-runstate-")));
+  try {
+    const dispatch = join(dir, "dispatch");
+    mkdirSync(dispatch, { recursive: true });
+    writeFileSync(
+      join(dispatch, "brief.md"),
+      "## Dispatch\nname: #1, Probe\nsynthesis worktree: /nowhere\n",
+    );
+    writeFileSync(join(dispatch, "manifest.json"), '{"stage":"review","leg":2,"lanes":{}}\n');
+    const child = spawn(join(import.meta.dir, "run"), ["host", "run-state", "--watch", dispatch]);
+    let out = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      out += String(chunk);
+    });
+    try {
+      expect(await waitFor(() => out.includes("as of "), 30)).toBe(true);
+      expect(out).toContain("#1, Probe");
+      expect(out).toContain("stage: review · leg 2");
+      // The one-shot form above has exited by now; the loop has not.
+      expect(child.exitCode).toBeNull();
+    } finally {
+      child.kill();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the docs and the runbook say how to look at a run afterwards, and where its records are", () => {
+  const read = (path: string): string => readFileSync(join(import.meta.dir, "..", path), "utf8");
+  const command = "run-state [--watch] <dispatch>";
+  const records = ["manifest.json", "run-log.md", "actions.jsonl"];
+  const section = read("skills/postmaster/postmaster.md").split("**Looking at a run.**")[1] ?? "";
+  const runbook = section.split("\n\n")[0] ?? "";
+  const guide = read("docs/getting-started.md");
+  for (const text of [runbook, guide]) {
+    expect(text).toContain(command);
+    for (const file of records) expect(text).toContain(file);
+  }
+  const hosts = read("skills/postmaster/hosts.md");
+  expect(hosts).toContain(command);
+  expect(hosts).not.toContain("first pane shows the run's state");
 });
 
 test("a run-tab lock reads live only for its own started owner", () => {
