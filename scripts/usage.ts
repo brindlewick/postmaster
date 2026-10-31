@@ -245,9 +245,9 @@ const readPi = (rows: Row[]): UsageFigures =>
     }),
   );
 
-// Grok's terminal end event carries the run's usage; chunk-level usage is ignored so a
-// repeated report is never counted twice. The last end carrying a figure wins; an end without
-// one is skipped, never read as zero.
+// Grok's closing end record carries the run's usage; the usage reported before it (the `usage`
+// records of a streaming-json stream) is ignored so a repeated report is never counted twice.
+// The last end carrying a figure wins; an end without one is skipped, never read as zero.
 const readGrok = (rows: Row[]): UsageFigures => {
   const ends = rows.filter((row) => row.type === "end");
   for (let i = ends.length - 1; i >= 0; i--) {

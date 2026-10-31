@@ -2928,6 +2928,33 @@ beforeAll(() => {
       "launch: cd <cwd> && agy -p ",
       "resume: none: agy resume form is not recorded",
     );
+    // The values grok's own --help lists for --output-format (grok 1.0.70). Any other value,
+    // stream-json among them, is refused with exit 2 before the lane starts.
+    const GROK_OUTPUT_FORMATS = ["plain", "json", "streaming-json", "streaming-messages-json"];
+    writeFileSync(
+      join(tmp, "grok.toml"),
+      '[lanes.g]\nharness = "grok"\nmodel = "grok-model"\neffort = "high"\n',
+    );
+    writeFileSync(join(tmp, "bin/grok"), "#!/bin/sh\n");
+    chmodSync(join(tmp, "bin/grok"), 0o755);
+    doRun("grok", "form", "g");
+    {
+      const formatOf = (prefix: string): string | undefined => {
+        const words = (out.split("\n").find((l) => l.startsWith(prefix)) ?? "").split(" ");
+        const at = words.indexOf("--output-format");
+        return at < 0 ? undefined : words[at + 1];
+      };
+      const launchFormat = formatOf("launch:");
+      const resumeFormat = formatOf("resume:");
+      check(
+        "a grok lane's launch and resume forms ask for streaming-json, a value grok lists",
+        rc === 0 &&
+          launchFormat === "streaming-json" &&
+          resumeFormat === "streaming-json" &&
+          GROK_OUTPUT_FORMATS.includes(launchFormat),
+        `rc=${rc} launch=${launchFormat} resume=${resumeFormat}`,
+      );
+    }
 
     console.log("skills");
     writeFileSync(
@@ -2982,6 +3009,11 @@ beforeAll(() => {
       '{"type":"system","subtype":"init","session_id":"a99db1c7-9178","model":"claude-haiku-4-5"}',
     );
     tid("grok: id on a session record", "fixture-grok", '{"type":"session","id":"fixture-grok"}');
+    tid(
+      "grok: sessionId on the closing end record of a streaming-json stream",
+      "fixture-grok-end",
+      '{"type":"text","data":"hi"}\n{"type":"end","stopReason":"end_turn","sessionId":"fixture-grok-end"}',
+    );
     tid("agy: conversationId", "fixture-agy", '{"conversationId":"fixture-agy"}');
     tid("pi: id on session", "sess-pi-1", '{"type":"session","id":"sess-pi-1"}');
     tid(
@@ -5355,6 +5387,11 @@ describe("the coachman on muse, a workhorse on mimo: both forms, each with its b
   test("an agy lane's form says it has no resume form, and still exits 0", () => {
     assertControl("an agy lane's form says it has no resume form, and still exits 0");
   });
+  test("a grok lane's launch and resume forms ask for streaming-json, a value grok lists", () => {
+    assertControl(
+      "a grok lane's launch and resume forms ask for streaming-json, a value grok lists",
+    );
+  });
 });
 
 describe("skills", () => {
@@ -5381,6 +5418,9 @@ describe("thread-id: the id a stream records, from its shape", () => {
   });
   test("grok: id on a session record", () => {
     assertControl("grok: id on a session record");
+  });
+  test("grok: sessionId on the closing end record of a streaming-json stream", () => {
+    assertControl("grok: sessionId on the closing end record of a streaming-json stream");
   });
   test("agy: conversationId", () => {
     assertControl("agy: conversationId");

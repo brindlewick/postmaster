@@ -56,7 +56,7 @@ served by these commands alone:
 - starting the watcher and keeping its wait (`<tool>/scripts/run host run`, `<tool>/scripts/run runs-watch`, `<tool>/scripts/run wait-for-markers`),
 - starting a helper (the harness form in `harnesses.md`, Helpers).
 
-On another harness there is no helper form: you run each brief's steps yourself, and this
+On another harness you run each brief's steps yourself, and this
 section's holds still stand — a hold is a hold whatever started the work. Where a harness
 has no helper form, its harness notes say so.
 
