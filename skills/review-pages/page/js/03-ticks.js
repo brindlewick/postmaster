@@ -1,6 +1,8 @@
-// Reviewed ticks: kept in this browser, and shared through the page's database when it is there.
-// A tick is keyed by the file's signature (its path and diff), so a file whose diff changed on a
-// new head loses its tick, and an unchanged file keeps it.
+// Reviewed ticks: kept in this browser, shared through the page's database when it is there, and kept
+// through the page bridge when the viewer around the page offers it (js/10-bridge.js). A tick is keyed
+// by the file's signature (its path and diff) in the browser and the database, and by its path and
+// the hash of what the page shows of it in the bridge, so a file whose diff changed on a new head
+// loses its tick, and an unchanged file keeps it.
 import { $, S, note, store } from "./01-core.js";
 import { reviewedFile } from "./02-data.js";
 import { paintComments, repaintCommentCounts } from "./04-diff.js";
@@ -8,6 +10,7 @@ import { updateTreeSummary } from "./05-tree.js";
 import { updateOrderCounts } from "./06-order.js";
 import { renderStart } from "./07-overview.js";
 import { updateFileBar } from "./09-nav.js";
+import { bridgeTick, paintSaveNotes } from "./10-bridge.js";
 
 const tickKey = () => `${S.key}-ticks-v1`;
 export function loadTicks() {
@@ -22,6 +25,7 @@ export function setReviewed(fi, on) {
   saveTicks();
   repaintTicks();
   writeTick(fi, on);
+  bridgeTick(fi, on);
 }
 
 function writeTick(fi, on) {
@@ -58,8 +62,9 @@ export async function connectDb() {
   } catch {
     d = null;
   }
-  if (!d) { S.dbOff = true; return; }
+  if (!d) { S.dbOff = true; paintSaveNotes(); return; }
   S.db = d;
+  paintSaveNotes();
   const bySig = new Map(S.files.map((f, fi) => [f.sig, fi]));
   let pushed = false;
   d.collection("reviewed").onSnapshot((snap) => {

@@ -34,6 +34,7 @@
           <p class="meta" id="ov-meta"></p>
         </header>
         <div class="card start" id="ov-start"></div>
+        <p class="savenote" data-scope="ticks" hidden></p>
         <div class="card prose" id="ov-body"></div>
         <div id="ov-rulings"></div>
         <details class="card ticketbox" id="ov-ticket"><summary>The ticket as signed off</summary><div class="prose" id="ov-ticket-body"></div></details>
@@ -53,6 +54,7 @@
           <button type="button" class="btn quiet" id="tree-collapse">Collapse all</button>
         </div>
         <p class="tree-sum" id="tree-sum"></p>
+        <p class="savenote" data-scope="ticks" hidden></p>
       </div>
       <ul class="tree" id="tree" role="tree" aria-label="Changed files"></ul>
       <p class="tree-empty" id="tree-empty" hidden>No file matches. Try fewer words.</p>
@@ -60,6 +62,7 @@
 
     <section class="screen" id="screen-order" aria-label="Review order" hidden>
       <p class="order-intro" id="order-intro">Files in the order worth reading them: the most important group first.</p>
+      <p class="savenote" data-scope="ticks" hidden></p>
       <div class="order" id="order-list"></div>
     </section>
 
@@ -67,6 +70,7 @@
       <p class="file-empty" id="file-empty">Choose a file in the tree to read its diff.</p>
       <article class="file-card" id="file-card" hidden>
         <div class="file-head" id="file-head"></div>
+        <p class="savenote" data-scope="ticks" hidden></p>
         <div class="code" id="file-code"></div>
         <div class="file-foot" id="file-foot">
           <button class="btn" type="button" id="done-next">Reviewed, next file</button>

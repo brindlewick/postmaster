@@ -6,6 +6,7 @@ import {
 } from "./01-core.js";
 import { fileKind, item, reviewedFile } from "./02-data.js";
 import { barOffset, openFile, scrollToEl } from "./09-nav.js";
+import { commentNote, paintSaveNotes, submitBridgeComment } from "./10-bridge.js";
 
 let drawn = -1;
 const SLICE = 400; // rows drawn at a time in a long diff
@@ -139,21 +140,23 @@ function watchBox(code) {
 // ---------- links to lines ----------
 function applyFlags(fi) {
   if (!S.flag || S.flag.fi !== fi) return;
-  for (let n = S.flag.from; n <= S.flag.to; n++) lineEl("new", n)?.classList.add("flag");
+  for (let n = S.flag.from; n <= S.flag.to; n++) lineEl(S.flag.side, n)?.classList.add("flag");
 }
 
-export async function gotoLines(path, from, to) {
+// Open a file at lines of one side of its diff (the new side unless said): a ruling's link, or a viewer
+// asking to show the lines of a comment.
+export async function gotoLines(path, from, to, side = "new") {
   const fi = S.files.findIndex((f) => f.path === path);
   if (fi < 0) return;
   for (const r of document.querySelectorAll("#file-code .r.flag")) r.classList.remove("flag");
-  S.flag = { fi, from, to };
+  S.flag = { fi, from, to, side };
   await openFile(fi, { tab: S.tab, seq: "order" });
-  let row = lineEl("new", from);
+  let row = lineEl(side, from);
   while (!row) {
     const more = document.querySelector("#file-code .more");
     if (!more) break;
     more.click();
-    row = lineEl("new", from);
+    row = lineEl(side, from);
   }
   if (!row) { note("That line is not in the diff."); return; }
   applyFlags(fi);
@@ -181,10 +184,12 @@ export function initComposer() {
   c.className = "composer";
   c.id = "composer";
   c.hidden = true;
-  c.innerHTML = '<label for="mtext" id="mclabel">Comment</label><textarea id="mtext" maxlength="3000" rows="3" placeholder="What should change here?"></textarea><p class="mhint" id="mhint">Tap another line to extend the comment to a range.</p><div class="mbtns"><button type="button" class="btn quiet" id="mcancel">Cancel</button><button type="submit" class="btn" id="msave">Save comment</button></div>';
+  c.innerHTML = '<label for="mtext" id="mclabel">Comment</label><textarea id="mtext" maxlength="3000" rows="3" placeholder="What should change here?"></textarea><p class="mhint" id="mhint">Tap another line to extend the comment to a range.</p><p class="savenote" data-scope="comments" hidden></p><div class="mbtns"><button type="button" class="btn quiet" id="mcancel">Cancel</button><button type="button" class="btn" id="msave">Save comment</button></div>';
   document.body.append(c);
   $("mcancel").addEventListener("click", () => { $("mtext").value = ""; clearSel(); });
-  c.addEventListener("submit", saveComment);
+  // A button that is clicked, not a form that is submitted: a frame sandboxed without allow-forms blocks a
+  // submission before the page can see it.
+  $("msave").addEventListener("click", saveComment);
   c.addEventListener("focusin", () => { setTimeout(keepComposerVisible, 60); setTimeout(keepComposerVisible, 400); });
   $("file-code").addEventListener("click", (ev) => {
     const r = ev.target.closest(".r");
@@ -214,9 +219,7 @@ function placeComposer() {
   c.hidden = false;
   const where = s.from === s.to ? `${s.side === "old" ? ", removed line " : ", line "}${s.from}` : `${s.side === "old" ? ", removed lines " : ", lines "}${s.from} to ${s.to}`;
   $("mclabel").textContent = `Comment on ${baseName(S.files[S.fi].path)}${where}`;
-  $("mhint").textContent = S.dbOff
-    ? "Saving is off in this view, so a comment would not be kept."
-    : "Tap another line to extend the comment to a range.";
+  paintSaveNotes();
   if (window.matchMedia("(pointer: fine)").matches) $("mtext").focus({ preventScroll: true });
   keepComposerVisible();
 }
@@ -246,13 +249,39 @@ export function keepComposerVisible() {
   if (Math.abs(dy) > 1) window.scrollBy(0, dy);
 }
 
+// Who wrote a comment, as the page names them: Claude for the session's replies; for a comment the viewer
+// keeps, the name it gives (or "Reader"); a comment of the reader's own that is not yet kept, or one from the
+// page's database, is "You".
+function whoWrote(x) {
+  if (x.by === "claude") return "Claude";
+  if (x.source === "bridge" && x.save === "kept") return x.by || "Reader";
+  return "You";
+}
+
+// The text of the lines a selection covers on its side of the diff, one line to a row, as the comment's quote.
+function selectedText(sel) {
+  const lines = [];
+  for (let n = sel.from; n <= sel.to; n++) {
+    const row = lineEl(sel.side, n);
+    if (row) lines.push(row.querySelector(".c").textContent);
+  }
+  return lines.join("\n");
+}
+
 async function saveComment(ev) {
   ev.preventDefault();
   const text = $("mtext").value.trim();
   const s = S.sel;
   if (!text || !s) return;
-  if (!S.db) { note("Saving is off in this view, so the comment was not kept."); return; }
   const f = S.files[S.fi];
+  if (!S.db) {
+    // No database: the viewer around the page keeps the comment through the page bridge, or, with no
+    // viewer, the page keeps it for this visit and says so. It shows at once either way.
+    submitBridgeComment({ path: f.path, side: s.side, from: s.from, to: s.to, quote: selectedText(s), text, at: new Date().toISOString() });
+    $("mtext").value = "";
+    clearSel();
+    return;
+  }
   const entry = { kind: "comment", page: "review", path: f.path, side: s.side, from: s.from, to: s.to, view: "changes", text, by: "user", at: new Date().toISOString() };
   $("msave").disabled = true;
   try {
@@ -278,9 +307,13 @@ export function paintComments() {
     if (!row) continue;
     const th = el("div", "thread");
     const add = (x) => {
-      const m = el("div", `cm${x.by === "claude" ? " claude" : ""}`);
-      m.append(el("span", "who", `${x.by === "claude" ? "Claude" : "You"} · ${c.from === c.to ? `line ${c.from}` : `lines ${c.from} to ${c.to}`} · ${hm(x.at)}`));
+      const m = el("div", `cm${x.by === "claude" ? " claude" : ""}${x.status === "closed" ? " closed" : ""}`);
+      const place = c.from === c.to ? `line ${c.from}` : `lines ${c.from} to ${c.to}`;
+      const said = commentNote(x);
+      m.append(el("span", "who", `${whoWrote(x)} · ${place} · ${hm(x.at)}${x.status === "closed" ? " · closed" : ""}${said === "Saving" ? " · saving" : ""}`));
       m.append(x.text);
+      if (x.source === "bridge") m.dataset.save = x.save;
+      if (said !== null && said !== "Saving") m.append(el("span", "cnote", said));
       th.append(m);
     };
     add(c);
@@ -291,7 +324,7 @@ export function paintComments() {
 
 export function repaintCommentCounts() {
   const counts = new Map();
-  for (const c of S.comments) if (!c.replyTo) counts.set(c.path, (counts.get(c.path) || 0) + 1);
+  for (const c of S.comments) if (!c.replyTo && c.status !== "closed") counts.set(c.path, (counts.get(c.path) || 0) + 1);
   for (const chip of document.querySelectorAll(".ccount[data-fi]")) {
     const n = counts.get(S.files[Number(chip.dataset.fi)].path) || 0;
     chip.hidden = n === 0;

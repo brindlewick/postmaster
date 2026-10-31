@@ -1,0 +1,11 @@
+/* The calm line that says ticks or comments are not kept: "Not saved". It is muted text that wraps like
+   any text, never a box and never a colour of alarm, and it sits where ticks and comments appear: under
+   the progress card, over the tree and the order, between the head of a file and its code, and in the
+   comment box. Beside a comment it says "Saving" while the comment is on its way, or why it is not saved. */
+.savenote { margin: 0; padding: 0 16px 6px; font-size: 13.5px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
+.ov > .savenote { padding: 0 4px 12px; }
+.tree-tools > .savenote { padding: 0; }
+.file-card > .savenote { padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.composer > .savenote { padding: 0; }
+.cm.closed { opacity: .7; border-left-color: var(--gutter); }
+.cm .cnote { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
