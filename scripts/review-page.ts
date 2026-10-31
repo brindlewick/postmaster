@@ -203,7 +203,17 @@ function buildFrom(out: string, args: string[], facts: Facts, extra: unknown[], 
         ? scrub(git(["show", `${facts.head}:${f.path}`], cwd))
         : null;
     removed += diff.removed + (text ? text.removed : 0);
-    return { change: f, diff: diff.text, text: text ? text.text : null };
+    // A binary file has no diff to show, so the id of its content at the head stands in for it.
+    const blob =
+      f.binary && f.status !== "D"
+        ? git(["rev-parse", `${facts.head}:${f.path}`], cwd).trim()
+        : undefined;
+    return {
+      change: f,
+      diff: diff.text,
+      text: text ? text.text : null,
+      ...(blob === undefined ? {} : { blob }),
+    };
   });
   const key = flag(args, "--key");
   const built = buildReviewData({
