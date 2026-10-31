@@ -2,7 +2,7 @@
 // folders come first, every folder row shows its file count and its added and deleted lines, and
 // a search box filters it. The open folders are remembered in this browser.
 import { matchWords, visibleRows } from "../../../../scripts/lib/review-tree.ts";
-import { $, MINUS, S, el, num, plural, softBreaks, store } from "./01-core.js";
+import { $, MINUS, S, el, label, num, plural, store } from "./01-core.js";
 import { fileKind, reviewedFile, statusClass } from "./02-data.js";
 import { reviewedCount } from "./03-ticks.js";
 import { repaintCommentCounts, tickButton } from "./04-diff.js";
@@ -40,10 +40,9 @@ function treeRow(row) {
     const lead = el("span", "tlead");
     lead.append(el("span", "tchev"));
     const files = S.query.trim() ? `${num(row.shown)} of ${plural(n.files, "file", "files")}` : plural(n.files, "file", "files");
-    const meta = el("span", "tmeta");
+    const meta = label("tmeta");
     meta.append(`${files} · `, el("span", "plus", `+${num(n.add)}`), " ", el("span", "minus", `${MINUS}${num(n.del)}`));
-    const name = el("span", "tname");
-    name.append(softBreaks(n.label));
+    const name = label("tname", n.label);
     go.append(lead, name, meta);
     li.append(go);
   } else {
@@ -63,8 +62,7 @@ function treeRow(row) {
     cc.dataset.fi = String(n.fi);
     cc.hidden = true;
     meta.append(" ", cc);
-    const name = el("span", "tname");
-    name.append(softBreaks(n.name));
+    const name = label("tname", n.name);
     go.append(lead, name, meta);
     go.setAttribute("aria-label", `${n.name}, ${fileKind(f)}`);
     li.append(go, tickButton(n.fi));

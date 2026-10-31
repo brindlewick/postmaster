@@ -15,15 +15,13 @@ export const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
 export const dirName = (p) => p.slice(0, p.lastIndexOf("/") + 1);
 export const KINDS = { A: "added", M: "modified", D: "deleted", R: "renamed" };
 
-// A path or file name as text with a soft break after each dot, dash, underscore and slash, so a
-// long name wraps at a separator and not in the middle of a word.
-export function softBreaks(text) {
-  const out = document.createDocumentFragment();
-  text.split(/([./_-])/).forEach((part, k) => {
-    if (part) out.append(part);
-    if (k % 2 === 1) out.append(document.createElement("wbr"));
-  });
-  return out;
+// A one-line label: a name, a path, a count. One wider than its place scrolls sideways on its own (the .ln
+// rule in css/10-tokens.css). Chrome makes every scroller a tab stop and a long change has hundreds of labels,
+// so each is kept out of the tab order.
+export function label(cls, text) {
+  const e = el("span", `${cls} ln`, text);
+  e.tabIndex = -1;
+  return e;
 }
 
 export function hm(iso) {

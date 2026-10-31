@@ -42,8 +42,17 @@ longest line, and fails on a sign column or a number column in front of the code
 starts more than 16 px from the left edge (of the window, or of its own box beside the tree), and on
 a line number that is not a faint layer behind the code: below it in stacking order, left aligned 6
 px in from the left edge of the row (within 2 px) and centered down the row, never taking a tap,
-between 0.15 and 0.5 alpha, and still 6 px in from the left edge of the box after the box is
+between 0.15 and 0.5 alpha, and still 6 px in from the left edge of its row after its group is
 scrolled sideways.
+
+Below 1200 px, the plain run excepted, the gate also serves the first file with a diff as a file of
+synthetic lines (a run of three wide lines, a short line that ends it, a single wide line, and a run that
+depends on the width) and fails unless the lines wider than the box are in groups that are exactly the runs of
+them, each a scroll container with no scrollbar that scrolls alone, with the comment box under a
+line of a run staying at its left edge and the groups made again when the window is unfolded or
+folded (`sideways`). On the file screen, the overview, the order and the tree it gives every
+one-line label a path's worth of text and fails unless each is wider than its place, on one row,
+scrolls alone with no scrollbar and leaves the page its width.
 
 Screenshots and `report.json` go to `--out` (default: a new temporary folder). `--quick` keeps 390
 px light and dark, 1199 px light, 1200 px light and the plain run, so both sides of the 1200 px

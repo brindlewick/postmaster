@@ -40,6 +40,10 @@ import {
   isAllowedHost,
   judge,
   KIT,
+  type GroupFacts,
+  type LabelsFacts,
+  type LineFacts,
+  type LinesFacts,
   loadPlaywright,
   matrix,
   MAX_CODE_OFFSET,
@@ -66,6 +70,8 @@ import {
   servedPath,
   shortReport,
   shotPath,
+  runsOf,
+  type SidewaysFacts,
   sidewaysVerdict,
   splitVerdict,
   startServer,
@@ -1270,21 +1276,183 @@ describe("verdicts on a phone", () => {
     expect(outside.detail).toContain("inside");
   });
 
-  test("sideways wants the page still and the code box scrollable where it overflows", () => {
-    const box = {
-      boxScrolls: true,
+  describe("sideways wants the lines wider than the box in groups, and the labels, scrolling alone", () => {
+    // The hunk header first, then S fits any box, M is wider than a phone's and fits a folded-out phone's, L is wider than any.
+    const KINDS = "L L S M L L L S L S M M L";
+    const WIDTH: Record<string, number> = { S: 100, M: 600, L: 1500 };
+    const open: GroupFacts = {
+      left: 0,
       overflowX: "auto",
-      scrollLeft: 200,
-      pageScrollWidth: 390,
-      innerWidth: 390,
+      bar: "none",
+      touch: "auto",
+      overscroll: "contain",
+      tab: "-1",
+      shade: "visible",
     };
-    expect(sidewaysVerdict(box).ok).toBe(true);
-    expect(
-      sidewaysVerdict({ ...box, boxScrolls: false, scrollLeft: 0, overflowX: "visible" }).ok,
-    ).toBe(true);
-    expect(sidewaysVerdict({ ...box, pageScrollWidth: 520 }).ok).toBe(false);
-    expect(sidewaysVerdict({ ...box, overflowX: "hidden" }).ok).toBe(false);
-    expect(sidewaysVerdict({ ...box, scrollLeft: 0 }).ok).toBe(false);
+    /** The lines of a file in a box `room` px wide, in the groups the page makes unless `groups` places them. */
+    const diff = (room: number, groups?: readonly number[]): LinesFacts => {
+      const lines = KINDS.split(" ").map((k, i) => ({
+        line: i === 0 ? "hunk" : String(i),
+        own: WIDTH[k] ?? 0,
+        group: -1,
+        num: i === 0 ? null : 8,
+      }));
+      const runs = runsOf(lines, room);
+      const placed = lines.map((l, i) => ({ ...l, group: groups?.[i] ?? runs[i] ?? -1 }));
+      const count = Math.max(-1, ...placed.map((l) => l.group)) + 1;
+      return {
+        room,
+        lines: placed,
+        groups: Array.from({ length: count }, () => open),
+        composer: null,
+        focus: true,
+        pageX: 0,
+        boxLeft: 0,
+        pageWidth: room,
+        innerWidth: room,
+      };
+    };
+    const at = (f: LinesFacts, group: number, left = 200): LinesFacts => ({
+      ...f,
+      groups: f.groups.map((g, k) => ({ ...g, left: k === group ? left : 0 })),
+    });
+    const rest = diff(390);
+    const good: SidewaysFacts = {
+      rest,
+      scrolled: [0, 1, 2, 3].map((group) => ({ group, after: at(rest, group) })),
+      comment: [
+        { ...rest, composer: 6 },
+        { ...at(rest, 1), composer: 6 },
+      ],
+      resized: diff(755),
+    };
+    const label = {
+      wide: true,
+      overflowX: "auto",
+      bar: "none",
+      nowrap: true,
+      tab: "-1",
+      left: 100,
+    };
+    const labelsOf = (labels: LabelsFacts["labels"], pageWidth = 390): LabelsFacts => ({
+      labels,
+      pageWidth,
+      innerWidth: 390,
+    });
+    const tree = (facts: LabelsFacts) => [{ screen: "tree", facts }];
+    const calm = tree(labelsOf([label, { ...label, left: 0 }]));
+    const place = (f: LinesFacts, line: number, over: Partial<LineFacts>): LinesFacts => ({
+      ...f,
+      lines: f.lines.map((l, i) => (i === line ? { ...l, ...over } : l)),
+    });
+    const group = (f: LinesFacts, k: number, over: Partial<GroupFacts>): LinesFacts => ({
+      ...f,
+      groups: f.groups.map((g, i) => (i === k ? { ...g, ...over } : g)),
+    });
+
+    test("groups that are the runs, scrolling alone, with the comment box pinned and made again at the other width pass", () => {
+      const v = sidewaysVerdict(good, calm);
+      expect(v.ok).toBe(true);
+      expect(v.detail).toContain("4 groups of 2, 4, 1, 3 lines");
+    });
+
+    test("each fault in the lines is named", () => {
+      const scrolled = (after: LinesFacts) => [{ group: 0, after }];
+      const cases: readonly (readonly [SidewaysFacts, string])[] = [
+        [{ ...good, rest: place(rest, 8, { group: -1 }) }, "the groups are not the runs"],
+        [{ ...good, rest: place(rest, 7, { group: 1 }) }, "the groups are not the runs"],
+        [{ ...good, rest: place(rest, 5, { group: 2 }) }, "the groups are not the runs"],
+        [{ ...good, rest: place(rest, 0, { group: -1 }) }, "the groups are not the runs"],
+        [{ ...good, rest: group(rest, 0, { overflowX: "visible" }) }, "not a scroll container"],
+        [{ ...good, rest: group(rest, 1, { bar: "auto" }) }, "not a scroll container"],
+        [{ ...good, rest: group(rest, 2, { touch: "pan-y" }) }, "not a scroll container"],
+        [{ ...good, rest: group(rest, 2, { touch: "pan-x" }) }, "not a scroll container"],
+        [{ ...good, rest: group(rest, 3, { overscroll: "auto" }) }, "not a scroll container"],
+        [{ ...good, rest: group(rest, 3, { tab: null }) }, "not a scroll container"],
+        [{ ...good, rest: { ...rest, pageWidth: 520 } }, "the page is 520px"],
+        [{ ...good, scrolled: scrolled(at(rest, 0, 0)) }, "did not scroll sideways"],
+        [
+          { ...good, scrolled: scrolled(group(at(rest, 0), 1, { left: 9 })) },
+          "moved another group",
+        ],
+        [
+          { ...good, scrolled: scrolled({ ...at(rest, 0), pageX: 5 }) },
+          "moved the page or the code box",
+        ],
+        [
+          { ...good, scrolled: scrolled(group(at(rest, 0), 0, { shade: "hidden" })) },
+          "shows no shade",
+        ],
+        [
+          {
+            ...good,
+            scrolled: scrolled({
+              ...at(rest, 0),
+              lines: rest.lines.map((l) =>
+                l.group === 0 && l.num !== null ? { ...l, num: l.num - 200 } : l,
+              ),
+            }),
+          },
+          "numbers of group 0 scrolled away",
+        ],
+        [
+          {
+            ...good,
+            comment: [
+              { ...rest, composer: 6 },
+              { ...at(rest, 1), composer: 0 },
+            ],
+          },
+          "does not stay at its left edge",
+        ],
+        [{ ...good, comment: [rest, rest] }, "comment box is not in its group"],
+        [{ ...good, resized: { ...diff(755), focus: false } }, "did not keep the focus"],
+        [
+          {
+            ...good,
+            resized: diff(
+              755,
+              rest.lines.map((l) => l.group),
+            ),
+          },
+          "after the window changed width",
+        ],
+        [{ ...good, resized: diff(390) }, "nothing was made again"],
+        [{ ...good, rest: { ...rest, lines: rest.lines.slice(0, 4) } }, "no run of three"],
+      ];
+      for (const [facts, fragment] of cases) {
+        const v = sidewaysVerdict(facts, calm);
+        expect([fragment, v.ok]).toEqual([fragment, false]);
+        expect([fragment, v.detail.includes(fragment), v.detail]).toEqual([
+          fragment,
+          true,
+          v.detail,
+        ]);
+      }
+    });
+
+    test("each fault in the labels is named", () => {
+      const cases: readonly (readonly [LabelsFacts, string])[] = [
+        [labelsOf([]), "no one-line label"],
+        [labelsOf([{ ...label, wide: false }]), "as wide as its text"],
+        [labelsOf([{ ...label, overflowX: "hidden" }]), "no scroll container"],
+        [labelsOf([{ ...label, bar: "auto" }]), "no scroll container"],
+        [labelsOf([{ ...label, nowrap: false }]), "no scroll container"],
+        [labelsOf([{ ...label, tab: null }]), "takes a tab stop"],
+        [labelsOf([label, { ...label, left: 5 }]), "did not move it alone"],
+        [labelsOf([{ ...label, left: 0 }]), "did not move it alone"],
+        [labelsOf([label], 520), "the page is 520px"],
+      ];
+      for (const [facts, fragment] of cases) {
+        const v = sidewaysVerdict(good, tree(facts));
+        expect([fragment, v.ok]).toEqual([fragment, false]);
+        expect([fragment, v.detail.includes("tree: "), v.detail.includes(fragment)]).toEqual([
+          fragment,
+          true,
+          true,
+        ]);
+      }
+    });
   });
 
   test("wrap flips with each tap, the wrapped lines fit their box, and the page never scrolls sideways", () => {
@@ -1305,6 +1473,7 @@ describe("verdicts on a phone", () => {
     expect(wrapVerdict(off, { ...on, pressed: "false" }, off).ok).toBe(false);
     // A second tap that does not bring the first state back.
     expect(wrapVerdict(off, on, on).ok).toBe(false);
+    expect(wrapVerdict(off, on, { ...off, boxScrolls: false }).ok).toBe(false);
     // Lines that are wrapped and still scroll in their box.
     const still = wrapVerdict(off, { ...on, boxScrolls: true }, off);
     expect(still.ok).toBe(false);
@@ -1978,7 +2147,7 @@ describe("the real gate", () => {
         };
         const clean = await measure("");
         expect(clean.detail).toContain("left aligned");
-        expect(clean.detail).toContain("pinned while the box scrolls sideways");
+        expect(clean.detail).toContain("pinned while a group scrolls sideways");
         expect(clean.ok).toBe(true);
         const faults: readonly (readonly [string, string])[] = [
           [".r .c { padding-left: 60px }", "at most 16px"],
