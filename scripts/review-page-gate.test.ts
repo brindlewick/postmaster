@@ -80,7 +80,11 @@ import {
   wrapSkeleton,
   wrapVerdict,
 } from "./review-page-gate.ts";
-import { constantHashes, withoutSaveNotes } from "./review-page-gate-bridge.ts";
+import {
+  constantHashes,
+  withoutComposerNote,
+  withoutSaveNotes,
+} from "./review-page-gate-bridge.ts";
 
 const HEAD =
   '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>';
@@ -2108,6 +2112,21 @@ describe("the real gate", () => {
             fragment: "never said Not saved",
           },
           {
+            id: "bridge-not-saved",
+            what: "a page that says Not saved before the viewer had time to answer",
+            page: (path, text) =>
+              path === "/index.html"
+                ? text.replace("READY_WAIT_MS = 1500", "READY_WAIT_MS = 300")
+                : text,
+            fragment: "before the wait for the viewer was over",
+          },
+          {
+            id: "bridge-not-saved",
+            what: "a page with no Not saved line in the comment box",
+            page: (path, text) => (path === "/index.html" ? withoutComposerNote(text) : text),
+            fragment: "no Not saved line for comments on the composer screen",
+          },
+          {
             id: "bridge-conflict",
             what: "a viewer that conflicts on every write",
             viewer: { conflicts: 100 },
@@ -2121,9 +2140,25 @@ describe("the real gate", () => {
           },
           {
             id: "bridge-comment",
-            what: "the viewer is slow to take a comment and the page waits for it",
+            what: "the viewer refuses a comment as too large",
             viewer: { fail: { "comment-create": "too_large" } },
             fragment: "never settled as kept",
+          },
+          {
+            id: "bridge-comment",
+            what: "a page that sends no quote with a line comment",
+            page: (path, text) =>
+              path === "/index.html" ? text.replace("quote: selectedText(s)", 'quote: ""') : text,
+            fragment: "the anchor quote is not the text of the line",
+          },
+          {
+            id: "bridge-focus",
+            what: "a page that marks the new side whatever side the viewer asks for",
+            page: (path, text) =>
+              path === "/index.html"
+                ? text.replace("lineEl(S.flag.side, n)", 'lineEl("new", n)')
+                : text,
+            fragment: "not the old side",
           },
           {
             id: "bridge-focus",
@@ -2139,6 +2174,15 @@ describe("the real gate", () => {
             what: "a viewer that answers a write after all",
             viewer: { drop: [] },
             fragment: "never said Not saved",
+          },
+          {
+            id: "bridge-unanswered",
+            what: "a page that gives up on a write after a second",
+            page: (path, text) =>
+              path === "/index.html"
+                ? text.replace("REQUEST_WAIT_MS = 5000", "REQUEST_WAIT_MS = 1000")
+                : text,
+            fragment: "before the 5 seconds were up",
           },
         ];
         for (const fault of faults) {

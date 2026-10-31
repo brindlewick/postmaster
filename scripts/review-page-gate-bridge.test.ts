@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { contentHash } from "./lib/review-model.ts";
 import {
+  allOf,
   bridgeTicksVerdict,
   commentVerdict,
   conflictVerdict,
@@ -13,8 +14,11 @@ import {
   newVersionOverrides,
   newVersionVerdict,
   notSavedVerdict,
+  protocolProblems,
   unansweredVerdict,
+  withoutComposerNote,
   withoutSaveNotes,
+  withProtocol,
 } from "./review-page-gate-bridge.ts";
 
 const HASH_A = "a".repeat(64);
@@ -101,43 +105,77 @@ describe("a new version of the page", () => {
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("count is 4");
   });
+
+  test("a review with one file to tick only has the changed file to judge", () => {
+    expect(newVersionVerdict({ changed: 3, kept: null, ticked: [], count: 0 }).ok).toBe(true);
+    const kept = newVersionVerdict({ changed: 3, kept: null, ticked: [3], count: 1 });
+    expect(kept.ok).toBe(false);
+    expect(kept.detail).toContain("file 3 kept its tick although its diff changed");
+  });
 });
 
 describe("no viewer answers", () => {
   const note = [{ scope: "ticks", text: "Not saved. Ticks may be lost when you close this page." }];
+  const comment = [
+    { scope: "comments", text: "Not saved. Comments are lost when you close this page." },
+  ];
+  const screens = [
+    { name: "overview", scope: "ticks", notes: note },
+    { name: "tree", scope: "ticks", notes: note },
+    { name: "file", scope: "ticks", notes: note },
+    { name: "composer", scope: "comments", notes: comment },
+  ];
+  const good = { early: [], late: note, screens, ticked: true, sent: 0 };
 
-  test("nothing is said while the page still waits, then Not saved, and a tick still works", () => {
-    const v = notSavedVerdict({ early: [], late: note, ticked: true, written: 0 });
+  test("nothing is said while the page still waits, then Not saved on every screen, and a tick still works", () => {
+    const v = notSavedVerdict(good);
     expect(v.ok).toBe(true);
+    expect(v.detail).toContain("composer");
   });
 
   test("a line shown before the 1.5 seconds are up is named", () => {
-    const v = notSavedVerdict({ early: note, late: note, ticked: true, written: 0 });
+    const v = notSavedVerdict({ ...good, early: note });
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("before the wait for the viewer was over");
   });
 
   test("no line at all after the wait is named", () => {
-    const v = notSavedVerdict({ early: [], late: [], ticked: true, written: 0 });
+    const v = notSavedVerdict({ ...good, late: [] });
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("never said Not saved");
   });
 
   test("a line that does not say Not saved is named", () => {
-    const v = notSavedVerdict({
-      early: [],
-      late: [{ scope: "ticks", text: "Saving" }],
-      ticked: true,
-      written: 0,
-    });
+    const v = notSavedVerdict({ ...good, late: [{ scope: "ticks", text: "Saving" }] });
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("never said Not saved");
   });
 
+  test("a screen with no line, or a line about the wrong thing, is named with its screen", () => {
+    const missing = notSavedVerdict({
+      ...good,
+      screens: [...screens.slice(0, 3), { name: "composer", scope: "comments", notes: [] }],
+    });
+    expect(missing.ok).toBe(false);
+    expect(missing.detail).toContain("no Not saved line for comments on the composer screen");
+    const wrong = notSavedVerdict({
+      ...good,
+      screens: [{ name: "composer", scope: "comments", notes: note }],
+    });
+    expect(wrong.ok).toBe(false);
+    expect(wrong.detail).toContain("no Not saved line for comments on the composer screen");
+  });
+
   test("a tick that does not work for the visit is named", () => {
-    const v = notSavedVerdict({ early: [], late: note, ticked: false, written: 0 });
+    const v = notSavedVerdict({ ...good, ticked: false });
     expect(v.ok).toBe(false);
     expect(v.detail).toContain("tick did not work");
+  });
+
+  test("anything sent to a viewer that never said ready is named", () => {
+    const v = notSavedVerdict({ ...good, sent: 2 });
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("sent 2 messages");
   });
 
   test("a request unanswered for 5 seconds counts as unavailable: nothing before, Not saved after", () => {
@@ -205,7 +243,7 @@ describe("a conflict", () => {
 });
 
 describe("a comment", () => {
-  const row = { path: "src/a.ts", side: "new", line: 12, text: "  const x = 1;" };
+  const row = { path: "src/a.ts", side: "new", line: 12, text: "  const x = 1;", blank: false };
   const good = {
     typed: "Why is this retried?",
     row,
@@ -271,9 +309,38 @@ describe("a comment", () => {
     expect(body.detail).toContain("body");
   });
 
-  test("a quote left out is allowed", () => {
+  test("a quote left out of a line that has text is named", () => {
     const { quote: _quote, ...bare } = good.stored[0]?.anchor ?? {};
-    expect(commentVerdict({ ...good, stored: [{ body: good.typed, anchor: bare }] }).ok).toBe(true);
+    const v = commentVerdict({ ...good, stored: [{ body: good.typed, anchor: bare }] });
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("quote");
+  });
+
+  test("a blank line has no quote, and a space for it is named", () => {
+    const blank = { ...row, text: " ", blank: true };
+    const { quote: _quote, ...bare } = good.stored[0]?.anchor ?? {};
+    expect(
+      commentVerdict({ ...good, row: blank, stored: [{ body: good.typed, anchor: bare }] }).ok,
+    ).toBe(true);
+    const spaced = commentVerdict({
+      ...good,
+      row: blank,
+      stored: [{ body: good.typed, anchor: { ...bare, quote: " " } }],
+    });
+    expect(spaced.ok).toBe(false);
+    expect(spaced.detail).toContain("quote");
+  });
+
+  test("the quote of a line over 2000 characters is the line cut at 2000", () => {
+    const long = { ...row, text: "x".repeat(2500) };
+    const anchor = { ...good.stored[0]?.anchor, quote: "x".repeat(2000) };
+    expect(commentVerdict({ ...good, row: long, stored: [{ body: good.typed, anchor }] }).ok).toBe(
+      true,
+    );
+    const whole = { ...anchor, quote: "x".repeat(2500) };
+    expect(
+      commentVerdict({ ...good, row: long, stored: [{ body: good.typed, anchor: whole }] }).ok,
+    ).toBe(false);
   });
 
   test("a comment that never settles as kept is named", () => {
@@ -425,5 +492,89 @@ describe("making a new version of the page", () => {
     const html = "<style>a{}</style><div></div>";
     expect(withoutSaveNotes(html)).toContain(".savenote{display:none!important}");
     expect(withoutSaveNotes(html).startsWith(html)).toBe(true);
+  });
+});
+
+describe("what the stand-in refused or ignored", () => {
+  const log = (...entries: [string, string | null, string][]) =>
+    entries.map(([type, id, outcome], k) => ({ at: 1000 + k, type, id, outcome }));
+  const clean = log(
+    ["bridge-hello", null, "bridge-ready"],
+    ["state-get", "r1", "state"],
+    ["comments-get", "r2", "comments"],
+    ["state-set", "r3", "state"],
+    ["comment-create", "r4", "comment"],
+  );
+
+  test("a visit with every message accepted has nothing to name", () => {
+    expect(protocolProblems(clean, { conflict: false })).toEqual([]);
+  });
+
+  test("a message that was ignored, or refused as bad, unsupported or too large, is named with its id", () => {
+    const problems = protocolProblems(
+      log(
+        ["state-set", "r1", "ignored"],
+        ["state-set", "r2", "error:bad_message"],
+        ["comments-get", "r3", "error:unsupported"],
+        ["comment-create", "r4", "error:too_large"],
+        ["state-set", "r5", "error:rate_limited"],
+        ["state-get", "r6", "error:unavailable"],
+      ),
+      { conflict: false },
+    );
+    expect(problems).toHaveLength(6);
+    expect(problems[0]).toContain("state-set r1");
+    expect(problems.join(" ")).toContain("ignored");
+    expect(problems.join(" ")).toContain("error:bad_message");
+  });
+
+  test("a message the stand-in was told to drop is not a refusal", () => {
+    expect(protocolProblems(log(["bridge-hello", null, "dropped"]), { conflict: false })).toEqual(
+      [],
+    );
+  });
+
+  test("a conflict is a refusal only where none was asked for", () => {
+    const conflict = log(["state-set", "r1", "error:conflict"], ["state-set", "r2", "state"]);
+    expect(protocolProblems(conflict, { conflict: true })).toEqual([]);
+    expect(protocolProblems(conflict, { conflict: false })).toHaveLength(1);
+  });
+
+  test("a verdict that passed fails when the log holds a refusal, and says both", () => {
+    const passed = { ok: true, detail: "all fine" };
+    const problems = ["state-set r2: error:bad_message"];
+    const v = withProtocol(passed, problems);
+    expect(v.ok).toBe(false);
+    expect(v.detail).toContain("state-set r2");
+    expect(withProtocol(passed, [])).toEqual(passed);
+    const failed = withProtocol({ ok: false, detail: "no tick" }, problems);
+    expect(failed.ok).toBe(false);
+    expect(failed.detail).toContain("no tick");
+    expect(failed.detail).toContain("state-set r2");
+  });
+
+  test("verdicts combine: all must pass, and what failed is said", () => {
+    expect(
+      allOf([
+        { ok: true, detail: "a" },
+        { ok: true, detail: "b" },
+      ]),
+    ).toEqual({ ok: true, detail: "a; b" });
+    const v = allOf([
+      { ok: true, detail: "a" },
+      { ok: false, detail: "b broke" },
+    ]);
+    expect(v.ok).toBe(false);
+    expect(v.detail).toBe("b broke");
+    expect(allOf([]).ok).toBe(false);
+  });
+});
+
+describe("faults put into the page", () => {
+  test("a rule at the end of the page can hide the Not saved line of the comment box alone", () => {
+    const html = "<style>a{}</style><div></div>";
+    const hidden = withoutComposerNote(html);
+    expect(hidden.startsWith(html)).toBe(true);
+    expect(hidden).toContain(".composer .savenote{display:none!important}");
   });
 });

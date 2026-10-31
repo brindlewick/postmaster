@@ -561,6 +561,51 @@ describe("a write that is refused", () => {
     const sent = v.clock(T + 6000 + DEBOUNCE_MS);
     expect(sent[0]).toMatchObject({ type: "state-set", baseRev: 3, set: { [KEY_A]: true } });
   });
+
+  test("an error answer to the document request is not answered with another request: only the next tick asks again", () => {
+    for (const code of ["unavailable", "rate_limited", "bad_message", "too_large"] as const) {
+      const v = visit();
+      v.start(T);
+      v.ready(T + 10);
+      v.tick(T + 20, KEY_A);
+      expect([code, v.count("state-get")]).toEqual([code, 1]);
+      v.error(T + 30, idOf(v.last("state-get")), code);
+      expect([code, v.count("state-get")]).toEqual([code, 1]);
+      expect(v.clock(T + 60000)).toEqual([]);
+      expect([code, v.count("state-get")]).toEqual([code, 1]);
+      v.tick(T + 61000, KEY_B);
+      expect([code, v.count("state-get")]).toEqual([code, 2]);
+      v.error(T + 61010, idOf(v.last("state-get")), code);
+      expect([code, v.count("state-get")]).toEqual([code, 2]);
+      expect(v.clock(T + 120000)).toEqual([]);
+    }
+  });
+
+  test("ticks that wait on a document that never came do not ask for it again by themselves: that is the next tick's job", () => {
+    const v = visit();
+    v.start(T);
+    v.ready(T + 10);
+    v.tick(T + 20, KEY_A);
+    expect(v.count("state-get")).toBe(1);
+    // The request runs out of time with a tick waiting; the page falls back and stays quiet.
+    v.clock(T + 10 + REQUEST_WAIT_MS);
+    expect(ticksNote(v.session)).toBe(TICKS_NOTE);
+    expect(v.count("state-get")).toBe(1);
+    expect(sessionWake(v.session)).toBeNull();
+    expect(v.clock(T + 60000)).toEqual([]);
+    expect(v.count("state-get")).toBe(1);
+    // The reader ticks again: that is when it asks, once.
+    v.tick(T + 61000, KEY_B);
+    expect(v.count("state-get")).toBe(2);
+    v.state(T + 61100, idOf(v.last("state-get")), {}, 7);
+    const sent = v.clock(T + 61000 + DEBOUNCE_MS);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      type: "state-set",
+      baseRev: 7,
+      set: { [KEY_A]: true, [KEY_B]: true },
+    });
+  });
 });
 
 describe("comments", () => {
@@ -655,6 +700,22 @@ describe("comments", () => {
     });
     expect(list).toEqual([]);
     expect(v.session.book.entries.map((e) => e.id)).toEqual(["c1", "c2", "local-1"]);
+  });
+
+  test("a comment kept before an older list is answered is still in view when the list comes", () => {
+    const v = visit();
+    v.start(T);
+    v.clock(T + READY_WAIT_MS);
+    v.comment(T + 2000);
+    const sent = v.ready(T + 3000);
+    expect(sent.map((m) => m.type)).toEqual(["state-get", "comments-get", "comment-create"]);
+    const listId = idOf(sent[1] as PageMessage);
+    const createId = idOf(sent[2] as PageMessage);
+    // The viewer answers the comment first, and the list it asked for first after it.
+    v.viewer(T + 3050, { type: "comment", id: createId, comment: hostComment(41) });
+    v.viewer(T + 3080, { type: "comments", id: listId, list: [hostComment(1)], truncated: false });
+    expect(v.session.book.entries.map((e) => e.id)).toEqual(["c1", "c41"]);
+    expect(v.session.book.entries.map((e) => e.save)).toEqual(["kept", "kept"]);
   });
 
   test("a list that never comes leaves the comments Not saved, but a comment can still be written", () => {

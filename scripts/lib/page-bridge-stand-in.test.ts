@@ -127,6 +127,18 @@ describe("the checks on a request", () => {
     }
   });
 
+  test("a request id used twice in one visit is bad_message, and a new visit may use it again", () => {
+    const p = ready();
+    expect(p.reply({ ...env, type: "state-get", id: "r1" })).toMatchObject({ type: "state" });
+    expect(p.reply({ ...env, type: "state-get", id: "r1" })).toMatchObject({
+      code: "bad_message",
+      id: "r1",
+    });
+    expect(p.reply({ ...env, type: "state-get", id: "r2" })).toMatchObject({ type: "state" });
+    p.hello();
+    expect(p.reply({ ...env, type: "state-get", id: "r1" })).toMatchObject({ type: "state" });
+  });
+
   test("an unknown type and a wrong version are bad_message, with the id when there is one", () => {
     const p = ready();
     expect(p.reply({ ...env, type: "teapot", id: "r1" })).toMatchObject({

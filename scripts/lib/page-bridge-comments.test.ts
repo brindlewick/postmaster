@@ -61,6 +61,7 @@ describe("a comment the viewer keeps", () => {
       quote: "retry()",
       sendAt: 0,
       tries: 0,
+      mine: false,
     });
   });
 
@@ -95,6 +96,7 @@ describe("a comment the reader writes", () => {
       line: null,
       sendAt: 5000,
       tries: 0,
+      mine: true,
     });
   });
 
@@ -125,6 +127,12 @@ describe("a comment the reader writes", () => {
     const kept = bookKept(bookSending(book, id), id, hostComment(41));
     expect(ids(kept)).toEqual(["c41"]);
     expect(kept.entries[0]).toMatchObject({ save: "kept", by: "reviewer", line: null });
+  });
+
+  test("a comment the reader wrote stays the reader's own once the viewer keeps it", () => {
+    const { book, id } = draftComment(EMPTY_BOOK, draft(), 1);
+    const kept = bookKept(bookSending(book, id), id, hostComment(41));
+    expect(kept.entries[0]?.mine).toBe(true);
   });
 
   test("if the list already holds the comment the viewer kept, it is not shown twice", () => {
@@ -177,6 +185,16 @@ describe("the list the viewer answers with", () => {
     expect(ids(second)).toEqual(["c2", "c3"]);
     expect(second.entries[0]?.status).toBe("closed");
     expect(ids(bookLoaded(second, []))).toEqual([]);
+  });
+
+  test("a comment the reader wrote and the viewer kept in this visit is not dropped by a list that does not hold it", () => {
+    const { book, id } = draftComment(EMPTY_BOOK, draft(), 1);
+    const kept = bookKept(bookSending(book, id), id, hostComment(41));
+    // The list was asked for before the comment was made, and answered after.
+    const loaded = bookLoaded(kept, [hostComment(1)]);
+    expect(ids(loaded)).toEqual(["c1", "c41"]);
+    // A later list that does hold it shows it once.
+    expect(ids(bookLoaded(kept, [hostComment(1), hostComment(41)]))).toEqual(["c1", "c41"]);
   });
 
   test("the reader's own comments that the viewer has not kept stay after it", () => {
