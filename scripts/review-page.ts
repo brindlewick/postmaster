@@ -1,5 +1,5 @@
-// Build the data a review page or a code viewer page shows, for a session to publish as a
-// private artifact. skills/review-pages/SKILL.md says how a page is published and how its
+// Build the data a review page or a code viewer page shows, for a session to publish with
+// `scripts/run pages publish`. skills/review-pages/SKILL.md says how a page is published and how its
 // comments are read and answered; docs/review-page.md says what the page is, and
 // docs/review-page/improve-it.md how it is made and improved.
 //
@@ -11,7 +11,7 @@
 //
 // options:  --layout <file>      a layout config (JSON) merged over the default one
 //           --purposes <file>    a JSON object of file path to one-line purpose
-//           --page-title <name>  the page's name, which is the artifact's title (default Code Review)
+//           --page-title <name>  the page's name, which is its title on the host (default Code Review)
 //           --key <name>         prefix of what the page keeps in the reader's browser (default review-page)
 //
 // change: diffs the head against its merge base with the base, as GitHub does, and writes
