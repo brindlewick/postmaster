@@ -6,7 +6,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   appendFileSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -16,12 +15,33 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { dataBlock, withData } from "./lib/page-text.ts";
 import { run } from "./lib/proc.ts";
+import { chunkBlockId, readBlock, reviewBlockId } from "./lib/review-source.ts";
 import { layoutFrom, lineCount, packChunks, parseChanges, titled } from "./review-page.ts";
 
 const script = join(import.meta.dir, "review-page.ts");
 const GOLDEN = join(import.meta.dir, "fixtures", "review-page");
 const UPDATE = process.env.REVIEW_PAGE_GOLDEN === "update";
+
+/** A document over built HTML: the text of the block with an id, as a browser gives it. */
+function documentOf(html: string) {
+  return {
+    getElementById(id: string) {
+      const open = `<script type="application/json" id="${id}">`;
+      const at = html.indexOf(open);
+      if (at < 0) return null;
+      const from = at + open.length;
+      return { textContent: html.slice(from, html.indexOf("</script>", from)) };
+    },
+  };
+}
+
+/** The chunk files of a built folder, in chunk order. */
+function chunkFiles(dir: string): unknown[] {
+  const names = readdirSync(join(dir, "chunks"));
+  return names.map((_n, k) => JSON.parse(readFileSync(join(dir, "chunks", `${k}.json`), "utf8")));
+}
 
 describe("pure core", () => {
   test("lines are counted as an editor numbers them", () => {
@@ -158,6 +178,36 @@ describe("the script: change", () => {
     expect(gone.purpose).toBe("Deleted file, 1 line removed.");
   });
 
+  test("publish.html is the page with its data inside it, for a host that stores one file", () => {
+    const out = join(repo, ".out-publish");
+    const r = build(out);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(join(out, "publish.html"));
+    const index = readFileSync(join(out, "index.html"), "utf8");
+    const single = readFileSync(join(out, "publish.html"), "utf8");
+    const review = JSON.parse(readFileSync(join(out, "review.json"), "utf8"));
+    const chunks = chunkFiles(out);
+    expect(chunks.length).toBeGreaterThan(0);
+    // The blocks hold what the data files hold, read the way the page reads them.
+    const doc = documentOf(single);
+    expect(readBlock(doc, reviewBlockId())).toEqual(review);
+    chunks.forEach((items, k) => expect(readBlock(doc, chunkBlockId(k))).toEqual(items));
+    expect(readBlock(doc, chunkBlockId(chunks.length))).toBeNull();
+    // Nothing else differs: with the blocks put into index.html, it is publish.html, byte for byte.
+    const blocks = [
+      dataBlock(reviewBlockId(), review),
+      ...chunks.map((items, k) => dataBlock(chunkBlockId(k), items)),
+    ];
+    expect(withData(index, blocks)).toBe(single);
+    // The page checked in a browser is index.html, which holds no data of its own.
+    expect(index).not.toContain('type="application/json"');
+    expect(single).toContain("<title>Code Review</title>");
+    expect(single).not.toMatch(/@@(TITLE|CSS|SCRIPT)@@/u);
+    // The one file carries the address-free text the data files carry.
+    expect(single).toContain("<address removed>");
+    expect(single).not.toContain("som" + "eon" + "e@c" + "omp" + "any" + ".co");
+  });
+
   test("the page name, the storage key, a layout and a purposes file are taken from the options", () => {
     const out = join(repo, ".out-options");
     const layoutFile = join(repo, "layout.json");
@@ -230,7 +280,7 @@ describe("the script: change", () => {
     const b = join(repo, ".out-same-b");
     expect(build(a).code).toBe(0);
     expect(build(b).code).toBe(0);
-    for (const f of ["index.html", "review.json", "chunks/0.json"]) {
+    for (const f of ["index.html", "publish.html", "review.json", "chunks/0.json"]) {
       expect(readFileSync(join(a, f), "utf8")).toBe(readFileSync(join(b, f), "utf8"));
     }
   });
@@ -308,18 +358,67 @@ describe("the script: change, on a new head", () => {
 });
 
 describe("the script: files", () => {
-  test("each path as it stands at the ref, with its own file", () => {
+  test("each path as it stands at the ref, in one file that needs nothing beside it", () => {
     const out = join(repo, ".out-files");
     const r = run("bun", [script, "files", out, head, "keep.txt", "src/new.ts"], { cwd: repo });
     expect(r.code).toBe(0);
-    const data = JSON.parse(readFileSync(join(out, "files.json"), "utf8"));
-    expect(data.files.map((f: { path: string; lines: number }) => [f.path, f.lines])).toEqual([
-      ["keep.txt", 4],
-      ["src/new.ts", 2],
+    expect(readdirSync(out)).toEqual(["index.html"]);
+    expect(r.out).toContain(`page to publish: ${join(out, "index.html")}`);
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    const data = readBlock(documentOf(html), "files-data") as {
+      title: string;
+      ref: string;
+      files: { id: string; path: string; lang: string; lines: number; text: string }[];
+    };
+    expect(data.ref).toBe(head);
+    expect(data.title).toBe(`2 files at ${head.slice(0, 7)}`);
+    expect(data.files.map((f) => [f.id, f.path, f.lines])).toEqual([
+      ["f0", "keep.txt", 4],
+      ["f1", "src/new.ts", 2],
     ]);
-    expect(readFileSync(join(out, "files", "0.txt"), "utf8")).toBe("one\n2\nthree\nfour\n");
-    expect(readFileSync(join(out, "files", "1.txt"), "utf8")).toContain("<address removed>");
-    expect(existsSync(join(out, "index.html"))).toBe(true);
+    expect(data.files[0]?.text).toBe("one\n2\nthree\nfour\n");
+    expect(data.files[1]?.text).toContain("<address removed>");
+    expect(html).not.toContain("som" + "eon" + "e@c" + "omp" + "any" + ".co");
+    expect(html).not.toContain("<!-- page data -->");
+    expect(html).toContain("<title>Code</title>");
+    // the page reads its files from the block, fetches nothing, and reaches the window only for
+    // highlight.js and the hash change
+    expect(html).not.toMatch(/fetch\(/u);
+    const windowUses = [...html.matchAll(/window\.([A-Za-z]+)/gu)].map((m) => m[1]).sort();
+    expect(windowUses).toEqual(["addEventListener", "hljs"]);
+  });
+
+  test("the viewer's own script parses, and the page loads only highlight.js and the fonts", () => {
+    const out = join(repo, ".out-files-script");
+    expect(run("bun", [script, "files", out, head, "keep.txt"], { cwd: repo }).code).toBe(0);
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    const scripts = [...html.matchAll(/<script>\n([^]*?)\n<\/script>/gu)].map((m) => m[1] ?? "");
+    expect(scripts.length).toBe(1);
+    expect(() => new Function(scripts[0] ?? "")).not.toThrow();
+    const loads = (html.match(/(?:src|href)="(https?:[^"]+)"/gu) ?? []).map((l) =>
+      l.slice(l.indexOf('"') + 1, -1),
+    );
+    for (const url of loads) {
+      expect(
+        /^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)(\/|$)/u.test(url) ||
+          url === "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js",
+      ).toBe(true);
+    }
+  });
+
+  test("text that would close a script tag stays text", () => {
+    const tricky = join(repo, "tricky.html");
+    writeFileSync(tricky, "<p>x</p>\n<" + "/script><script>alert(1)</" + "script>\n");
+    const g = (...a: string[]) => run("git", ["-C", repo, ...a]);
+    g("add", "tricky.html");
+    g("commit", "-q", "-m", "tricky");
+    const sha = g("rev-parse", "HEAD").out.trim();
+    const out = join(repo, ".out-files-tricky");
+    expect(run("bun", [script, "files", out, sha, "tricky.html"], { cwd: repo }).code).toBe(0);
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    const data = readBlock(documentOf(html), "files-data") as { files: { text: string }[] };
+    expect(data.files[0]?.text).toBe(readFileSync(tricky, "utf8"));
+    expect(html.split("<script>alert(1)").length).toBe(1);
   });
 
   test("usage and an unknown ref exit 1", () => {
@@ -386,6 +485,7 @@ describe("the script: demo", () => {
   test("two builds, from two sample repositories in two folders, are byte for byte the same", () => {
     const names = [
       "index.html",
+      "publish.html",
       "review.json",
       ...readdirSync(join(outA, "chunks")).map((n) => `chunks/${n}`),
     ];
