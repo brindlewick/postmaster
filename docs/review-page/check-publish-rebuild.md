@@ -56,7 +56,8 @@ box stays at the left edge of its group and its text field leaves a sideways swi
 groups are made again when the window is unfolded or folded and when the fonts change. On the file
 screen, the overview, the order, the tree and the file list it gives every one-line label a path's worth
 of text and fails unless each is wider than its place, on one row with a fade, scrolls alone with no
-scrollbar, lies over no control and leaves the page its width. A diff of more lines than the page draws
+scrollbar, lies over no control and leaves the page its width; a tap on a name in the order list still
+opens the file. A diff of more lines than the page draws
 at a time gets its Show more button pressed (`show-more`): the button is part of no group and the group
 keeps where it was scrolled.
 

@@ -33,7 +33,8 @@ Three tabs and a file screen.
   opens the next. Lines wider than the screen scroll sideways with no scrollbar, a run of
   consecutive ones together as a group and a single one alone; a line that fits ends a run, but the
   first two below it stay in the group, pinned at the left, so that a finger can sit under the
-  text, and the page never moves sideways. Wrap, in the file's head, folds long lines instead. A row
+  text, and the page never moves sideways. Wrap, in the file's head, folds long lines instead; it is
+  also the way for a keyboard reader, since a group and a label take no tab stop. A row
   is the code and nothing in front of it, so the code starts 8 px from the edge of the screen: there
   is no sign column and no number column. Added and removed lines are told apart by their colour and a 3 px
   edge in a stronger colour at the left of the row, and each line's number is a faint layer behind

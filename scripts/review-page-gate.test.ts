@@ -1536,10 +1536,17 @@ describe("verdicts on a phone", () => {
       pressed: "false",
       wrapped: false,
       boxScrolls: true,
+      overflows: true,
       pageScrollWidth: 390,
       innerWidth: 390,
     };
-    const on: WrapState = { ...off, pressed: "true", wrapped: true, boxScrolls: false };
+    const on: WrapState = {
+      ...off,
+      pressed: "true",
+      wrapped: true,
+      boxScrolls: false,
+      overflows: false,
+    };
     expect(wrapVerdict(off, on, off).ok).toBe(true);
     // A page that starts with the lines wrapped is as good: the taps flip it the other way first.
     expect(wrapVerdict(on, off, on).ok).toBe(true);
@@ -1554,6 +1561,8 @@ describe("verdicts on a phone", () => {
     const still = wrapVerdict(off, { ...on, boxScrolls: true }, off);
     expect(still.ok).toBe(false);
     expect(still.detail).toContain("still scroll");
+    // Lines that are wrapped and still go past their box, with no group to scroll them.
+    expect(wrapVerdict(off, { ...on, overflows: true }, off).ok).toBe(false);
     // The page wider than the window in any of the three states.
     const wide = wrapVerdict(off, { ...on, pageScrollWidth: 520 }, off);
     expect(wide.ok).toBe(false);

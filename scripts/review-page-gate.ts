@@ -1380,8 +1380,10 @@ export interface WrapState {
   pressed: string | null;
   /** The rows carry the class that wraps long lines. */
   wrapped: boolean;
-  /** Some line is wider than the box (so it scrolls sideways in a group), or a group is there. */
+  /** A group of lines is there to scroll sideways. */
   boxScrolls: boolean;
+  /** Some line is wider than the box: it scrolls in a group, or its text is cut off. */
+  overflows: boolean;
   pageScrollWidth: number;
   innerWidth: number;
 }
@@ -1405,7 +1407,7 @@ export function wrapVerdict(first: WrapState, tapped: WrapState, again: WrapStat
     ...(states.every((s) => s.pressed === String(s.wrapped))
       ? []
       : ["the button says one thing and the lines show another"]),
-    ...(states.some((s) => s.wrapped && s.boxScrolls)
+    ...(states.some((s) => s.wrapped && (s.boxScrolls || s.overflows))
       ? ["wrapped lines still scroll sideways in their box"]
       : []),
     ...states
@@ -2021,7 +2023,8 @@ window.__gate = (() => {
     const rows = $("#file-code .rows");
     return { pressed: b ? b.getAttribute("aria-pressed") : null,
       wrapped: !!(rows && rows.classList.contains("wrap")),
-      boxScrolls: !!rows && (all(".grp", rows).length > 0 || all(".c", rows).some((c) => c.offsetWidth > rows.clientWidth + 1)),
+      boxScrolls: all("#file-code .grp").length > 0,
+      overflows: !!rows && all(".c", rows).some((c) => c.offsetWidth > rows.clientWidth + 1),
       pageScrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
       innerWidth: vw() };
   };
@@ -2752,6 +2755,11 @@ async function checkSideways(ctx: Ctx): Promise<Verdict> {
           await until(page, "window.__gate.find().opened", "the file list");
         }
         screens.push({ screen: tab, facts: await gate<LabelsFacts>(page, "labels") });
+        if (tab === "order" && single) {
+          // A tap on a name does what its row does: it opens the file.
+          await tap(page, "#order-list .fname.ln");
+          await until(page, "window.__gate.screens().file", "the file, opened from a name");
+        }
         if (tab === "tree" && cdp !== null)
           name = await swipeUp(page, cdp, "#tree .trow.file .tname.ln");
       }
