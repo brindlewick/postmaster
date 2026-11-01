@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { CUTOFF_CAUSE } from "./lib/lane-cutoff.ts";
 import { toolRoot } from "./lib/paths.ts";
 import {
   buildPrompt,
@@ -135,6 +136,22 @@ describe("finalMessage", () => {
       result: "said",
     });
     expect(finalMessage("claude", `${ok}\n`, null)).toEqual({ message: "said" });
+  });
+
+  test("a lane carrying the cut-off marker gives no answer, whatever its last message says", () => {
+    const ok = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Review under way.",
+    });
+    expect(finalMessage("claude", `${ok}\n`, null, true)).toEqual({ error: CUTOFF_CAUSE });
+    expect(finalMessage("codex", "", "said\n", true)).toEqual({ error: CUTOFF_CAUSE });
+    // The same stream without the marker is answered, so the refusal is the marker's alone.
+    expect(finalMessage("claude", `${ok}\n`, null, false)).toEqual({
+      message: "Review under way.",
+    });
+    expect(finalMessage("claude", `${ok}\n`, null)).toEqual({ message: "Review under way." });
   });
 
   test("codex trusts -o only with a completed turn and no failed one", () => {

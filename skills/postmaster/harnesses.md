@@ -289,6 +289,30 @@ keeps one per name, and muse lists it once.
 - Resume takes the recorded session id with the same flags; `launch form <lane>` prints it.
 - Ambient context: reads `CLAUDE.md` in the repo and the files it imports. A project that keeps
   its context in `AGENTS.md` needs a `CLAUDE.md` pointing at it; a symlink works.
+- **A lane's helpers.** A lane or reviewer may start helpers to finish sooner. Headless, the
+  harness stops a run's background helpers 10 minutes after its last turn and drops what they
+  were doing, so a lane that started helpers and ended its turn returned a status line where its
+  work should be. Such a run still ends with exit 0, `is_error` false and `terminal_reason`
+  `completed`, so the exit status says nothing. `run launch` starts every lane and reviewer with
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (milliseconds; the default is 600000, 0 waits for the
+  helpers; on 2.1.314 a 660 second helper was stopped about 600 seconds after the last turn by
+  default and stayed up with 0), set with `env` in front of the command after the lane's env file
+  has loaded, so `launch form` shows it and the file cannot lower it. The round's time limit
+  still ends a lane that runs long. No role carries it: not the coachman, its fallback, the clerk
+  or the postmaster.
+- **A shell a helper leaves running is cut whatever the setting.** On 2.1.314 a background shell
+  a helper started and left running when it finished was stopped about 5 seconds after the lane's
+  last result, with the setting at its default and at 20000, and no result counts it:
+  `subagent_stats.killed.system` stays 0 and nothing reaches stderr. So as a lane or reviewer
+  inside a run ends, `run launch` reads its stream for work the harness stopped while it ran: a
+  `result` record whose `subagent_stats.killed.system` is above 0, a `task_notification`
+  reporting a stopped `local_agent` task, or a `task_notification` reporting any task stopped
+  after the last `result` record (a stop before it is the lane's own). When it finds any it
+  writes `<stream>.cutoff` beside the stream (`.cutoff` in place of `.jsonl`); a launch that ends
+  whole removes the marker an earlier one left. A review round records a reviewer carrying the
+  marker as `degrade <lens> r<round>: cut off with helpers still running`, and the surveyor
+  gives no answer for one. Only this harness's streams are read; no stream recorded here shows
+  what another harness's cut-off end looks like.
 - As the coachman's own harness: background tasks are reaped at about 29 minutes, and a long
   lane routinely outlives that. A launch through `<tool>/scripts/run host` is not one of its background
   tasks: it runs in a host's pane, or detached in a session of its own, and outlives the call

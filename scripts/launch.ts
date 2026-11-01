@@ -41,6 +41,17 @@
 //   exit 3  skill or review: the lane's harness has no such review form recorded
 //   else    the harness's own exit code
 //
+// A Claude lane or reviewer (any name in [lanes], never a role) is launched with
+// CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0, placed in front of the command with env as the muse
+// and mimo forms carry XDG_DATA_HOME, so it shows in `form`. Headless Claude Code stops a
+// lane's background helpers 10 minutes after the lane's last turn and drops their results; 0
+// waits for them, and the round's time limit ends a lane that runs long. A shell a helper left
+// running is swept after the lane's last result whatever the wait. As a lane or reviewer inside
+// a run ends, its stream is read for helpers, or what they left running, that the harness
+// stopped while they ran (lib/lane-cutoff.ts), and `<stream>.cutoff` is written beside it when
+// it shows any, so the round and the surveyor can tell a cut-off lane from a finished one.
+// Claude streams only.
+//
 // POSTMASTER_ATTEMPT_PHASE names the file this attempt's phase is written to:
 // `refused` before a launch or resume runs its preflight, `started` once the env
 // file has loaded and the harness is still callable. Only launch and resume ever
@@ -73,6 +84,7 @@ import {
 import { startCheck, wrapCommand } from "./lib/confine.ts";
 import { scriptsDir, toolRoot } from "./lib/paths.ts";
 import { GUARD_SHIM_NAMES, ensureGuardBin } from "./lib/guardbin.ts";
+import { recordCutoff } from "./lib/lane-cutoff.ts";
 
 export { GUARD_SHIM_NAMES, ensureGuardBin };
 import { mkstempSync, run, signalExitCode } from "./lib/proc.ts";
@@ -81,6 +93,27 @@ import { parseWallReset } from "./lib/wall.ts";
 
 const CONFIG = globalConfigPath();
 const LEGS = ["synthesis", "review", "ship"] as const;
+
+// The names that are roles, not lanes: a lane is any other name in [lanes]. A role is never
+// confined, never armed with the install guard, and never handed the lane-only settings below.
+const ROLE_NAMES: ReadonlySet<string> = new Set([
+  "coachman",
+  "coachman_fallback",
+  "postmaster",
+  "clerk",
+]);
+
+export function isLaneName(name: string): boolean {
+  return !ROLE_NAMES.has(name);
+}
+
+// What a Claude lane or reviewer is launched with. The harness stops a headless run's background
+// helpers 10 minutes after its last turn (600000 ms by default) and drops what they were doing,
+// so a lane that starts helpers and ends its turn returns a status line where its review should
+// be. 0 waits for them as long as they run; the round's time limit still ends a lane that runs
+// long. Set by env in front of the harness, after any env file has loaded, so a lane's env file
+// cannot lower it again.
+const LANE_HELPER_WAIT = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0";
 
 // The harness top review level, named when the lane's config names no effort. Without a named
 // level claude's `/code-review` reuses whatever level an interactive session last used, which
@@ -423,6 +456,7 @@ function buildForms(
     }
     case "claude": {
       const text = isReview ? `/code-review ${reviewEffort} ${base}...HEAD` : promptText;
+      if (isLaneName(name)) cmd.push("env", LANE_HELPER_WAIT);
       if (isResume) cmd.push("claude", "-p", "--resume", thread, text);
       else cmd.push("claude", "-p", text);
       // A review's text is already literal; only a launch or resume splices the file after the cd.
@@ -1314,6 +1348,34 @@ function recordWallIfAny(o: {
   return false;
 }
 
+/**
+ * Leave the lane's cut-off marker beside its stream (lib/lane-cutoff.ts): written when the harness
+ * stopped helpers the lane still had running as it ended, removed when this launch ended whole,
+ * left alone for a harness that is not read. True when a marker the stream calls for could not
+ * be written: the launch fails closed on that, so a cut-off lane never reads as a clean end.
+ */
+function recordCutoffIfAny(o: {
+  streamPath: string;
+  offset: number;
+  harness: string;
+  stopped: boolean;
+}): boolean {
+  if (o.stopped) return false; // stopped mid-run is not a cut-off at exit
+  try {
+    recordCutoff({
+      stream: o.streamPath,
+      harness: o.harness,
+      tail: readStreamTail(o.streamPath, o.offset),
+    });
+    return false;
+  } catch (e) {
+    console.error(
+      `launch: the cut-off marker for ${basename(o.streamPath)} was not written: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return true;
+  }
+}
+
 function readRegularFile(path: string, missing: string): string {
   let st;
   try {
@@ -1546,11 +1608,7 @@ if (import.meta.main) {
   // form shows the wrapped command whenever one applies; it runs no start
   // check. launch, resume and review start the confinement with a no-op, and
   // run the lane unconfined with a warning when it cannot start.
-  const isLane =
-    NAME !== "coachman" &&
-    NAME !== "coachman_fallback" &&
-    NAME !== "postmaster" &&
-    NAME !== "clerk";
+  const isLane = isLaneName(NAME);
   const showWrap = spec.confine && isLane;
   let confineWrap = false;
   if (spec.confine && isLane && CMD !== "skill" && CMD !== "form") {
@@ -2120,7 +2178,9 @@ exit "$rc"
     // Before anything else the wall is read and recorded: run host lands the marker when
     // this process exits, so the line has to be in actions.jsonl by then.
     let wallLost = false;
+    let cutoffLost = false;
     if (launchRole === "lane" || launchRole === "reviewer") {
+      const stopped = child.signal !== null && child.signal !== undefined;
       wallLost = recordWallIfAny({
         dispatch: RUN,
         streamPath: stream,
@@ -2129,12 +2189,19 @@ exit "$rc"
         lane: NAME,
         role: launchRole,
         cwd: CWD,
-        stopped: child.signal !== null && child.signal !== undefined,
+        stopped,
         launchedAt,
       });
+      // As the lane ends, the helpers the harness stopped on it are marked beside its stream.
+      cutoffLost = recordCutoffIfAny({
+        streamPath: stream,
+        offset: streamStart,
+        harness: HARNESS,
+        stopped,
+      });
     }
-    // A detected wall that could not be recorded must not read as a clean end.
-    if (wallLost && rc === 0) rc = 1;
+    // A detected wall or cut-off that could not be recorded must not read as a clean end.
+    if ((wallLost || cutoffLost) && rc === 0) rc = 1;
     const r = run(join(scriptsDir(import.meta), "run"), [
       "export-session",
       RUN,
