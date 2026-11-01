@@ -1,18 +1,16 @@
 /* The file screen: the file's head, its unified diff, and the comment box that opens under a tapped
-   line. A line of the diff, a hunk header too, that is wider than the code box scrolls sideways with no
-   scrollbar, a run of consecutive ones together as a group and a single one alone; a line that fits ends
-   a run, but the first two below it stay in the group as .tail, pinned at its left edge, so that a finger
-   can sit under the text. js/04-groups.js wraps each run in one scroll container, .grp, and makes the runs
-   again when the width, Wrap or the fonts change; the code box and the page never scroll. A row is the
-   code and nothing in front of it, so the code starts a few pixels from the edge of the screen: no sign
-   column and no number column. The colour of a row says added or removed, with a thin edge in a stronger
-   colour at the left. The row's line number is faint, left aligned a few pixels in from the left edge of
-   the row, on a layer behind the code, and stays at the left edge of its group as the group scrolls. A
-   group that goes on past an edge of the screen has a faint shade there: every row of it holds a sticky
-   layer at each edge, and the script shows the layers of an edge with more of the group behind it. A
-   comment under a line of a group, and the comment box, stay in the group, pinned 6px in from its left
-   edge. The tree's status badge has the class r as a row has, so every rule for a row starts at .rows or
-   .grp. */
+   line. A line of the diff, a hunk header too, wider than the code box scrolls sideways with no scrollbar,
+   a run of consecutive ones together as a group and a single one alone; a line that fits ends a run, but
+   the first two below it stay in the group as .tail, pinned at its left edge, so that a finger can sit
+   under the text. js/04-groups.js wraps each run in one scroll container, .grp, and makes the runs again
+   when the width, Wrap or the fonts change; the code box and the page never scroll. A row is the code and
+   nothing in front of it: no sign column and no number column. The colour of a row says added or removed,
+   with a thin edge in a stronger colour at the left. The row's line number is a faint layer behind the
+   code, left aligned a few pixels in, that stays at the left edge of its group. A group that goes on past
+   an edge has a faint shade there: every row of it holds a sticky layer at each edge, shown by the script
+   where the group has more behind it. A comment under a line of a group, and the comment box, stay in the
+   group, pinned 6px in from its left edge. The tree's status badge has the class r as a row has, so every
+   rule for a row starts at .rows or .grp. */
 .file-empty { margin: 0; padding: 32px 16px; text-align: center; color: var(--muted); font-size: 15px; }
 .file-card { background: var(--panel); border-block: 1px solid var(--rule); }
 .file-head { display: flex; align-items: flex-start; padding: 2px 4px 8px 2px; border-bottom: 1px solid var(--rule); }
