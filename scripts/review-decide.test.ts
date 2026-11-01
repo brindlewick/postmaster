@@ -523,7 +523,7 @@ describe("controls for the unbounded loop", () => {
     const text = readFileSync(COACHMAN, "utf8");
     const start = text.indexOf("5. **Run the review loop");
     expect(start >= 0).toBe(true);
-    const end = text.indexOf("6. **One review checkpoint card", start);
+    const end = text.indexOf("6. **The Greptile step", start);
     expect(end > start).toBe(true);
     const step = text.slice(start, end);
     expect(step.includes("`RUN`")).toBe(true);

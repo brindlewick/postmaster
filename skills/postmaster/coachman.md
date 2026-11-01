@@ -69,7 +69,10 @@ round), and `review-harvest` likewise with the thread id added; `finding` per ve
 lane that found it, verified by execution or reading); `apply` per fix (target its commit,
 detail the findings it fixes, as whitespace-separated bare finding targets);
 `degrade` per lane per lens per round it did not review at full strength (detail the
-lens, the round and the cause, quoted); `escalate` when a ruling is needed; `gate` per gate run
+lens, the round and the cause, quoted); the Greptile step's own `review-launch`,
+`review-finish`, `review-harvest` and `degrade` lines, for lane and lens `greptile`, which
+`<tool>/scripts/run greptile-step` writes and you never write by hand, and the user's word on
+that step, a `rule` line for target `greptile` (Stage 2, step 6); `escalate` when a ruling is needed; `gate` per gate run
 with its exit; `verify` per check per commit it runs on, written by `<tool>/scripts/run verify run`
 and never by hand; `ticket-state` and `ticket-comment` per tracker write; `merge` on the merge;
 `teardown` per worktree removed; `handoff-accept` as a leg's first action and `handoff` as its
@@ -172,7 +175,7 @@ knew survives except what it wrote down. The boundaries are the run's own gates:
 | leg | name | covers | ends with |
 |---|---|---|---|
 | 1 | `synthesis` | stage 0, the premise check, stage 1, checkpoint 1; the ship card (stage 3) when no review leg runs | `handoff-1.md` |
-| 2 | `review` | stage 2: the waybill's review turnpikes as lenses in one loop, every round to clean; then the ship card (stage 3) | `handoff-2.md` |
+| 2 | `review` | stage 2: the waybill's review turnpikes as lenses in one loop, every round to clean, then Greptile's one review of the final change where the waybill names it; then the ship card (stage 3) | `handoff-2.md` |
 | 3 | `ship` | legacy contract only, stage 3 and stage 4: gates, preview, QA, the card, the merge on the word, the style sort, teardown | `handoff-3.md` |
 
 The review leg runs only when the waybill names a turnpike that runs in it. Under contract 2,
@@ -937,7 +940,10 @@ output. Each round runs every lens still open, on one snapshot, every lane the w
 that lens as its own process in its own scratch: every lens in round 1, then the gating lenses
 alone from round 2 (the style and design lenses run in round 1 only). A lens's lanes are its own `<lens> reviewers:` line in the waybill where it
 has one, and the `reviewers:` line otherwise; `<tool>/scripts/run reviewers lanes <dispatch>/brief.md
-<lens>` prints them.
+<lens>` prints them. Greptile, where the waybill names it, is no lens of the loop: it has no brief,
+no lane and no round of the loop, every call below leaves it out, and it reviews the run's final
+change once, after the loop, in its own step (step 6). A review leg whose only turnpike is
+`greptile` has no loop: set the stage, then go to step 6.
 [Why the lenses run as one loop](../../wiki/concepts/review-loop.md)
 
 Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
@@ -1017,6 +1023,11 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
      review skill where it has one and the lens's brief where it has none, so the lens never
      loses a lane (the security lens's launch, below).
      [Why a lane may review through its harness's own skill](../../wiki/concepts/own-review-skills.md)
+   - Greptile (its own step, once, after the loop): an outside review service reads the run's
+     final change by the project's own Greptile rules and reports what it finds. It has no brief,
+     no prompt and no lane, and no round of the loop launches it. Launch: by the Greptile step
+     (step 6), through its adapter, which knows Greptile's command, flags, report and exit codes so
+     that this runbook never names them (`harnesses.md`, greptile).
 
    **A launch from a brief** has two parts. Its preparation, once per round and before any
    reviewer starts, writes the lens's prompt file verbatim — `Read <abs>/review-<lens>-brief.md
@@ -1342,7 +1353,68 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    whatever the severity. Three instances of one thing is a design signal: the fix is to remove
    the capability that lets a caller get it wrong, not to patch the fourth site. Name the class
    in the escalation and say which sites each round closed.
-6. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
+6. **The Greptile step, once, where the waybill names `greptile` and the loop has ended.** The loop
+   has ended when `review-decide` printed `STOP`, or printed `RULING` and the user's word ended it.
+   Greptile reviews the run's final change once, by the project's own Greptile rules, and you fix
+   nothing and start no round on its findings: the user decides what happens next. A review leg that
+   does not list `greptile` has no such step, and goes to step 7. Run it with every change
+   committed in the synthesis worktree:
+
+   ```sh
+   <tool>/scripts/run greptile-step run <dispatch> <repo> <synthesis-wt>
+   ```
+
+   It cuts a clone on a branch at the head, starts the adapter through the host as a reviewer is
+   started, waits for it for the round's time limit (`review.round_timeout_seconds`), and logs the
+   step as a round of its own, `greptile round <N>`, one more than the highest round any review
+   has had. Use that `<N>` for every line you log about the step. The first word it prints is the
+   verdict; act on it, not on the exit:
+
+   - `PASSED`: Greptile reported no finding. Go on to step 7.
+   - `MISSED`: Greptile did not finish a review. A sign-in, credit or setup fault, a time limit
+     that ran out, and a file Greptile left out unexpectedly (one that looks like a secret, or one
+     it says it could not review) each count: only a file the project's own ignore rules hold back,
+     and a binary file, do not. The step has logged a `degrade` line that quotes Greptile's words,
+     written `ESCALATION.md` and made the escalation ready. Retry nothing, write no ship card, and
+     end the leg here, without `leg-end`; the user's word arrives as a resume.
+   - `FAILED`: Greptile reported findings, one or more, of any severity; any one fails the review.
+     `ESCALATION.md` holds each with Greptile's severity, file and line and Greptile's words, and
+     a line `Coachman's assessment: pending` under each; `logs/greptile-r<N>-findings.json` holds
+     them in the finding record. Check each finding against the code as step 3 does a bug finding,
+     and put your assessment in its place on that line: whether it holds, its grade, P1, P2 or
+     P3, and why. Where the project's own Greptile rules say when a finding does not apply, such as
+     a deviation that a comment at the line justifies, follow them, as the style lens does for a
+     written rule with such a comment. Your assessment is shown beside the finding and clears
+     none: a finding that does not hold still fails the review. Log each finding as step 3 does,
+     as a `finding` line whose detail opens `<gating|style> <P1|P2|P3> r<N>` and names greptile,
+     and a defect a lens of the loop also raised as a `finding-also` line on its target, naming
+     greptile. Then run `<tool>/scripts/run greptile-step escalate <dispatch>`: it refuses while an
+     assessment is pending, then makes the escalation ready. Fix nothing, and end the leg here,
+     without `leg-end`.
+
+   The user's word arrives as a resume. Log it first, one `rule` line for target `greptile` for
+   each word the answer holds, the word that asks for another review last:
+   `<tool>/scripts/run log-action <dispatch> coachman rule greptile "<word> <the user's words>"`.
+   The words are `fix`, `rule-out` and `go-on`, which settle a review that reported findings or was
+   missed, and `try-again` and `review-again`, which ask for another review. Then:
+
+   - Fix: apply the fixes the user names and no others, each saved with the fix step (step 4)
+     naming the finding's target, and run the gate again before the card (Stage 3, step 1). Each
+     is `applied on user word, not re-reviewed` in the checkpoint and listed under `## Not
+     re-reviewed` on the card.
+   - Rule out: each finding the user rules out is `dismissed: <the user's reason>`.
+   - Go on: the findings stay `open`, and the card lists them. After a `MISSED` review the card is
+     written without a Greptile review, and its line for Greptile says so.
+   - Try again, after a miss, or review again: run the step again. It runs only after one of these
+     two words; run again without one, it reports the result it has. A word that asks for another
+     round of the model reviewers runs one as the loop does, numbered one more than the step's, and
+     decides it as step 5 does. A new Greptile review is a new step, and a new round number.
+
+   The step passes the gate before the ship card (Stage 3) when it reported no finding, or when the
+   user's word has settled it. `<tool>/scripts/run review-decide <dispatch> <N>` reads the step's own
+   lines for its round and prints `STOP` after a review with no finding and a `RULING` after a miss
+   or any finding; the step has escalated already, so a ruling there asks for nothing more.
+7. **One review checkpoint card.** Per lens: the findings and their overlap, across lanes and
    with the other lenses, verified versus dismissed, applied, and the rounds it ran, with each
    finding as one bullet `- [<severity>] <id>: <state>`, the id `<lens>-<n>` numbered in the
    order verified, the state one of `open`, `closed round <r>`, `dismissed: <reason>`, or
@@ -1350,7 +1422,10 @@ Set the stage first, `<tool>/scripts/run stage <dispatch> review`, then:
    a finding-shaped line in any other shape — numbered, bare, or a `+` bullet — is
    refused, to be rewritten as a `-` bullet;
    for style, how many findings go to the ship card's Style residue, as
-   `<tool>/scripts/run style-findings count <dispatch>` prints it. The card says which round
+   `<tool>/scripts/run style-findings count <dispatch>` prints it. Where the Greptile step ran,
+   each of its findings is a bullet too, `- [<severity>] greptile-<n>: <state>`, the severity your
+   grade and `<n>` the finding's number in `ESCALATION.md`, and the checkpoint carries the line
+   `<tool>/scripts/run greptile-step card-line <dispatch>` prints. The card says which round
    ended the loop and why, as `<tool>/scripts/run review-decide` printed it, and lists the P3
    findings the loop carried to the ship card's open findings, with each one's lens and the
    round that found it. Then the gate status and the checks from the final round's
@@ -1379,6 +1454,13 @@ exit 0 before this stage runs. On exit 1, run `<tool>/scripts/run walls escalate
 and exit the leg without `card.md`, as at the Stage 1 harvest: the ruling arrives as a resume
 of this thread, `open` exits 0, and this stage starts from the top. A walled reviewer's
 `<tool>/scripts/run walls show <dispatch>` line goes on the card with the lane outcomes.
+
+**No card while the Greptile step has neither passed nor been ruled on.**
+`<tool>/scripts/run greptile-step gate <dispatch>` must exit 0 before this stage runs, beside the
+wall check. It exits 1 while the waybill names greptile and no step has run, or the latest one
+missed, reported findings or has no result, and the user's word has not settled it; the line it
+prints says which. On exit 1 run the step (Stage 2, step 6) or wait for the user's word, and write
+no card.
 
 Set the stage first: `<tool>/scripts/run stage <dispatch> shipping`.
 
@@ -1432,7 +1514,8 @@ degrade, never a pass: the card says so.
 
 1. **Verify the final HEAD.** Run `<tool>/scripts/run verify run <synthesis-wt> <dispatch>` after
    the last code change; the gate must
-   pass before the card is ready. No P1 or P2 finding may remain open.
+   pass before the card is ready. No P1 or P2 finding may remain open, except a finding of the
+   Greptile step that the user's word to go on left open, which the card lists.
    If the private-data check fails, fix each finding in the synthesis worktree, record its
    resolution and rerun the gate; do not ask the user to repair an ordinary finding. A finding
    that survives only in an earlier commit goes to the user, as one in a pushed commit does,
@@ -1488,7 +1571,9 @@ again.
    copy into the run's record for the postmaster's keep, so after any verifier change re-run
    it and re-paste; browser suite and QA when
    present; the journey report path where a check's source names `web-journey`; every ticket
-   turnpike with its rounds and result from its checkpoint record, or `none`; the Style residue
+   turnpike with its rounds and result from its checkpoint record, or `none`, and for greptile
+   the line `<tool>/scripts/run greptile-step card-line <dispatch>` prints, whole, which names
+   the changed files the project's own ignore rules held back; the Style residue
    count as `<tool>/scripts/run style-findings count <dispatch>` prints it, then every Style
    residue from `<tool>/scripts/run style-findings list <dispatch>`; every branch created by the
    run and its state; lane outcomes — none in single-thread mode, which has no lanes; in synthesis
