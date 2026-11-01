@@ -10,7 +10,7 @@
 //   scripts/run story-change check <repo> <story-dir>
 //
 // build reads <story-dir>/story.json and the files it names, and writes <out-dir>/index.html (the
-// page to publish as an Artifact), <out-dir>/preview-light.html and <out-dir>/preview-dark.html
+// page to publish), <out-dir>/preview-light.html and <out-dir>/preview-dark.html
 // (the page in a local skeleton, for the render check) and prints the coverage on one line. check
 // runs every test build runs and writes nothing, so a story file can be corrected without building.
 // Both name every problem they find, not only the first. Every text the page shows has its email
@@ -22,6 +22,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { inSkeleton } from "./lib/page-skeleton.ts";
 import { langOf, scrub } from "./lib/page-text.ts";
 
 type Range = [number, number];
@@ -946,7 +947,7 @@ const skeleton = (theme: string): string =>
   `<!doctype html><html lang="en"${theme ? ` data-theme="${theme}"` : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0;font:14px system-ui;background:#fafafa}img{max-width:100%}[hidden]{display:none!important}</style></head><body>\n${page}</body></html>\n`;
 if (mode === "build") {
   mkdirSync(outDir!, { recursive: true });
-  writeFileSync(join(outDir!, "index.html"), page);
+  writeFileSync(join(outDir!, "index.html"), inSkeleton(page));
   writeFileSync(join(outDir!, "preview-light.html"), skeleton("light"));
   writeFileSync(join(outDir!, "preview-dark.html"), skeleton("dark"));
 }

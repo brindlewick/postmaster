@@ -12,9 +12,11 @@ scripts/run review-page change <dir> --base <base> --head <full sha> --summary <
 
 Run it from the repository the change belongs to. `<dir>` is a new folder in the session's
 scratchpad. The command reads git (and `gh` for `--pr` and `--ticket`) and writes `index.html`,
-`review.json` and `chunks/<k>.json` into `<dir>`. It prints one line: files, groups, lines, chunks,
-addresses removed, how many file purposes came from the heuristics, how many files are withheld. It
-exits 1, naming the text, when the layout does not parse or a ruling's link finds no line.
+`review.json` and `chunks/<k>.json` into `<dir>`, and `publish.html` beside them: the same page with
+that data inside it and in a complete document, the one file to publish. It prints one line: files, groups, lines, chunks,
+addresses removed, how many file purposes came from the heuristics, how many files are withheld, and
+then the path of `publish.html`. It exits 1, naming the text, when the layout does not parse or a
+ruling's link finds no line.
 
 | input | what it is |
 |---|---|
@@ -25,7 +27,7 @@ exits 1, naming the text, when the layout does not parse or a ruling's link find
 | `--summary <file>` | Markdown shown on the Overview. See below. |
 | `--layout <file>` | a layout config merged over the default one. See below. |
 | `--purposes <file>` | a JSON object of file path to one-line purpose, merged into the layout's purposes. |
-| `--page-title <name>` | the page's `<title>`, which is the Artifact's name: two to four words, a name and not a caption. Default `Code Review`. |
+| `--page-title <name>` | the page's `<title>`, which is its name on the host: two to four words, a name and not a caption. Default `Code Review`. |
 | `--key <name>` | prefix of what the page keeps in the reader's browser. Keep it the same across rebuilds of one review so ticks and open folders survive. Default `review-page`. |
 
 An email address outside the reserved example domains becomes `<address removed>` in every diff and

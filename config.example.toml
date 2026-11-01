@@ -141,6 +141,19 @@ channel = "none"
 # channel = "telegram"
 # env_file = "~/.postmaster/telegram.env"
 
+# Where the review page, the code viewer, the story pages and the experiments page are published,
+# and where the comments on them are read: three commands of the page host this person uses
+# (docs/pages-contract.md). Each is split on whitespace, its {placeholders} are put in, and it is
+# run without a shell. The tool runs these and nothing else: with no publish command the pages are
+# still built, and `scripts/run pages publish` says nothing was published. A project's own
+# settings.toml may set any key here for that project alone; the shared project.toml may not.
+# [pages]
+# publish  = "host-cli publish {file} --slug {slug}"
+# comments = "host-cli comments {slug} --all --json"
+# close    = "host-cli close {id}"
+# bridge   = "page-bridge-v1"   # the host's viewer answers the page bridge (docs/page-bridge.md)
+# state    = true               # and keeps a page's ticks between visits; true only with a bridge
+
 [review]
 # Seconds a review round may run; a run keeps the value recorded in its run.json at dispatch.
 # A reviewer still running at the limit is stopped and recorded DEGRADED, with timeout as the

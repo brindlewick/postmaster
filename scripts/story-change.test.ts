@@ -173,6 +173,9 @@ describe("story-change build", () => {
         expect(existsSync(join(f.out, name))).toBe(true);
       const page = readFileSync(join(f.out, "index.html"), "utf8");
       expect(page).toContain("<title>TEST-1 change story</title>");
+      // a complete document, for a host that stores the file as it is
+      expect(page.startsWith("<!doctype html>")).toBe(true);
+      expect(page).toContain("<meta name=viewport");
       expect(page).toContain("Two gets bigger");
       expect(page).toContain('data-state="a"');
       expect(page).toContain("5 of 8 lines are shown; 3 are listed.");

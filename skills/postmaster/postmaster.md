@@ -738,17 +738,18 @@ Write your report to `<runs>/postmaster/helper-d-experiments-<rand>.md`, rand si
 This brief reads only: no hold. When an experiment is due, tell the user once: its question,
 its levels, what was measured.
 The user decides whether it concludes or gets a new date, and only on their word brief a
-helper to conclude or move it and write the change to the page at once, as the Experiments
-section says:
+helper to conclude or move it and republish the page at once, as the Experiments section
+says:
 
 ```helper
 Helper brief `d-experiments-act` for project `<repo>`: conclude or move an experiment.
 Read the brief contract under `Helpers` in `<tool>/skills/postmaster/postmaster.md` first.
 Run `<tool>/scripts/run experiments conclude --project <repo> <id> --result <r> --evidence
 <addr>` or `<tool>/scripts/run experiments move --project <repo> <id> --look <date>` with the
-words the postmaster hands you, then print the rows with `experiments push-docs` and write
-them to the page's store with ArtifactData at once, so the page is current whenever it is
-opened. Report what changed.
+words the postmaster hands you, then build the page with `<tool>/scripts/run experiments page
+--project <repo>` and publish it with `<tool>/scripts/run pages publish <path> --slug <slug>
+--project <repo>`, the path and slug it printed, as `<tool>/skills/experiments/SKILL.md` says, so
+the page is current whenever it is opened. Report what changed, and the page's title and link.
 Write your report to `<runs>/postmaster/helper-d-experiments-act-<rand>.md`, rand six hex digits you pick fresh, before you end, and end as the brief contract says.
 ```
 
@@ -1107,26 +1108,28 @@ date to look. Decisions made once and studies of past runs stay off the page: it
 waits on a result.
 
 **Start one when the user asks to try a flow change as an experiment.** Settle what it
-compares and when to look, then brief a helper to start it and write the change to the page
-at once:
+compares and when to look, then brief a helper to start it and republish the page at once:
 
 ```helper
 Helper brief `x-start` for project `<repo>`: start an experiment.
 Read the brief contract under `Helpers` in `<tool>/skills/postmaster/postmaster.md` first.
 Run `<tool>/scripts/run experiments start --project <repo> --question <q> --level <a> --level
-<b> --measure <m> --look <date>` with the words the postmaster hands you, then print the rows
-with `experiments push-docs` and write them to the page's store with ArtifactData at once, so
-the page is current whenever it is opened. Report what started.
+<b> --measure <m> --look <date>` with the words the postmaster hands you, then build the page
+with `<tool>/scripts/run experiments page --project <repo>` and publish it with
+`<tool>/scripts/run pages publish <path> --slug <slug> --project <repo>`, the path and slug it
+printed, as `<tool>/skills/experiments/SKILL.md` says, so the page is current whenever it is
+opened. Report what started, and the page's title and link.
 Write your report to `<runs>/postmaster/helper-x-start-<rand>.md`, rand six hex digits you pick fresh, before you end, and end as the brief contract says.
 ```
 
 This brief is work on no run: no hold.
 
-**Conclude one on the user's verdict** through the `d-experiments-act` brief, which writes
-the change to the page at once. Each project has its own page
-(`skills/experiments/SKILL.md`): private, read on the phone, what is due first. Publish it
-once; the briefs keep it current after each change. When an experiment falls due, Stage D
-says what happens.
+**Conclude one on the user's verdict** through the `d-experiments-act` brief, which
+republishes the page at once. Each project has its own page (`skills/experiments/SKILL.md`):
+one slug, read on the phone, what is due first. Every change republishes it to that slug, so
+its link always shows the newest rows. With no publish command in the person's `[pages]`
+settings the page is built and not published, and the brief says so. When an experiment falls
+due, Stage D says what happens.
 
 ## Spec review: older runs only
 
