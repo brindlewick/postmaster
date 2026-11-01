@@ -71,8 +71,8 @@ import { countdown, sleepMs } from "./wait-for-markers.ts";
 import { lostWallFor, wallFor } from "./walls.ts";
 
 const HERE = scriptsDir(import.meta);
-const DEFAULT_LIMIT = 3600;
-const MAX_LIMIT = 86400;
+export const DEFAULT_LIMIT = 3600;
+export const MAX_LIMIT = 86400;
 const USAGE =
   "usage: run review-round start <dispatch> <round> [<lens>:<lane>...] | cut|launch <dispatch> <round> <repo> <synthesis-wt>" +
   " | harvest <dispatch> <round> <repo> [<lens>:<lane>...] | wait|wait-next|teardown <dispatch> <round> <repo> [<lens>:<lane>...]" +
@@ -149,6 +149,45 @@ function stateSave(path: string, st: RoundState): void {
 
 export const ARG_SPLIT_RE = new RegExp(`[${PY_S_CLASS},]+`, "u");
 
+/**
+ * The time limit of a review round, and of the Greptile step beside it: review.round_timeout_seconds
+ * in the run's run.json, a whole number of seconds from 1 to `most`; the default `def` where it
+ * names none, or where the file or the value cannot be used, with the reason in `notice`.
+ */
+export function roundTimeLimit(
+  runJson: string,
+  def: number,
+  most: number,
+): { limit: number; source: string; notice: string | null } {
+  const fall = (why: string) => ({
+    limit: def,
+    source: "the default",
+    notice: `review-round: ${why}; the round's time limit is the default, ${def}s`,
+  });
+  try {
+    const runData = JSON.parse(readFileSync(runJson, "utf8")) as Record<string, unknown>;
+    const cfg = runData.config;
+    const review =
+      cfg !== null && typeof cfg === "object" && !Array.isArray(cfg)
+        ? (cfg as Record<string, unknown>).review
+        : undefined;
+    const v =
+      review !== null && typeof review === "object" && !Array.isArray(review)
+        ? (review as Record<string, unknown>).round_timeout_seconds
+        : undefined;
+    if (v === undefined || v === null) return { limit: def, source: "the default", notice: null };
+    if (typeof v === "number" && Number.isInteger(v) && !Number.isNaN(v) && v >= 1 && v <= most) {
+      return { limit: v, source: "review.round_timeout_seconds in run.json", notice: null };
+    }
+    return fall(
+      `review.round_timeout_seconds in ${runJson} is ${JSON.stringify(v)}, not a whole number of seconds from 1 to ${most}`,
+    );
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return fall(`no run.json at ${runJson}`);
+    return fall(`${runJson} cannot be read (${String(e)})`);
+  }
+}
+
 function stateCmd(
   what: string,
   path: string,
@@ -160,48 +199,10 @@ function stateCmd(
     const runJson = args[0] ?? "";
     const def = parseInt(args[1] ?? String(DEFAULT_LIMIT), 10);
     const most = parseInt(args[2] ?? "86400", 10);
-    let limit: number;
-    let source: string;
-    const fall = (why: string): void => {
-      err.push(`review-round: ${why}; the round's time limit is the default, ${def}s`);
-      limit = def;
-      source = "the default";
-    };
-    try {
-      const runData = JSON.parse(readFileSync(runJson, "utf8")) as Record<string, unknown>;
-      const cfg = runData.config;
-      const review =
-        cfg !== null && typeof cfg === "object" && !Array.isArray(cfg)
-          ? (cfg as Record<string, unknown>).review
-          : undefined;
-      const v =
-        review !== null && typeof review === "object" && !Array.isArray(review)
-          ? (review as Record<string, unknown>).round_timeout_seconds
-          : undefined;
-      if (v === undefined || v === null) {
-        limit = def;
-        source = "the default";
-      } else if (
-        typeof v === "number" &&
-        Number.isInteger(v) &&
-        !Number.isNaN(v) &&
-        v >= 1 &&
-        v <= most
-      ) {
-        limit = v;
-        source = "review.round_timeout_seconds in run.json";
-      } else {
-        fall(
-          `review.round_timeout_seconds in ${runJson} is ${JSON.stringify(v)}, not a whole number of seconds from 1 to ${most}`,
-        );
-      }
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-        fall(`no run.json at ${runJson}`);
-      } else {
-        fall(`${runJson} cannot be read (${String(e)})`);
-      }
-    }
+    const timed = roundTimeLimit(runJson, def, most);
+    if (timed.notice !== null) err.push(timed.notice);
+    const limit = timed.limit;
+    const source = timed.source;
     const attemptBytes = new Uint8Array(8);
     crypto.getRandomValues(attemptBytes);
     const attempt = Array.from(attemptBytes)
@@ -211,13 +212,13 @@ function stateCmd(
     stateSave(path, {
       attempt,
       boot: bootId(),
-      limit: limit!,
-      source: source!,
-      deadline: monotonic() + limit!,
+      limit,
+      source,
+      deadline: monotonic() + limit,
       started: now.toISOString().replace(/\.[0-9]+Z$/u, "Z"),
       reviewers: [],
     });
-    out.push(`${limit!}\t${source!}`);
+    out.push(`${limit}\t${source}`);
     return {
       code: 0,
       out: `${out.join("\n")}\n`,
@@ -434,7 +435,7 @@ function recordStep(
 }
 
 /** manifest.json's base: the sha the round reviews from. */
-function manifestBase(dispatch: string): string {
+export function manifestBase(dispatch: string): string {
   try {
     const m = JSON.parse(readFileSync(join(dispatch, "manifest.json"), "utf8")) as Record<
       string,
@@ -465,9 +466,15 @@ function notRunLines(text: string): string[] {
 }
 
 /**
+ * The turnpike that is not a lens of the loop: Greptile reviews the run's final change once, after
+ * the loop, in a step of its own (scripts/greptile-step.ts), so no round launches it.
+ */
+const STEP_TURNPIKE = "greptile";
+
+/**
  * The open lenses of this round, each with its lanes: the review leg's turnpikes, style
- * dropped from round 2 on. A turnpikes, waybill or lens that does not resolve stops the
- * step with res.code 1 and null.
+ * dropped from round 2 on, and Greptile in every round. A turnpikes, waybill or lens that
+ * does not resolve stops the step with res.code 1 and null.
  */
 function resolveLenses(
   a: StepArgs,
@@ -489,7 +496,9 @@ function resolveLenses(
     res.code = 1;
     return null;
   }
-  const names = review.slice(2).filter((n) => a.round === "1" || (n !== "style" && n !== "design"));
+  const names = review
+    .slice(2)
+    .filter((n) => n !== STEP_TURNPIKE && (a.round === "1" || (n !== "style" && n !== "design")));
   const pairs: Array<[string, string[]]> = [];
   for (const lens of names) {
     const r = deps.tool("reviewers", ["lanes", join(a.dispatch, "brief.md"), lens]);
@@ -603,7 +612,7 @@ export function findGatePass(dispatch: string, snap: string): GatePass | null {
   return null;
 }
 
-function scratchPath(repo: string, ticket: string, lens: string, lane: string): string {
+export function scratchPath(repo: string, ticket: string, lens: string, lane: string): string {
   return join(repo, ".worktrees", `${ticket}-rev-${lens}-${lane}`);
 }
 

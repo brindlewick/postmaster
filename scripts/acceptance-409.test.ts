@@ -7,7 +7,14 @@
 // model run and stays hand-verified by the postmaster at landing. Every case
 // drives scripts/run as a subprocess or reads a runbook file.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   NOTICE,
@@ -525,6 +532,27 @@ describe("C3: the check's edges", () => {
       dispatch,
       "luna-events.jsonl",
       codexExec(`scripts/run github ${repo} edit 409 body.md base.md`),
+    );
+    const r = ticketReads(dispatch);
+    expect(r.code).toBe(0);
+    expect(outcomeOf(r.out)).toBe("ticket-reads: not read");
+  });
+
+  test("a Greptile step is no agent: its launch line adds no record to read and nothing unknown", () => {
+    const dispatch = fixtureDispatch(tmp, "c3-greptile", {
+      agents: [
+        {
+          lane: "opus",
+          harness: "claude",
+          file: "review-r1-bug-opus.jsonl",
+          reviews: ["r1 bug"],
+          lines: [claudeUse("Bash", { command: "git diff --stat" })],
+        },
+      ],
+    });
+    appendFileSync(
+      join(dispatch, "actions.jsonl"),
+      `${JSON.stringify({ action: "review-launch", target: "greptile", detail: "greptile round 2" })}\n`,
     );
     const r = ticketReads(dispatch);
     expect(r.code).toBe(0);

@@ -27,6 +27,7 @@ import {
   monotonic,
   reachCheckMissing,
   roundPointRecorded,
+  roundTimeLimit,
   type StepChild,
   type StepDeps,
 } from "./review-round.ts";
@@ -1161,6 +1162,53 @@ describe("the round's three steps", () => {
       }, "review-round-cutbroken-");
     });
 
+    describe("a waybill that names greptile", () => {
+      const withGreptile: Handler = (name, args) =>
+        name === "turnpikes"
+          ? { code: 0, out: "1 synthesis\n2 review style bug security greptile\n", err: "" }
+          : green(name, args);
+
+      test("cuts the other lenses' scratches in every round, and never asks about greptile", () => {
+        withTempDir((root) => {
+          const p = paths(root);
+          for (const [round, lenses] of [
+            ["1", ["style", "bug", "security"]],
+            ["2", ["bug", "security"]],
+          ] as const) {
+            const { calls, deps } = stand(withGreptile);
+            const res = cutRound(
+              { dispatch: p.dispatch, round, repo: p.repo, synthesis: p.synthesis },
+              deps,
+            );
+            expect(res.code).toBe(0);
+            expect(of(calls, "reviewers").map((c) => c.args[2])).toEqual([...lenses]);
+            expect(of(calls, "cut-scratch").map((c) => c.args[2])).toEqual(
+              lenses.map((lens) => join(p.repo, ".worktrees", `T-1-rev-${lens}-luna`)),
+            );
+            expect(calls.some((c) => c.args.includes("greptile"))).toBe(false);
+          }
+        }, "review-round-cutgreptile-");
+      });
+
+      test("cuts nothing for a ticket whose only review turnpike is greptile", () => {
+        withTempDir((root) => {
+          const p = paths(root);
+          const { calls, deps } = stand((name, args) =>
+            name === "turnpikes"
+              ? { code: 0, out: "1 synthesis\n2 review greptile\n", err: "" }
+              : green(name, args),
+          );
+          const res = cutRound(
+            { dispatch: p.dispatch, round: "1", repo: p.repo, synthesis: p.synthesis },
+            deps,
+          );
+          expect(res.code).toBe(0);
+          expect(of(calls, "reviewers")).toEqual([]);
+          expect(of(calls, "cut-scratch")).toEqual([]);
+        }, "review-round-cutonlygreptile-");
+      });
+    });
+
     describe("gate reuse", () => {
       const SHA = "9f2c4a1b7d3e8f0a5b6c9d2e4f7a1b3c5d6e8f0a";
       const gateRow = (target: string, detail: string): string =>
@@ -2003,6 +2051,63 @@ describe("the round's three steps", () => {
         expect(of(calls, "reach").length).toBe(1);
       }, "review-round-launchbadjournal-");
     });
+
+    describe("a waybill that names greptile", () => {
+      const stood = (turnpikes: string): ReturnType<typeof stand> =>
+        stand((name, args) => {
+          if (name === "turnpikes") return { code: 0, out: turnpikes, err: "" };
+          if (name === "launch" && args[0] === "skill")
+            return { code: 0, out: "SECURITY TEXT\n", err: "" };
+          if (name === "host" && args[0] === "name")
+            return { code: 0, out: `${args[4]}-name\n`, err: "" };
+          return green(name, args);
+        });
+
+      test("launches the other lenses' reviewers in every round, and starts nothing for greptile", () => {
+        withTempDir((root) => {
+          const p = paths(root);
+          for (const [round, pairs] of [
+            ["1", ["style:luna", "bug:luna", "security:luna"]],
+            ["2", ["bug:luna", "security:luna"]],
+          ] as const) {
+            const { calls, deps } = stood("1 synthesis\n2 review style bug security greptile\n");
+            const res = launchRound(
+              { dispatch: p.dispatch, round, repo: p.repo, synthesis: p.synthesis },
+              deps,
+            );
+            expect(res.code).toBe(0);
+            expect(one(calls, "review-round", (c) => c.args[0] === "start")?.args).toEqual([
+              "start",
+              p.dispatch,
+              round,
+              ...pairs,
+            ]);
+            expect(of(calls, "host").filter((c) => c.args[0] === "run").length).toBe(pairs.length);
+            expect(calls.some((c) => c.name === "greptile" || c.args.includes("greptile"))).toBe(
+              false,
+            );
+            // The action, its target and its detail: the dispatch's own path is no evidence.
+            expect(
+              of(calls, "log-action").some((c) => c.args.slice(2).join(" ").includes("greptile")),
+            ).toBe(false);
+          }
+        }, "review-round-launch-gt-");
+      });
+
+      test("launches nothing for a ticket whose only review turnpike is greptile", () => {
+        withTempDir((root) => {
+          const p = paths(root);
+          const { calls, deps } = stood("1 synthesis\n2 review greptile\n");
+          const res = launchRound(
+            { dispatch: p.dispatch, round: "1", repo: p.repo, synthesis: p.synthesis },
+            deps,
+          );
+          expect(res.code).toBe(1);
+          expect(res.err).toContain("review-round: round 1 has no reviewers; nothing launched");
+          expect(of(calls, "host")).toEqual([]);
+        }, "review-round-launchonlygreptile-");
+      });
+    });
   });
 
   describe("harvest", () => {
@@ -2506,6 +2611,48 @@ function teardown(snapshot: boolean, actions: string[], named: boolean): Torn {
     };
   });
 }
+
+describe("roundTimeLimit", () => {
+  const limitOf = (config: unknown, raw?: string): ReturnType<typeof roundTimeLimit> =>
+    withTempDir((root) => {
+      const path = join(root, "run.json");
+      writeFileSync(path, raw ?? `${JSON.stringify({ config })}\n`);
+      return roundTimeLimit(path, 3600, 86400);
+    }, "review-round-limit-");
+
+  test("is the run's review.round_timeout_seconds, a whole number of seconds from 1 to the most", () => {
+    for (const seconds of [1, 5, 86400]) {
+      expect(limitOf({ review: { round_timeout_seconds: seconds } })).toEqual({
+        limit: seconds,
+        source: "review.round_timeout_seconds in run.json",
+        notice: null,
+      });
+    }
+  });
+
+  test("is the default where the run names none", () => {
+    for (const config of [
+      undefined,
+      {},
+      { review: {} },
+      { review: { round_timeout_seconds: null } },
+    ]) {
+      expect(limitOf(config)).toEqual({ limit: 3600, source: "the default", notice: null });
+    }
+  });
+
+  test("is the default, with the reason, where the value or the file cannot be used", () => {
+    for (const value of [0, 86401, 1.5, "60", true]) {
+      const got = limitOf({ review: { round_timeout_seconds: value } });
+      expect([got.limit, got.source]).toEqual([3600, "the default"]);
+      expect(got.notice).toContain("not a whole number of seconds from 1 to 86400");
+    }
+    expect(limitOf(undefined, "not json").notice).toContain("cannot be read");
+    expect(roundTimeLimit("/no/such/run.json", 3600, 86400).notice).toBe(
+      "review-round: no run.json at /no/such/run.json; the round's time limit is the default, 3600s",
+    );
+  });
+});
 
 describe("roundPointRecorded", () => {
   test("it reads the round's own point, and never refuses on an unreadable journal", () => {

@@ -33,7 +33,8 @@ export const TABLE = `# name     set      leg     what it checks
 style      default  review  idiom, naming, abstraction and consistency with the project's own conventions
 bug        default  review  correctness, logic, and whether the tests are adequate
 security   default  review  exploit paths through the project's risk surfaces
-design     -        review  whether the change builds what a library or the repository already offers`;
+design     -        review  whether the change builds what a library or the repository already offers
+greptile   -        review  what Greptile, an outside review service, reports on the change, once after the other reviews`;
 
 export const CURRENT_LEGS: Array<[number, string]> = [
   [1, "synthesis"],

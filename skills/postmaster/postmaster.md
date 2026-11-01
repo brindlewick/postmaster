@@ -1158,13 +1158,15 @@ ticket and rand six hex digits you pick fresh, before you end, and end as the br
 2. **Decide yourself within the user's standing instructions** when the question is about the
    work: a within-brief ambiguity, a scope call the ticket's own criteria answer, a round to
    stop of the review loop. On a review-loop stop, the report already carries the survey the
-   escalation names; rule from it. A reach is never decided here. A walled workhorse is never
+   escalation names; rule from it. A reach is never decided here. A Greptile review that
+   reported findings or could not finish is never decided here either: the escalation names
+   Greptile, and the user's word alone settles it. A walled workhorse is never
    yours to drop: it goes to the user as Stage D's WALL step says. Log `escalate` yourself
    with your ruling.
 3. **Send it up through a helper** when it is genuinely destructive, changes the ticket's
    scope, touches anything outside the repo, is a fault in a control (Tool faults), asks
-   whether to fix a gating finding in a loop with no gating lens, is a reach, or the user
-   asked to see it:
+   whether to fix a gating finding in a loop with no gating lens, is a reach, is a Greptile
+   review that reported findings or could not finish, or the user asked to see it:
 
 ```helper
 Helper brief `e-send` for run `<TICKET>` at `<dispatch>`: wait on the user for a ruling.

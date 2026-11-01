@@ -6,10 +6,12 @@
 //   round    the round that just finished, a whole number of 1 or more
 //
 // With --cause the decision prints as `<RUN|STOP|RULING> <cause>` instead of
-// its sentence, for a caller that must tell the two rulings apart without
+// its sentence, for a caller that must tell the rulings apart without
 // matching words: `RULING rise` is a round that found more serious defects
 // than the round before, `RULING no-working-reviewer` two rounds running
-// without a working reviewer for a gating lens.
+// without a working reviewer for a gating lens, and for the Greptile step's
+// round (below) `STOP greptile-clean`, `RULING greptile-findings` and
+// `RULING greptile-missed`.
 //
 // Reads <dispatch>/actions.jsonl. A finding is a `finding` line whose detail opens with its class,
 // `gating` or `style`, then its severity (P1, P2 or P3), its round (r1, r2, ...) and the rest. A
@@ -26,6 +28,15 @@
 // `<lens> round <n>:`. A gating lens had no working reviewer in round n when every lane with
 // a launch for it in round n has a degrade for it in round n. Style is never gating; launch
 // and degrade lines in any other spelling are ignored.
+//
+// A round that holds a `review-launch` for greptile is the Greptile step's, not the loop's
+// (scripts/greptile-step.ts, scripts/lib/greptile-record.ts): the step reviews the run's final change
+// once, after the loop. Its decision comes from its own lines alone: a `degrade` for greptile in
+// the round is a missed review, a `review-harvest` for it says how many findings it reported, and
+// either missed or any finding is a ruling at once, with no round of the loop after it and no retry
+// of its own, since a missed review is most often a sign-in, credit or setup fault a retry cannot
+// fix. The step's findings stay out of the count below, and a round of the loop after the step
+// compares itself with the last round before it.
 //
 // The rule (ticket #316, the user's): round 2 runs whenever round 1 applied a fix; from round
 // 2 on, the loop goes on while no round finds more serious defects than the round before, and
@@ -46,6 +57,7 @@
 //           line of its round or one opening otherwise, or an apply naming no target or a
 //           target with no finding line
 import { readFileSync, statSync } from "node:fs";
+import { decisionOf, harvestOf, LENS as GREPTILE, type Outcome } from "./lib/greptile-record.ts";
 import { D_CLASS, digitValue, END_OF_STRING, pySplitLines, pyTrim, pyWords } from "./lib/text.ts";
 
 const USAGE = "usage: run review-decide <dispatch> <round> [--cause]";
@@ -214,6 +226,7 @@ function decide(dispatch: string, roundS: string, causeOnly: boolean): void {
   const seenPairs = new Set<string>();
   const findingsAt = new Map<string, { cls: string; sev: string }>();
   const applies: Array<{ n: number; targets: string[] }> = [];
+  const harvests = new Map<string, number>();
   const alsos: Array<{ n: number; target: string; cls: string; sev: string; rnd: string }> = [];
   const faults: string[] = [];
   lines.forEach((line, idx) => {
@@ -307,6 +320,12 @@ function decide(dispatch: string, roundS: string, causeOnly: boolean): void {
       alsos.push({ n, target: pyStr(rec.target, !("target" in rec)), cls, sev, rnd: m[1]! });
     } else if (action === "apply") {
       applies.push({ n, targets: pyWords(pyStr(rec.detail, !("detail" in rec))) });
+    } else if (action === "review-harvest") {
+      // Only the Greptile step's harvest says anything here: how many findings it reported.
+      const harvest = harvestOf(pyStr(rec.detail, !("detail" in rec)));
+      if (harvest !== null && pyStr(rec.target, !("target" in rec)) === GREPTILE) {
+        harvests.set(String(harvest.round), harvest.findings);
+      }
     } else if (action === "review-launch" || action === "degrade") {
       // Launch and degrade spellings outside the known forms are ignored, never
       // faults: older records spell these lines in other ways.
@@ -362,15 +381,25 @@ function decide(dispatch: string, roundS: string, causeOnly: boolean): void {
   }
   if (faults.length > 0) die(faults.join("; "));
 
+  // The rounds that are the Greptile step's: a launch for greptile in them.
+  const greptileRounds = new Set<string>();
+  for (const key of launches.keys()) {
+    const [lens = "", rnd = ""] = key.split("\0");
+    if (lens === GREPTILE) greptileRounds.add(rnd);
+  }
   const appliedIn = (roundNum: string): boolean =>
     applies.some(({ targets }) => targets.some((t) => roundsSeen.get(t)?.has(roundNum) ?? false));
   const countSerious = (roundNum: string): number =>
-    findings.filter(
-      ({ sev, rnd, cls }) => rnd === roundNum && (sev === "P1" || sev === "P2") && cls === "gating",
-    ).length;
+    greptileRounds.has(roundNum)
+      ? 0
+      : findings.filter(
+          ({ sev, rnd, cls }) =>
+            rnd === roundNum && (sev === "P1" || sev === "P2") && cls === "gating",
+        ).length;
   // The gating lenses with no working reviewer in a round, sorted: every launched
   // lane degraded. Style is never gating, and design runs in round 1 alone, so neither forces
-  // another round; a lens with no launch had no reviewer to lose.
+  // another round; Greptile is the step's, decided on its own; a lens with no launch had no
+  // reviewer to lose.
   const lacking = (roundNum: string): string[] => {
     const out: string[] = [];
     for (const [key, lanes] of launches) {
@@ -379,6 +408,7 @@ function decide(dispatch: string, roundS: string, causeOnly: boolean): void {
         rnd !== roundNum ||
         lens === "style" ||
         lens === "design" ||
+        lens === GREPTILE ||
         lens === "" ||
         lanes.size === 0
       )
@@ -389,6 +419,16 @@ function decide(dispatch: string, roundS: string, causeOnly: boolean): void {
     return out.sort();
   };
 
+  if (greptileRounds.has(r)) {
+    const outcome: Outcome = degrades.has(`${GREPTILE}\0${r}`)
+      ? { kind: "missed", cause: "" }
+      : harvests.has(r)
+        ? { kind: "reviewed", findings: harvests.get(r) ?? 0 }
+        : { kind: "unfinished" };
+    const decision = decisionOf(Number(r), outcome);
+    say(decision.first, decision.cause, decision.line);
+    return;
+  }
   if (r === "1") {
     const lacking1 = lacking("1");
     if (lacking1.length > 0) {
@@ -404,7 +444,9 @@ function decide(dispatch: string, roundS: string, causeOnly: boolean): void {
     }
     return;
   }
-  const prev = decStr(r);
+  // The round before, not counting a round that was the Greptile step's.
+  let prev = decStr(r);
+  while (prev !== "0" && greptileRounds.has(prev)) prev = decStr(prev);
   const lackingPrev = lacking(prev);
   const lackingR = lacking(r);
   if (lackingPrev.length > 0 && lackingR.length > 0) {

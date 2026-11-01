@@ -22,6 +22,7 @@ import { parseTomlText } from "./lib/data";
 import {
   generatedFilesOf,
   globalConfigPath,
+  greptileLevelOf,
   ignoreSettings,
   isTracked,
   prSizeBudgetOf,
@@ -1130,5 +1131,59 @@ describe("the pages settings", () => {
     expect(refusal(() => inspect(projectWith("pages-shared-file", block, null)))).toBe(
       "shared project settings has unsupported table or key: pages",
     );
+  });
+});
+
+describe("the Greptile level setting", () => {
+  function projectWith(name: string, shared: string | null, local: string | null): string {
+    const dir = at(name);
+    mkdirSync(dir, { recursive: true });
+    if (shared !== null) write(join(dir, ".postmaster", "project.toml"), shared);
+    if (local !== null) write(join(dir, ".postmaster", "settings.toml"), local);
+    return dir;
+  }
+
+  test("a project that names none gains no key and no source, and reads as base", () => {
+    const dir = projectWith("level-none", '[project]\ndefault_turnpikes = ["bug"]\n', null);
+    const got = inspect(dir);
+    expect(Object.hasOwn(got.project as Rec, "greptile_level")).toBe(false);
+    expect(Object.hasOwn(got.sources as Rec, "project.greptile_level")).toBe(false);
+    expect(greptileLevelOf(dir)).toBe("base");
+  });
+
+  test("the shared file names the level and the report names it as the source", () => {
+    for (const level of ["base", "plus", "apex"]) {
+      const dir = projectWith(`level-${level}`, `[project]\ngreptile_level = "${level}"\n`, null);
+      expect((inspect(dir).project as Rec).greptile_level).toBe(level);
+      expect((inspect(dir).sources as Rec)["project.greptile_level"]).toBe("shared");
+      expect(greptileLevelOf(dir)).toBe(level);
+    }
+  });
+
+  test("the person's file replaces the shared level", () => {
+    const dir = projectWith(
+      "level-local",
+      '[project]\ngreptile_level = "plus"\n',
+      '[project]\ngreptile_level = "apex"\n',
+    );
+    expect(greptileLevelOf(dir)).toBe("apex");
+    expect((inspect(dir).sources as Rec)["project.greptile_level"]).toBe("local");
+  });
+
+  test("a level other than base, plus or apex is refused, in either file, naming the key", () => {
+    for (const bad of ['"max"', '"Plus"', '""', "1", "true", '["plus"]']) {
+      for (const file of ["project.toml", "settings.toml"]) {
+        const dir = projectWith(`level-bad-${bad.length}-${file}`, null, null);
+        write(join(dir, ".postmaster", file), `[project]\ngreptile_level = ${bad}\n`);
+        let message = "";
+        try {
+          inspect(dir);
+        } catch (e) {
+          if (isDie(e)) message = e.message;
+          else throw e;
+        }
+        expect(message).toContain('project.greptile_level must be "base", "plus" or "apex"');
+      }
+    }
   });
 });

@@ -230,7 +230,10 @@ spawns otherwise; `postmaster.md` is what the postmaster then does. A run is at 
 coachman legs, `synthesis` and `review`, each a fresh thread, so no context outlives a
 leg and a leg's hand-off document is the whole of what the next leg knows. The review leg runs
 only when the ticket names a turnpike that runs in it, and the last leg ends the run ready for
-the user's merge with the ship card. A run dispatched before this change keeps its third `ship` leg.
+the user's merge with the ship card. Where the ticket names `greptile`, the review leg ends with
+one Greptile review of the final change, after the model reviewers' loop and before the ship card,
+and the card waits until Greptile has passed or the user has said what happens next. A run
+dispatched before this change keeps its third `ship` leg.
 
 ## What the project has learned lives in the wiki
 
@@ -258,8 +261,8 @@ metaphor expresses them.
 **blinkers** worktree isolation between lanes · **workhorse** a lane that implements the ticket,
 as against a reviewer · **lead horse / wheeler** the ranked lanes ·
 **turnpike** a check a run must pass through before it ships, named by its ticket: `default` is
-the style, bug and security reviews unless the project's settings add the design review, and the
-project's gate always runs besides them ·
+the style, bug and security reviews unless the project's settings add the design review or
+Greptile's review, and the project's gate always runs besides them ·
 **surveyor** one question put to a lane that took no part in the work, for an independent judgement ·
 **remount** resuming a stalled run ·
 **spent** a run whose process is gone with no marker · **lame** a lane that is present but not pulling · **fleet** the

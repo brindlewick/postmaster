@@ -13,7 +13,7 @@ What a project may declare to everyone who works on it is one file, `.postmaster
 committed on purpose with `git add -f`: the checks that show a change works, the default
 turnpikes, the tracker binding by name, whether a GitHub project keeps a board, the changed lines a pull
 request for review aims at and never passes (naming a cap turns that budget on, as draft pull
-requests do), and the risk surfaces. It names no credential, no
+requests do), the effort of its Greptile review, and the risk surfaces. It names no credential, no
 filesystem path, no machine name and no role assignment, and no command: the page host's
 commands (`[pages]`, [the pages contract](pages-contract.md)) are the machine's and the
 person's choice, in the global config or in `settings.toml`, since a command in a cloned

@@ -1613,3 +1613,64 @@ describe("close-run from inside the launch that called it", () => {
     }
   }, 600000);
 });
+
+// Greptile is signed in once on the machine, so no launch the flow starts is given a key for it.
+// The launched command reports only whether the key is there, never its value, and the caller's
+// environment is these names and no more, so a failure shows nothing else.
+test("GREPTILE_API_KEY reaches no launch, whatever its role, and the rest of the environment does", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "host-greptile-key-")));
+  try {
+    const dispatch = join(dir, "run");
+    const cwd = join(dir, "work");
+    mkdirSync(dispatch, { recursive: true });
+    mkdirSync(cwd);
+    writeFileSync(join(dispatch, "run.json"), "{}\n");
+    for (const role of ["reviewer", "lane", "coachman"]) {
+      const out = join(dir, `${role}.out`);
+      const marker = join(dir, `${role}.done`);
+      const started = spawnSync(
+        join(import.meta.dir, "run"),
+        [
+          "host",
+          "run",
+          `key-${role}`,
+          cwd,
+          "--under",
+          dispatch,
+          "--role",
+          role,
+          "--out",
+          out,
+          "--marker",
+          marker,
+          "--",
+          "sh",
+          "-c",
+          'echo "PM_CHECK_PASS=${PM_CHECK_PASS-unset}"; echo "GREPTILE_API_KEY=${GREPTILE_API_KEY+present}"',
+        ],
+        {
+          encoding: "utf8",
+          timeout: 60000,
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: dir,
+            POSTMASTER_HOST: "none",
+            POSTMASTER_HOST_STATE: join(dir, "state"),
+            GREPTILE_API_KEY: "pm-check-not-a-key",
+            PM_CHECK_PASS: "1",
+          },
+        },
+      );
+      expect(started.status).toBe(0);
+      for (let i = 0; i < 200 && !existsSync(marker); i++)
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(existsSync(marker)).toBe(true);
+      expect(readFileSync(out, "utf8").trim().split("\n")).toEqual([
+        "PM_CHECK_PASS=1",
+        "GREPTILE_API_KEY=",
+      ]);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -85,6 +85,8 @@
 // CLAUDE_CODE_SESSION_*, CLAUDE_CODE_MESSAGING_* and CLAUDE_CODE_CHILD_*
 // families. Add an exact identity name or family
 // to runLaunch's filter and its test controls; keep unrelated CLAUDE_CODE_* configuration.
+// It drops GREPTILE_API_KEY too: Greptile is signed in once on the machine (scripts/greptile.ts),
+// no launch needs the key, and one that held it could leak it into its log.
 // If the host cannot place it, it runs in the background. On Linux with a working systemd user
 // manager, the command and its descendants run in a transient scope with MemoryMax,
 // MemorySwapMax=0 and TasksMax;
@@ -2760,12 +2762,14 @@ async function runLaunch(specDir: string, mode: string): Promise<number> {
   // controls. Herdr values are all caller identity; a Herdr pane's own six are re-added
   // below from this runner's environment, never from the caller pipe. POSTMASTER_LAUNCH_ROLE
   // is dropped with them so an inherited role cannot replace the run's explicit host role,
-  // re-added below.
+  // re-added below. GREPTILE_API_KEY is dropped with them and never re-added: no launch is given a
+  // Greptile key, so a signed-in Greptile uses its stored sign-in.
   const env: Record<string, string> = {};
   const drop = new Set([
     "POSTMASTER_LAUNCH_NAME",
     "POSTMASTER_LAUNCH_ROLE",
     "POSTMASTER_EVENT_STREAM",
+    "GREPTILE_API_KEY",
     ...PANE_IDS,
   ]);
   const keep =

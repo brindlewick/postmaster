@@ -755,7 +755,7 @@ function checkFindingWords(ntext: string): void {
 }
 
 // --- findings ---------------------------------------------------------------------------
-interface Finding {
+export interface Finding {
   file: string;
   line: number;
   line_end: number | string;
@@ -850,7 +850,7 @@ function normalizeLocation(
   return [rel, line, lineEnd];
 }
 
-function normalizeItem(item: unknown, harness: string, scratch: string): Finding {
+export function normalizeItem(item: unknown, harness: string, scratch: string): Finding {
   if (!isObj(item)) fail("finding is not an object");
   const path = firstTruthy(item, ["file", "path", "file_path", "filePath", "filename"]);
   const line = firstPresent(item, [

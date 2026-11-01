@@ -40,6 +40,18 @@
 # not. The person's settings.toml may name either and replaces the shared value.
 # `scripts/run pr-size` counts a change.
 #
+# `default_turnpikes` lists the turnpikes `default` stands for. `scripts/run turnpikes --list` names
+# them. Adding `greptile` turns on a Greptile review of the run's final change, once, after the other
+# reviews and before the pull request is pushed, for every ticket that asks for `default`. A ticket
+# that names its own turnpikes gets it only when it names `greptile`.
+#
+# `greptile_level` is the effort of a Greptile review of a change to the project: `base`, `plus` or
+# `apex`, and `base` where it is left out. Set it to the level the project's pull-request reviews run
+# at, since that level is a Greptile organization setting the repository does not hold. The person's
+# settings.toml may name it and replaces the shared value. Setting up Greptile on the machine is the
+# user's: install it, allow `auth.greptile.com` and `api.greptile.com` where hosts are limited, and
+# sign in once (skills/postmaster/harnesses.md, greptile).
+#
 # The checks say how a change to the project is shown to work. A project that declares none gets
 # defaults (scripts/run verify): the gate, always, and by what discovery finds, a command-line
 # app's ticket examples run through its command, a web app's browser suite and a walk of the
@@ -50,10 +62,11 @@
 # turnpike table marks default, and the tracker binding stays with discovery.
 #
 # [project]
-# default_turnpikes = ["style", "bug", "security"]
+# default_turnpikes = ["style", "bug", "security", "greptile"]
 # generated_files = ["**/*.gen.ts"]
 # pr_size_aim = 200
 # pr_size_cap = 400
+# greptile_level = "plus"
 # risk_surfaces = "Processes, network bindings, credentials and data stores the security lens should inspect."
 #
 # [tracker]

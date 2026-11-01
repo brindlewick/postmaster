@@ -68,6 +68,18 @@ beforeAll(() => {
     join(emptyProject, ".postmaster", "project.toml"),
     "[project]\ndefault_turnpikes = []\n",
   );
+  for (const [name, list] of [
+    ["greptile-on", '"style", "bug", "security", "greptile"'],
+    ["greptile-off", '"style", "bug", "security"'],
+  ] as const) {
+    mkdirSync(join(tmp, name, ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(tmp, name, ".postmaster", "project.toml"),
+      `[project]\ndefault_turnpikes = [${list}]\n`,
+    );
+  }
+  mkdirSync(join(tmp, "greptile-unset", ".postmaster"), { recursive: true });
+  writeFileSync(join(tmp, "greptile-unset", ".postmaster", "project.toml"), "[project]\n");
 });
 
 afterAll(() => {
@@ -293,6 +305,86 @@ describe("positive controls: the list", () => {
   });
 });
 
+describe("greptile, the review run once after the loop", () => {
+  const legsOf = (line: string): { code: number; out: string } => runSelf("legs", "--line", line);
+
+  test("--list names it once, in no default set, on the review leg", () => {
+    const rows = runSelf("--list")
+      .out.split("\n")
+      .filter((l) => pyWords(l)[0] === "greptile");
+    expect(rows.length).toBe(1);
+    expect(pyWords(rows[0] ?? "").slice(1, 3)).toEqual(["-", "review"]);
+  });
+
+  test("a project lists it among its default turnpikes, and default then stands for it", () => {
+    const project = join(tmp, "greptile-on");
+    checkIs(
+      runSelf("resolve", "--project", project, "default"),
+      0,
+      "turnpikes: style, bug, security, greptile",
+    );
+    checkIs(
+      legsOf("turnpikes: style bug security greptile"),
+      0,
+      lines("1 synthesis", "2 review style bug security greptile"),
+    );
+  });
+
+  test("a project that leaves it out, lists the defaults without it or sets none gets the three", () => {
+    for (const name of ["greptile-off", "greptile-unset"]) {
+      const project = join(tmp, name);
+      checkIs(
+        runSelf("resolve", "--project", project, "default"),
+        0,
+        "turnpikes: style, bug, security",
+      );
+    }
+    checkIs(
+      legsOf("turnpikes: style, bug, security"),
+      0,
+      lines("1 synthesis", "2 review style bug security"),
+    );
+  });
+
+  test("a ticket that names its own turnpikes gets it only when it names it", () => {
+    checkIs(
+      runSelf("resolve", "--project", join(tmp, "greptile-on"), "bug security"),
+      0,
+      "turnpikes: bug, security",
+    );
+    checkIs(
+      runSelf("resolve", "--project", join(tmp, "greptile-off"), "bug security greptile"),
+      0,
+      "turnpikes: bug, security, greptile",
+    );
+  });
+
+  test("a ticket may name it alone, and the review leg then holds nothing else", () => {
+    checkIs(runSelf("resolve", "greptile"), 0, "turnpikes: greptile");
+    checkIs(legsOf("turnpikes: greptile"), 0, lines("1 synthesis", "2 review greptile"));
+  });
+
+  test("short names greptile as the project default a ticket's line leaves out", () => {
+    checkIs(
+      runSelf("short", "--project", join(tmp, "greptile-on"), "turnpikes: style bug security"),
+      0,
+      "greptile",
+    );
+  });
+
+  test("a project that names it in a settings file the table does not know is refused by name", () => {
+    const project = join(tmp, "greptile-typo");
+    mkdirSync(join(project, ".postmaster"), { recursive: true });
+    writeFileSync(
+      join(project, ".postmaster", "project.toml"),
+      '[project]\ndefault_turnpikes = ["greptyle"]\n',
+    );
+    const r = runSelf("resolve", "--project", project, "default");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("default_turnpikes names an unknown turnpike: greptyle");
+  });
+});
+
 describe("positive controls: a ticket's section", () => {
   test("--list does not read project settings", () => {
     const plain = runSelf("--list");
@@ -372,7 +464,7 @@ describe("positive controls: a ticket's section", () => {
     checkIs(
       runSelf("resolve", lines("default", "", "\t---")),
       2,
-      '"---" is not a turnpike; the section holds only default, none, or names from: style, bug, security, design',
+      '"---" is not a turnpike; the section holds only default, none, or names from: style, bug, security, design, greptile',
     );
   });
 

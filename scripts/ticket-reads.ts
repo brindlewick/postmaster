@@ -2201,6 +2201,9 @@ function readAgents(
     const detail = /^(\S+) round (\d+)\b/u.exec(text(record.detail)); // ASCII: review-launch details are machine-logged lines
     const lane = text(record.target);
     if (!detail || !lane) return { agents, broken: "a review launch cannot be read", extra };
+    // Greptile is an outside review service, not an agent: its adapter is given the run's change
+    // and no ticket text, and it keeps no event stream to read.
+    if (detail[1] === "greptile") continue;
     const key = `${detail[2]}:${detail[1]}:${lane}`;
     if (seen.has(key)) continue;
     seen.add(key);
