@@ -426,6 +426,92 @@ keeps one per name, and muse lists it once.
 - Source: trials of MiMo Code 0.1.15, `raw/trials/mimo-headless-forms/`, and for the prompt and
   resumes, `raw/trials/muse-mimo-controls/`.
 
+## greptile (an outside review service)
+
+Greptile is not a harness: no model lane runs on it, and it has no launch form, no thread and no
+events stream. Everything particular to it is in one adapter,
+`<tool>/scripts/run greptile review <repo> <checkout> <base> <prefix>`, which whatever runs a
+Greptile review calls with the project, a clone to review, the commit to review since and the prefix
+of the files it writes. The runbooks name the adapter and never Greptile's flags. A run's Greptile
+step starts it through `run host run`, once, after the review loop (`coachman.md`, the Greptile
+step).
+
+- **What it runs.** `greptile review --json -b <base>` in the checkout: the committed change from
+  the base to the checkout's HEAD, reviewed by the project's own Greptile rules, which Greptile
+  gathers from the checkout itself (`.greptile/config.json`, `rules.md` and `files.json`). The
+  adapter passes no `--instructions`. The effort is the project's `greptile_level` (`project.toml` or
+  `settings.toml`): `plus` and `apex` add `--plus` or `--apex`, `base` or none add nothing, and a
+  level the organization lacks fails the review, which counts as a miss. Saved Greptile settings do
+  not change the effort. The adapter does not pass `--agent`: `--json` already keeps Greptile from
+  prompting and from opening a browser to sign in, and the switch below keeps it from printing
+  update notices.
+- **What it sets.** `GREPTILE_TELEMETRY_DISABLED=1`, `GREPTILE_NO_UPDATE_CHECK=1` and
+  `GREPTILE_NO_AUTO_INSTALL=1`, so a run sends Greptile its change and nothing else, and no
+  update notice or download is made.
+- **Where it finds the repository.** Greptile refuses a detached HEAD and reads the web address of
+  the remote of the checked-out branch, then of `origin`, then of the only remote. A clone cut for a
+  review (`cut-scratch --cut-workhorse` for the step, a reviewer's `--clone`) has the project folder
+  as its `origin`, which `cut-scratch --kind` and `--remove` read, so the adapter gives the branch
+  the checkout is on, or `greptile-review` when it is detached, a remote of its own, `project-origin`,
+  that holds the origin URL of the project, and leaves `origin` alone. `-b` takes the base as a
+  commit. A project whose origin is a folder cannot be identified by Greptile: every review misses.
+- **Its sign-in.** The user signs in once on the machine (`greptile login`), which stores the sign-in
+  in Greptile's own folder in their home. `run host run` removes `GREPTILE_API_KEY` from the
+  environment of every launch, and the adapter passes none on to Greptile, so Greptile uses the stored
+  sign-in, and no lane holds a key it could leak into its log. A key kept in the environment is not
+  used; the user stores it through Greptile's own sign-in (`greptile login --api-key`). Greptile
+  signs in through `https://auth.greptile.com` and reviews through `https://api.greptile.com`:
+  where a machine limits network hosts, allow both. Reviewing needs the repository's Greptile
+  organization to include the signed-in user.
+- **Its report.** `--json` prints one line holding an object: `summary`, `confidence`,
+  `confidenceReasoning`, `securitySummary`, `instructions`, `effort` on a plus or apex review, and
+  `comments`, empty for a review with no findings. A comment has `id`, `path`, `startLine`,
+  `endLine`, `side` (`new`, or `old` for a removed line), `severity` (`P0`, `P1` or `P2`, `P2` when
+  absent), `securityIssue`, `category`, `body`, `verifiedEvidence`, `suggestion` and `hunk`. A review
+  with findings exits 0. The adapter turns each comment into the record `review-findings` writes,
+  with Greptile's severity as the proposed one and `greptile` as the source, in the findings file:
+  the first line of the body is the summary, the suggestion and a removed-side note ride in the body,
+  `verifiedEvidence` is the evidence, and `securityIssue` adds `security issue` to the category.
+- **Files it holds back.** Before it sends anything Greptile holds back changed files that look
+  like they hold secrets (`.env`, key files, `.npmrc`, a diff with a recognizable key), and reviews the
+  rest. It names them in a line on stderr, `warning: N possibly sensitive files found: ...`, and
+  exits 0, so a partial review reads as a finished one. A binary file gets a line of its own,
+  `warning: N binary files not included in the review`. A committed file that the project's ignore
+  rules match (`git check-ignore --no-index`) is held back with no line at all. The ignore list in the
+  project's own Greptile settings is applied by Greptile's service, as on pull requests, and the tool
+  skips nothing for it.
+- **What counts as left out.** The adapter counts a warning line that leaves a file out, the one
+  about secrets and any other but the one about binary files, as a missed review, quoting the line:
+  a warning it does not know stops the run rather than passing it. The files the project's ignore
+  rules hold back it finds itself, with `git check-ignore --no-index --stdin` over the files the
+  change adds or changes, as Greptile does, and names them in `<prefix>-left-out.txt`, one path to a
+  line: the project chose to leave them out, so they are no miss, and the ship card names them.
+  Binary files are neither.
+- **Its exit codes.** `0` a finished review; `1` a review it could not finish (signed out, no remote,
+  a repository it cannot identify, a failed review, nothing committed to review); `2` an invalid
+  invocation; `6` a feature the account lacks, with a `notice:` line on stderr; `130` interrupted.
+  `3`, `4` and `5` belong to `greptile review status` alone. In plain output an error is one line on
+  stderr, `error: ...` or `notice: ...`, then indented detail and suggestion lines. A refusal by the
+  service is exit 1 with an `error:` line: a plan with no CLI reviews, no credits, a billing pause,
+  the daily review limit, a remote it does not recognize, a failure on its side.
+- **A miss.** Anything but exit 0 with a readable report and no warning that leaves a file out is a
+  missed review: the adapter exits 1, leaves no file, and ends its stderr with
+  `greptile: missed: <cause>`, the cause being Greptile's own error line (the first line marked
+  `error:` or `notice:`, warnings passed over), or the warning lines it counts, or the cause where it
+  printed none: not on PATH, no origin, output that is no report. A review is reviewed only when the
+  adapter exits 0 and `<prefix>-findings.json` exists, written last and whole, so a run of it that
+  crashed is a miss too. A review still running when its caller's time limit ends is stopped by the
+  caller.
+- **Versions.** Read against 3.7.0 and 3.8.0, the two releases checked: the review's options
+  (`--agent` among them), the preflight, the report, the exit codes and the environment switches read
+  the same in both. They differ in the `trex` commands, in the staging session commands only the
+  3.7.0 README documents, and in two lines of the service's refusals: 3.8.0 gives an unpaid
+  subscription the line of an unfinished billing migration, shortened to "Reviews are paused. Open
+  billing settings to continue.", and drops the upgrade link from the line for a billing check that
+  is down. Neither changes an exit code or the `error:` mark.
+- Source: the README and bundled code of those two releases of the `greptile` npm package (MIT,
+  Node 22 or later).
+
 ## Reach records
 
 `<tool>/scripts/run reach` is this section's executable form: it reads the lane's recorded tool

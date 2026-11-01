@@ -52,6 +52,7 @@ scripts/run style-findings list|count|gate|check <dispatch>         # a run's st
 scripts/run launch form|launch|review|resume|skill <lane-or-role> … # any lane or role, one command
 scripts/run reviewers lines|eligible <lens>|lanes <waybill> <lens>|lenses # which lanes review under each lens
 scripts/run review-forms has <harness>                            # whether the harness has a code-review form
+scripts/run greptile review <repo> <checkout> <base> <prefix>        # Greptile's review of a change, its findings in the review-findings record
 scripts/run review-findings normalize|harvest …                   # native bug-review output into the finding contract
 scripts/run host leg launch|resume|takeover|retry|outcome|backfill|waiting … | detect|name|run|stop|close|stop-run|close-run|spawn|send|wait|read … # leg lifecycle, launch placement and teardown
 scripts/run view-stream < <events-file>                            # a harness's events, wrapped: what it says and runs, in full
