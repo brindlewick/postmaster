@@ -27,6 +27,7 @@ import {
   monotonic,
   reachCheckMissing,
   roundPointRecorded,
+  roundTimeLimit,
   type StepChild,
   type StepDeps,
 } from "./review-round.ts";
@@ -2610,6 +2611,48 @@ function teardown(snapshot: boolean, actions: string[], named: boolean): Torn {
     };
   });
 }
+
+describe("roundTimeLimit", () => {
+  const limitOf = (config: unknown, raw?: string): ReturnType<typeof roundTimeLimit> =>
+    withTempDir((root) => {
+      const path = join(root, "run.json");
+      writeFileSync(path, raw ?? `${JSON.stringify({ config })}\n`);
+      return roundTimeLimit(path, 3600, 86400);
+    }, "review-round-limit-");
+
+  test("is the run's review.round_timeout_seconds, a whole number of seconds from 1 to the most", () => {
+    for (const seconds of [1, 5, 86400]) {
+      expect(limitOf({ review: { round_timeout_seconds: seconds } })).toEqual({
+        limit: seconds,
+        source: "review.round_timeout_seconds in run.json",
+        notice: null,
+      });
+    }
+  });
+
+  test("is the default where the run names none", () => {
+    for (const config of [
+      undefined,
+      {},
+      { review: {} },
+      { review: { round_timeout_seconds: null } },
+    ]) {
+      expect(limitOf(config)).toEqual({ limit: 3600, source: "the default", notice: null });
+    }
+  });
+
+  test("is the default, with the reason, where the value or the file cannot be used", () => {
+    for (const value of [0, 86401, 1.5, "60", true]) {
+      const got = limitOf({ review: { round_timeout_seconds: value } });
+      expect([got.limit, got.source]).toEqual([3600, "the default"]);
+      expect(got.notice).toContain("not a whole number of seconds from 1 to 86400");
+    }
+    expect(limitOf(undefined, "not json").notice).toContain("cannot be read");
+    expect(roundTimeLimit("/no/such/run.json", 3600, 86400).notice).toBe(
+      "review-round: no run.json at /no/such/run.json; the round's time limit is the default, 3600s",
+    );
+  });
+});
 
 describe("roundPointRecorded", () => {
   test("it reads the round's own point, and never refuses on an unreadable journal", () => {
