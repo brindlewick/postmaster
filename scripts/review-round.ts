@@ -465,9 +465,15 @@ function notRunLines(text: string): string[] {
 }
 
 /**
+ * The turnpike that is not a lens of the loop: Greptile reviews the run's final change once, after
+ * the loop, in a step of its own (scripts/greptile-step.ts), so no round launches it.
+ */
+const STEP_TURNPIKE = "greptile";
+
+/**
  * The open lenses of this round, each with its lanes: the review leg's turnpikes, style
- * dropped from round 2 on. A turnpikes, waybill or lens that does not resolve stops the
- * step with res.code 1 and null.
+ * dropped from round 2 on, and Greptile in every round. A turnpikes, waybill or lens that
+ * does not resolve stops the step with res.code 1 and null.
  */
 function resolveLenses(
   a: StepArgs,
@@ -489,7 +495,9 @@ function resolveLenses(
     res.code = 1;
     return null;
   }
-  const names = review.slice(2).filter((n) => a.round === "1" || (n !== "style" && n !== "design"));
+  const names = review
+    .slice(2)
+    .filter((n) => n !== STEP_TURNPIKE && (a.round === "1" || (n !== "style" && n !== "design")));
   const pairs: Array<[string, string[]]> = [];
   for (const lens of names) {
     const r = deps.tool("reviewers", ["lanes", join(a.dispatch, "brief.md"), lens]);
