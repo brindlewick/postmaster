@@ -121,6 +121,10 @@ path = "scripts/review-round.ts"
 holds = "the review round's cut, launch and harvest: the gate check and its action, the open lenses and scratches, every reviewer through the host, the wait's pairs, and the bug report harvest"
 
 [[files]]
+path = "scripts/greptile-step.ts"
+holds = "the Greptile step and its gate: the scratch it cuts, the launch through the host, the wait and its time limit, the records it writes, the escalation it makes, the gate before the ship card and the card's line for Greptile"
+
+[[files]]
 path = "scripts/synthesis-shares.ts"
 holds = "the SHARES measurement the runbook invokes: the synthesis HEAD it reads, the record, and the line it appends to the run log"
 

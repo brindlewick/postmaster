@@ -50,7 +50,8 @@ import { pyWords } from "./lib/text.ts";
 import { type Finding, isObj, isReportError, normalizeItem } from "./review-findings.ts";
 
 const USAGE = "usage: run greptile review <repo> <checkout> <base> <prefix>";
-const BRANCH = "greptile-review";
+/** The branch a detached checkout is put on, and the branch the step cuts its clone on. */
+export const BRANCH = "greptile-review";
 const REMOTE = "project-origin";
 const ENV: Record<string, string | undefined> = {
   GREPTILE_TELEMETRY_DISABLED: "1",

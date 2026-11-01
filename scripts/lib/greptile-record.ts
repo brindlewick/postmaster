@@ -153,13 +153,18 @@ export function askedAgain(rows: readonly Row[], step: Step): boolean {
   return last !== undefined && (AGAIN as readonly string[]).includes(last);
 }
 
+/** The last word after this step's last line that settles it, else null. */
+export function settlingWord(rows: readonly Row[], step: Step): string | null {
+  const after = rulingsAfter(rows, step.at);
+  const asked = after.findLastIndex((w) => (AGAIN as readonly string[]).includes(w));
+  const at = after.findLastIndex((w) => (SETTLING as readonly string[]).includes(w));
+  return at !== -1 && at > asked ? (after[at] ?? null) : null;
+}
+
 /** Whether the user has settled this step: some word after its last line settles it, and no later
  * word asks for another step. */
 export function settled(rows: readonly Row[], step: Step): boolean {
-  const after = rulingsAfter(rows, step.at);
-  const asked = after.findLastIndex((w) => (AGAIN as readonly string[]).includes(w));
-  const settling = after.findLastIndex((w) => (SETTLING as readonly string[]).includes(w));
-  return settling !== -1 && settling > asked;
+  return settlingWord(rows, step) !== null;
 }
 
 /** What the gate before the ship card says: held while the waybill names Greptile and the latest
