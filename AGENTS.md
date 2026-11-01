@@ -230,7 +230,10 @@ spawns otherwise; `postmaster.md` is what the postmaster then does. A run is at 
 coachman legs, `synthesis` and `review`, each a fresh thread, so no context outlives a
 leg and a leg's hand-off document is the whole of what the next leg knows. The review leg runs
 only when the ticket names a turnpike that runs in it, and the last leg ends the run ready for
-the user's merge with the ship card. A run dispatched before this change keeps its third `ship` leg.
+the user's merge with the ship card. Where the ticket names `greptile`, the review leg ends with
+one Greptile review of the final change, after the model reviewers' loop and before the ship card,
+and the card waits until Greptile has passed or the user has said what happens next. A run
+dispatched before this change keeps its third `ship` leg.
 
 ## What the project has learned lives in the wiki
 

@@ -3,7 +3,7 @@ title: A ticket names the turnpikes its run passes through
 type: concept
 standing: claimed
 sources: []
-updated: 2026-09-27
+updated: 2026-11-01
 ---
 
 # A ticket names the turnpikes its run passes through
@@ -95,6 +95,11 @@ The ticket shape in `skills/postmaster/trackers.md` gains `## Turnpikes` after `
 `scripts/run ticket-check` requires the section and names any word that is not a turnpike. The
 postmaster copies the resolved names into the waybill, and proposes `default` for a ticket with
 no section. The table also holds `design`, a review that asks whether the change builds what a library or
-the repository already offers; it is in no default set, and a project adds it to its own default turnpikes. The coachman runs exactly the waybill's turnpikes, so a run with none goes from
+the repository already offers; it is in no default set, and a project adds it to its own default turnpikes. It
+also holds `greptile`, one review of the run's final change by an outside review service, after the review
+loop and before the ship card. It too is in no default set, and a project adds it to its own default turnpikes
+or a ticket names it. It runs once because each review costs credits, and the user decided that a finding of
+any severity, or a review that could not finish, stops the run for the user's word ([issue
+#652](https://github.com/brindlewick/postmaster/issues/652)). The coachman runs exactly the waybill's turnpikes, so a run with none goes from
 synthesis to ship, and the ship card lists the turnpikes the run passed through. `AGENTS.md`
 defines the word.

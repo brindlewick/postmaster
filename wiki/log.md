@@ -1,12 +1,23 @@
 ---
 title: Log
 type: schema
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Log
 
 Append-only. Newest first. One entry per operation, prefixed so it can be parsed.
+
+## [2026-11-01] update | the turnpikes page records Greptile's review
+
+At the user's request, after the Greptile step was built. [The turnpikes page](concepts/turnpikes.md)
+now says the table holds `greptile`, one review of the run's final change by an outside review service,
+after the review loop and before the ship card, in no default set; that it runs once because each
+review costs credits; and that a finding of any severity, or a review that could not finish, stops the
+run for the user's word. The change touches coachman contract files, `skills/postmaster/coachman.md`,
+`skills/postmaster/postmaster.md`, `scripts/turnpikes.ts`, `scripts/review-round.ts` and
+`scripts/host.ts`, and adds `scripts/greptile-step.ts` to the contract's list, so it merges only
+after a fixture run scores clean. No standing changed.
 
 ## [2026-10-31] update | the design lens's ladder keeps a library's setting first unless a plain alternative is simpler
 
