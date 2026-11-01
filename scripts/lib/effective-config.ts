@@ -592,7 +592,12 @@ const PROJECT_KEYS = [
   "generated_files",
   "pr_size_aim",
   "pr_size_cap",
+  "greptile_level",
 ];
+
+// The effort of a Greptile review: its level is a Greptile organization setting the repository does
+// not hold, so a project names the one its pull-request reviews run at.
+const GREPTILE_LEVELS = ["base", "plus", "apex"];
 
 const positiveInteger = (v: unknown): v is number =>
   typeof v === "number" && Number.isInteger(v) && v > 0;
@@ -645,6 +650,12 @@ export const validateCommon = (data: Rec, label: string, local: boolean): Rec =>
   }
   if (positiveInteger(aim) && positiveInteger(cap) && aim > cap) {
     fail(`${label}.project.pr_size_aim must not be above pr_size_cap`);
+  }
+  if (
+    Object.hasOwn(project, "greptile_level") &&
+    !GREPTILE_LEVELS.includes(project.greptile_level as string)
+  ) {
+    fail(`${label}.project.greptile_level must be "base", "plus" or "apex"`);
   }
   const tracker = asTable(Object.hasOwn(data, "tracker") ? data.tracker : {}, `${label}.tracker`);
   if (!local) {
@@ -1054,8 +1065,9 @@ const mergedProfile = (shared: Rec, local: Rec, hasShared: boolean, hasLocal: bo
     project.generated_files = localProject.generated_files;
     sources["project.generated_files"] = "local";
   }
-  // The size budget has no discovered default either: each key appears only where a file names it.
-  for (const field of ["pr_size_aim", "pr_size_cap"]) {
+  // The size budget and the Greptile level have no discovered default either: each key appears only
+  // where a file names it.
+  for (const field of ["pr_size_aim", "pr_size_cap", "greptile_level"]) {
     if (Object.hasOwn(sharedProject, field)) {
       project[field] = sharedProject[field];
       sources[`project.${field}`] = "shared";
@@ -1380,6 +1392,16 @@ export const inspect = (repo: string, opts?: { storePath?: string }): Rec => {
 export const generatedFilesOf = (repo: string, opts?: { storePath?: string }): string[] => {
   const list = asTable(inspect(repo, opts).project, "project").generated_files;
   return Array.isArray(list) ? list.filter((glob): glob is string => typeof glob === "string") : [];
+};
+
+/**
+ * The effort a project asks of Greptile's review: base, plus or apex, and base where it names none.
+ * A person's file replaces the shared value, and a tracked settings file that waits for acceptance
+ * reads as absent, as everywhere else.
+ */
+export const greptileLevelOf = (repo: string, opts?: { storePath?: string }): string => {
+  const level = asTable(inspect(repo, opts).project, "project").greptile_level;
+  return typeof level === "string" ? level : "base";
 };
 
 /**
