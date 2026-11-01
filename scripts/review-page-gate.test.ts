@@ -2217,6 +2217,8 @@ describe("the real gate", () => {
         await wait("window.__gate.fileReady()");
         // The page sizes the layers behind the code from the box once the browser has laid it out.
         await wait("window.__gate.boxSized()");
+        // Web fonts that load late make the page group its lines again; let them finish before measuring.
+        await page.evaluate("document.fonts.ready.then(() => 0)");
         // The fault's style goes at the very end of the body, after the page's own style element, so
         // that it wins a tie, and its rules for a row start at .rows as the page's do, to be as specific.
         // The box is measured at rest and scrolled sideways, as the gate does.
