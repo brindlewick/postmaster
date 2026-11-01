@@ -1151,7 +1151,7 @@ describe("verdicts on a phone", () => {
   });
 
   test("tree-rows wants a count on folders and a badge and tick on files, and reports compacted rows", () => {
-    const clean = { dirs: 4, files: 11, noCount: [], noBadge: [], compacted: 2 };
+    const clean = { dirs: 4, files: 11, noCount: [], noBadge: [], compacted: 2, oddBadges: [] };
     const v = rowsVerdict(clean);
     expect(v.ok).toBe(true);
     expect(v.detail).toContain("2 compacted");
@@ -1159,9 +1159,12 @@ describe("verdicts on a phone", () => {
     expect(broken.ok).toBe(false);
     expect(broken.detail).toContain("src");
     expect(broken.detail).toContain("a.ts");
-    expect(rowsVerdict({ dirs: 0, files: 0, noCount: [], noBadge: [], compacted: 0 }).ok).toBe(
-      false,
-    );
+    const odd = rowsVerdict({ ...clean, oddBadges: ["R"] });
+    expect(odd.ok).toBe(false);
+    expect(odd.detail).toContain("badge R is drawn unlike");
+    expect(
+      rowsVerdict({ dirs: 0, files: 0, noCount: [], noBadge: [], compacted: 0, oddBadges: [] }).ok,
+    ).toBe(false);
   });
 
   test("tree-expand-collapse leaves only root files after collapse, and every file after expand", () => {
@@ -2141,10 +2144,11 @@ describe("the real gate", () => {
         // The page sizes the layers behind the code from the box once the browser has laid it out.
         await wait("window.__gate.boxSized()");
         // The fault's style goes at the very end of the body, after the page's own style element, so
-        // that it wins a tie. The box is measured at rest and scrolled sideways, as the gate does.
+        // that it wins a tie, and its rules for a row start at .rows as the page's do, to be as specific.
+        // The box is measured at rest and scrolled sideways, as the gate does.
         const measure = async (css: string): Promise<Verdict> => {
           await page.evaluate(
-            `document.getElementById("probe")?.remove(); const s = document.createElement("style"); s.id = "probe"; s.textContent = ${JSON.stringify(css)}; document.body.append(s)`,
+            `document.getElementById("probe")?.remove(); const s = document.createElement("style"); s.id = "probe"; s.textContent = ${JSON.stringify(css.replaceAll(".r ", ".rows .r "))}; document.body.append(s)`,
           );
           const at = (await page.evaluate("window.__gate.diffLayout(0)")) as DiffLayoutFacts;
           const scrolled = at.box.scrolls
@@ -2250,6 +2254,21 @@ describe("the real gate", () => {
             });
         expect(scrolled.length).toBeGreaterThan(0);
         expect(linesProblems(rest, scrolled)).toEqual([]);
+        // A regrouping that changes nothing (a fonts event, a box 4px narrower) keeps where a group is scrolled and the text selected in it.
+        const mark = `(() => { const g = Array.from(document.querySelectorAll("#code .grp")).sort((a, b) => b.scrollWidth - b.clientWidth - (a.scrollWidth - a.clientWidth))[0]; window.__g = g; g.scrollLeft = 100; getSelection().selectAllChildren(g.firstElementChild); return [Math.round(g.scrollLeft), getSelection().toString().length]; })()`;
+        const marked = (await page.evaluate(mark)) as number[];
+        expect(marked[0]).toBe(100);
+        expect(marked[1]).toBeGreaterThan(0);
+        await page.evaluate('document.fonts.dispatchEvent(new Event("loadingdone"))');
+        await page.setViewportSize({ width: 1020, height: 768 });
+        await page.evaluate(
+          "new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))",
+        );
+        expect(
+          await page.evaluate(
+            "[Math.round(window.__g.scrollLeft), getSelection().toString().length]",
+          ),
+        ).toEqual(marked);
         const labels = (await page.evaluate("window.__gate.labels()")) as LabelsFacts;
         expect(labels.labels.length).toBeGreaterThan(0);
         expect(labelProblems("viewer", labels)).toEqual([]);

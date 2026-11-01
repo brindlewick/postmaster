@@ -887,6 +887,8 @@ export interface RowsFacts {
   noBadge: string[];
   /** Folder rows that stand for a chain of folders. */
   compacted: number;
+  /** Status badges not drawn like the rest (another display, overflow or size than the commonest), by their letter. */
+  oddBadges: string[];
 }
 
 export function rowsVerdict(f: RowsFacts): Verdict {
@@ -895,6 +897,9 @@ export function rowsVerdict(f: RowsFacts): Verdict {
     ...(f.noCount.length > 0 ? [`no file count on ${f.noCount.slice(0, LISTED).join(", ")}`] : []),
     ...(f.noBadge.length > 0
       ? [`no badge or tick on ${f.noBadge.slice(0, LISTED).join(", ")}`]
+      : []),
+    ...(f.oddBadges.length > 0
+      ? [`the status badge ${f.oddBadges.slice(0, LISTED).join(", ")} is drawn unlike the others`]
       : []),
   ];
   return problems.length > 0
@@ -1808,12 +1813,22 @@ window.__gate = (() => {
     return { left: r ? r.left : 0, right: r ? r.right : 0, innerWidth: vw(), outside };
   };
 
+  // The status badges of the tree that are not drawn like the commonest: another display, overflow or size.
+  const oddBadges = () => {
+    const badges = all("#tree .badge").filter(shown);
+    const key = (b) => { const cs = getComputedStyle(b); return cs.display + cs.overflowX + b.offsetWidth + "x" + b.offsetHeight; };
+    const tally = {};
+    for (const b of badges) tally[key(b)] = (tally[key(b)] || 0) + 1;
+    const common = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
+    return badges.filter((b) => key(b) !== common).map((b) => b.textContent.trim());
+  };
+
   const rows = () => {
     const lis = all("#tree .trow");
     const dirs = lis.filter((li) => li.classList.contains("dir"));
     const files = lis.filter((li) => li.classList.contains("file"));
     return {
-      dirs: dirs.length, files: files.length,
+      dirs: dirs.length, files: files.length, oddBadges: oddBadges(),
       noCount: dirs.filter((li) => !/[0-9]+ files?/u.test((($(".tmeta", li) || {}).textContent) || "")).map(rowName),
       noBadge: files.filter((li) => !$(".badge", li) || !$(".tick", li)).map(rowName),
       compacted: dirs.filter((li) => rowName(li).includes("/")).length,

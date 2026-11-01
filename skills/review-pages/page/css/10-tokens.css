@@ -41,7 +41,7 @@ html.lock { overflow: hidden; }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 16px; line-height: 1.5; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button { font: inherit; color: inherit; }
-button, a, summary, .r { touch-action: manipulation; }
+button, a, summary, .rows .r { touch-action: manipulation; }
 .app { min-width: 0; overflow-x: clip; padding-bottom: var(--kb, 0px); }
 
 /* shared parts: buttons, the search box, ticks, pills, status badges */

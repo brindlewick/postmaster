@@ -1,13 +1,18 @@
 /* The file screen: the file's head, its unified diff, and the comment box that opens under a tapped
-   line. A run of consecutive lines wider than the code box scrolls sideways together as a group, a single
-   one alone (js/04-groups.js wraps each run in one scroll container, .grp, with the two lines that fit below
-   it, .tail, which stay at its left edge so that a finger can sit under the text); the code box and the page
-   never scroll. A row is the code and nothing in front of it, so the code starts a few pixels from the edge of
-   the screen: no sign column and no number column. The colour of a row says added or removed, with a thin
-   edge in a stronger colour at the left. The row's line number is faint, left aligned a few pixels in from
-   the left edge of the row, on a layer behind the code, and stays at the left edge of its group. Every row
-   of a group holds a faint shade layer at each edge, shown where the group goes on; a comment under a line
-   of a group, and the comment box, stay at its left edge. */
+   line. A line of the diff, a hunk header too, that is wider than the code box scrolls sideways with no
+   scrollbar, a run of consecutive ones together as a group and a single one alone; a line that fits ends
+   a run, but the first two below it stay in the group as .tail, pinned at its left edge, so that a finger
+   can sit under the text. js/04-groups.js wraps each run in one scroll container, .grp, and makes the runs
+   again when the width, Wrap or the fonts change; the code box and the page never scroll. A row is the
+   code and nothing in front of it, so the code starts a few pixels from the edge of the screen: no sign
+   column and no number column. The colour of a row says added or removed, with a thin edge in a stronger
+   colour at the left. The row's line number is faint, left aligned a few pixels in from the left edge of
+   the row, on a layer behind the code, and stays at the left edge of its group as the group scrolls. A
+   group that goes on past an edge of the screen has a faint shade there: every row of it holds a sticky
+   layer at each edge, and the script shows the layers of an edge with more of the group behind it. A
+   comment under a line of a group, and the comment box, stay in the group, pinned 6px in from its left
+   edge. The tree's status badge has the class r as a row has, so every rule for a row starts at .rows or
+   .grp. */
 .file-empty { margin: 0; padding: 32px 16px; text-align: center; color: var(--muted); font-size: 15px; }
 .file-card { background: var(--panel); border-block: 1px solid var(--rule); }
 .file-head { display: flex; align-items: flex-start; padding: 2px 4px 8px 2px; border-bottom: 1px solid var(--rule); }
@@ -19,26 +24,25 @@
 .file-foot .btn.quiet { flex: 1 1 0; }
 .code { --gap: 8px; --numgap: 6px; font: 13.5px/1.55 var(--font-code); padding-block: 2px; background: var(--panel); }
 .rows { container-type: inline-size; }
-.r, .hunk { display: flex; isolation: isolate; background: var(--panel); }
-.r { cursor: pointer; scroll-margin-top: 150px; }
+.rows :is(.r, .hunk) { --rb: var(--panel); display: flex; position: relative; isolation: isolate; background: var(--rb); }
+.rows .r { cursor: pointer; scroll-margin-top: 150px; }
 .grp { display: grid; grid-template-columns: minmax(max-content, 1fr); container-type: inline-size; overflow: auto hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
 .grp::-webkit-scrollbar { display: none; }
-.r .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: 100cqw; margin-right: -100cqw; padding-left: var(--numgap); display: grid; align-content: center; text-align: left; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
-.r .c, .hunk .c { position: relative; z-index: 1; flex: none; white-space: pre; padding: 3px var(--gap); }
-.rows.wrap .c { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.grp > :is(.r, .hunk)::before, .grp > :is(.r, .hunk)::after { content: ""; flex: none; position: sticky; width: 16px; margin-right: -16px; z-index: -1; visibility: hidden; }
+.rows .r > .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: 100cqw; margin-right: -100cqw; padding-left: var(--numgap); display: grid; align-content: center; text-align: left; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.rows :is(.r, .hunk) > .c { position: relative; z-index: 1; flex: none; white-space: pre; padding: var(--py, 3px) var(--gap); }
+.rows.wrap :is(.r, .hunk) > .c { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.grp > :is(.r, .hunk)::before, .grp > :is(.r, .hunk)::after { content: ""; flex: none; position: sticky; width: 16px; margin-right: -16px; align-self: stretch; z-index: -1; pointer-events: none; visibility: hidden; }
 .grp > :is(.r, .hunk)::before { left: 0; background: linear-gradient(to right, var(--fade), transparent); }
 .grp > :is(.r, .hunk)::after { order: -1; left: calc(100cqw - 16px); background: linear-gradient(to left, var(--fade), transparent); }
 .grp[data-l] > :is(.r, .hunk)::before, .grp[data-r] > :is(.r, .hunk)::after { visibility: visible; }
 .grp > .tail { position: sticky; left: 0; width: 100cqw; }
 .grp > .tail::before, .grp > .tail::after { display: none; }
 .grp > :is(.thread, .composer) { position: sticky; left: 6px; box-sizing: border-box; width: calc(100cqw - 12px); touch-action: pan-y; }
-.r.add { background: var(--add); } .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
-.r.del { background: var(--del); } .r.del > .n { box-shadow: inset 3px 0 0 var(--del-ink); }
-.r.sel { background: var(--mark); } .r.sel > .n { box-shadow: inset 3px 0 0 var(--mark-edge); }
-.r.flag { background: var(--accent-soft); } .r.flag > .n { box-shadow: inset 4px 0 0 var(--accent); }
-.hunk { background: var(--accent-soft); font-size: 13px; color: var(--muted); }
-.hunk .c { padding-block: 4px; }
+.rows .r.add { --rb: var(--add); } .rows .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
+.rows .r.del { --rb: var(--del); } .rows .r.del > .n { box-shadow: inset 3px 0 0 var(--del-ink); }
+.rows .r.sel { --rb: var(--mark); } .rows .r.sel > .n { box-shadow: inset 3px 0 0 var(--mark-edge); }
+.rows .r.flag { --rb: var(--accent-soft); } .rows .r.flag > .n { box-shadow: inset 4px 0 0 var(--accent); }
+.rows .hunk { --rb: var(--accent-soft); --py: 4px; font-size: 13px; color: var(--muted); }
 .status { padding: 14px var(--gap); font-size: 14.5px; color: var(--muted); }
 .more { display: block; box-sizing: border-box; width: 100%; min-height: 44px; font-size: 15px; color: var(--accent); background: var(--accent-soft); border: 0; cursor: pointer; }
 .thread { margin: 6px 6px 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; font-family: var(--font-ui); white-space: normal; }

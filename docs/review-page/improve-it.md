@@ -82,7 +82,10 @@ written once. A module may import one listed before it in `assets.json`.
   `regroup` makes the runs again: a resize observer on the code box calls it (a width, more lines) and so
   does the loading of fonts, and drawing a file and Wrap call it themselves, since they change no size. A
   label is made with `label(cls, text)` of `js/01-core.js` (the class `ln`), and whatever holds one gives it
-  a place of its own width. The `sideways` check holds both; the code viewer does the same.
+  a place of its own width. The `sideways` check holds both; the code viewer does the same, and its `regroup`
+  leaves a group and the text selected in a line where they are when nothing changes. The tree's status badge
+  has the class `r` as a row has, so every rule for a row in `css/60-file.css` starts at `.rows` or `.grp`;
+  the tree-rows check fails on a badge drawn unlike the others.
 - Keep the one width that matters, 1200 px: below it the page shows one screen at a time, from it the
   tree is a left pane. It is written in `css/80-wide.css`, in `js/09-nav.js` and as `WIDE_FROM` in
   `scripts/review-page-gate.ts`, and a test in `scripts/review-page-gate.test.ts` fails when the

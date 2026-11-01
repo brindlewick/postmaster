@@ -253,25 +253,57 @@ async function openFile(id, range) {
 
 // Groups of lines: a run of consecutive lines wider than the code box scrolls sideways together, wrapped in one scroll
 // container (.grp), a single such line alone; a line that fits ends a run, but the first two below it stay in the group
-// as its .tail. The runs are made again when the width, Fold or the fonts change. Where a group has more of itself to the
-// right, its rows show the shade of it.
+// as its .tail. The runs are made again when the width, Fold or the fonts change, moving as few lines as it takes: a
+// group that is as it was keeps its scroll, and a line that is not moved keeps the text selected in it. Where a group
+// has more of itself to the right, its rows show the shade of it.
 function edges(g) { g.toggleAttribute("data-r", g.scrollLeft + g.clientWidth < g.scrollWidth - 1); }
 
 function regroup() {
   const box = $("code").querySelector(".lines");
   if (!box || box.clientWidth === 0) return;
-  const rows = Array.from(box.querySelectorAll(".l"));
-  const wide = rows.map((r) => !$("code").classList.contains("fold") && r.lastElementChild.offsetWidth > box.clientWidth + 1);
-  box.replaceChildren(...rows);
+  const flat = [];
+  const was = new Map();
+  for (const e of Array.from(box.children)) {
+    if (!e.classList.contains("grp")) { flat.push(e); continue; }
+    for (const k of Array.from(e.children)) { flat.push(k); was.set(k, e.scrollLeft); }
+  }
+  const room = box.clientWidth + 1;
+  const folded = $("code").classList.contains("fold");
+  const plan = [];
   let run = null;
   let tails = 0;
-  rows.forEach((r, i) => {
-    const under = !wide[i] && run !== null && tails < 2;
-    r.classList.toggle("tail", under);
-    if (wide[i] && (run === null || tails > 0)) { run = document.createElement("div"); run.className = "grp"; run.tabIndex = -1; r.before(run); }
-    if (wide[i] || under) { tails = under ? tails + 1 : 0; run.append(r); } else run = null;
+  for (const e of flat) {
+    const wide = !folded && e.lastElementChild.offsetWidth > room;
+    const under = !wide && run !== null && tails < 2;
+    e.classList.toggle("tail", under);
+    if (wide) { if (run === null || tails > 0) { run = []; plan.push(run); } tails = 0; run.push(e); }
+    else if (under) { tails += 1; run.push(e); }
+    else { run = null; plan.push(e); }
+  }
+  const had = new Map();
+  for (const g of box.querySelectorAll(":scope > .grp")) had.set(g.firstElementChild, g);
+  const made = [];
+  const want = plan.map((p) => {
+    if (!Array.isArray(p)) return p;
+    const old = had.get(p[0]);
+    if (old && old.children.length === p.length && p.every((x, i) => old.children[i] === x)) return old;
+    const g = document.createElement("div");
+    g.className = "grp";
+    // Chrome makes a scroller a tab stop; a file has hundreds of groups.
+    g.tabIndex = -1;
+    g.append(...p);
+    made.push([g, was.get(p[0]) || 0]);
+    return g;
   });
-  for (const g of box.querySelectorAll(".grp")) edges(g);
+  const keep = new Set(want);
+  let at = box.firstElementChild;
+  for (const w of want) {
+    while (at !== null && at !== w && !keep.has(at)) at = at.nextElementSibling;
+    if (w === at) at = at.nextElementSibling; else box.insertBefore(w, at);
+  }
+  for (const e of Array.from(box.children)) if (!keep.has(e)) e.remove();
+  for (const [g, x] of made) if (x > 0) g.scrollLeft = x;
+  for (const g of box.querySelectorAll(":scope > .grp")) edges(g);
 }
 
 $("code").addEventListener("scroll", (ev) => { if (ev.target.matches(".grp")) edges(ev.target); }, true);
