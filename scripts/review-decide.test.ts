@@ -677,3 +677,115 @@ describe("--cause prints the decision and its cause", () => {
     expect(r.err.includes("usage:")).toBe(true);
   });
 });
+
+describe("the Greptile step's round", () => {
+  const cause = (d: string, round: string): { code: number; out: string } => {
+    const r = run(SELF, ["review-decide", d, round, "--cause"]);
+    return { code: r.code, out: r.out + r.err };
+  };
+  const step = (d: string, round: number): void => launched(d, "greptile", "greptile", round);
+  const missed = (d: string, round: number, why: string): void =>
+    logged(d, "degrade", "greptile", `greptile r${round}: ${why}`);
+  const reported = (d: string, round: number, n: number): void =>
+    logged(d, "review-harvest", "greptile", `greptile round ${round} reported ${n} findings`);
+
+  test("a review that was missed is a ruling at once, whatever the loop did before it", () => {
+    const d = newRun("greptile-missed");
+    loggedCounts(d, [2, 0], "gm");
+    launched(d, "luna", "bug", 1);
+    launched(d, "luna", "bug", 2);
+    step(d, 3);
+    missed(d, 3, "Not signed in.");
+    checkWhole(
+      decide(d, "3"),
+      0,
+      "RULING 3: the Greptile review was missed in round 3; escalate with residue",
+    );
+    checkWhole(cause(d, "3"), 0, "RULING greptile-missed");
+  });
+
+  test("a missed review is no round to retry in, in the first round of a run or a later one", () => {
+    const d = newRun("greptile-missed-first");
+    step(d, 1);
+    missed(d, 1, "Not signed in.");
+    checkWhole(cause(d, "1"), 0, "RULING greptile-missed");
+  });
+
+  test("a review that reported any findings is a ruling at once, the lowest severity included", () => {
+    const d = newRun("greptile-findings");
+    loggedCounts(d, [1, 0], "gf");
+    launched(d, "luna", "bug", 1);
+    launched(d, "luna", "bug", 2);
+    step(d, 3);
+    reported(d, 3, 1);
+    checkWhole(
+      decide(d, "3"),
+      0,
+      "RULING 3: the Greptile review reported 1 finding in round 3; escalate with residue",
+    );
+    checkWhole(cause(d, "3"), 0, "RULING greptile-findings");
+  });
+
+  test("a review that reported none ends the loop", () => {
+    const d = newRun("greptile-clean");
+    loggedCounts(d, [1, 0], "gc");
+    launched(d, "luna", "bug", 1);
+    launched(d, "luna", "bug", 2);
+    step(d, 3);
+    reported(d, 3, 0);
+    checkWhole(decide(d, "3"), 0, "STOP 3: the Greptile review reported no finding in round 3");
+    checkWhole(cause(d, "3"), 0, "STOP greptile-clean");
+  });
+
+  test("a step that began and has no result is a missed review", () => {
+    const d = newRun("greptile-unfinished");
+    step(d, 1);
+    checkWhole(cause(d, "1"), 0, "RULING greptile-missed");
+  });
+
+  test("the step's findings are no part of the loop's count", () => {
+    const d = newRun("greptile-count");
+    loggedCounts(d, [2, 0], "gk");
+    launched(d, "luna", "bug", 1);
+    launched(d, "luna", "bug", 2);
+    // Round 2 stopped the loop clean; the step's findings, logged in its round, must not read as
+    // a rise from it.
+    checkWhole(cause(d, "2"), 0, "STOP clean");
+    step(d, 3);
+    reported(d, 3, 2);
+    loggedCount(d, 3, 2, "gk");
+    checkWhole(cause(d, "2"), 0, "STOP clean");
+    checkWhole(cause(d, "3"), 0, "RULING greptile-findings");
+  });
+
+  test("a round of the loop after the step compares itself with the last round before it", () => {
+    const d = newRun("greptile-after");
+    loggedCounts(d, [3, 4], "ga");
+    launched(d, "luna", "bug", 1);
+    launched(d, "luna", "bug", 2);
+    step(d, 3);
+    reported(d, 3, 1);
+    // The user asked for another model round. Its 2 findings against round 2's 4 are converging,
+    // where against the step's round, which has no count of the loop's, they would read as a rise.
+    loggedCount(d, 4, 2, "gb");
+    launched(d, "luna", "bug", 4);
+    checkWhole(cause(d, "4"), 0, "RUN converging");
+    // And more than round 2's 4 is a rise as ever.
+    loggedCount(d, 4, 3, "gc");
+    checkWhole(cause(d, "4"), 0, "RULING rise");
+  });
+
+  test("a loop lens that went without a reviewer decides as it did, with the step beside it", () => {
+    const d = newRun("greptile-lens");
+    loggedCounts(d, [1, 0], "gl");
+    launched(d, "opus", "security", 1);
+    degraded(d, "opus", "security", 1, "r");
+    launched(d, "opus", "security", 2);
+    degraded(d, "opus", "security", 2, "r");
+    checkWhole(cause(d, "2"), 0, "RULING no-working-reviewer");
+    step(d, 3);
+    missed(d, 3, "x");
+    checkWhole(cause(d, "2"), 0, "RULING no-working-reviewer");
+    checkWhole(cause(d, "3"), 0, "RULING greptile-missed");
+  });
+});
