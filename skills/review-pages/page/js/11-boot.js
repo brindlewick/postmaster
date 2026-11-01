@@ -3,6 +3,7 @@ import { $ } from "./01-core.js";
 import { loadReview, prepare } from "./02-data.js";
 import { connectDb, loadTicks, repaintTicks } from "./03-ticks.js";
 import { initComposer } from "./04-diff.js";
+import { watchGroups } from "./04-groups.js";
 import { initTree, initTreeState, renderTree } from "./05-tree.js";
 import { initGroupState, initOrder, renderOrder } from "./06-order.js";
 import { initOverview, renderOverview } from "./07-overview.js";
@@ -23,6 +24,7 @@ async function boot() {
   initTreeState();
   initGroupState();
   initComposer();
+  watchGroups();
   initTree();
   initOrder();
   initFind();

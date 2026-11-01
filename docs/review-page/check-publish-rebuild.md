@@ -42,8 +42,24 @@ longest line, and fails on a sign column or a number column in front of the code
 starts more than 16 px from the left edge (of the window, or of its own box beside the tree), and on
 a line number that is not a faint layer behind the code: below it in stacking order, left aligned 6
 px in from the left edge of the row (within 2 px) and centered down the row, never taking a tap,
-between 0.15 and 0.5 alpha, and still 6 px in from the left edge of the box after the box is
+between 0.15 and 0.5 alpha, and still 6 px in from the left edge of its row after its group is
 scrolled sideways.
+
+Every run but the plain one also serves the first file with a diff as a file of synthetic lines (a run
+of three wide lines, a short line below it, a single wide line, a line a little wider than a phone, and
+a run that depends on the width) and fails unless the lines wider than the box are in groups that are
+exactly the runs of them and the two lines below each (`sideways`): each a scroll container with no
+scrollbar and no scroll chained to the page, shaded at the edge it goes on past, that scrolls alone, with
+the lines below it staying at its left edge and taking a touch. With touch, real swipes must move one
+line's group alone and select nothing, and scroll the page from a line and from a file name; the comment
+box stays at the left edge of its group and its text field leaves a sideways swipe to the page; the
+groups are made again when the window is unfolded or folded and when the fonts change. On the file
+screen, the overview, the order, the tree and the file list it gives every one-line label a path's worth
+of text and fails unless each is wider than its place, on one row with a fade, scrolls alone with no
+scrollbar, lies over no control and leaves the page its width; a tap on a name in the order list still
+opens the file. A diff of more lines than the page draws
+at a time gets its Show more button pressed (`show-more`): the button is part of no group and the group
+keeps where it was scrolled.
 
 Screenshots and `report.json` go to `--out` (default: a new temporary folder). `--quick` keeps 390
 px light and dark, 1199 px light, 1200 px light and the plain run, so both sides of the 1200 px

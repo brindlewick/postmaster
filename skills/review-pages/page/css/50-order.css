@@ -12,14 +12,14 @@
 .gsub { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
 .gnote { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--ex); color: var(--ex-ink); font-size: 14px; }
 .gcount { flex: none; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.gbody { display: none; margin-top: 8px; gap: 8px; }
+.gbody { display: none; grid-template-columns: minmax(0, 1fr); margin-top: 8px; gap: 8px; }
 .ogroup.open > .gbody { display: grid; }
 .orow { display: flex; align-items: flex-start; background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; }
 .orow.done { border-color: var(--ok); }
 .orow.current { background: var(--accent-soft); }
-.ogo { flex: 1 1 0; min-width: 0; min-height: 56px; padding: 6px 4px 8px 14px; text-align: left; background: none; border: 0; cursor: pointer; }
-.fdir { display: block; font: 400 13px/1.35 var(--font-code); color: var(--muted); overflow-wrap: anywhere; }
-.fname { display: block; font: 600 15px/1.35 var(--font-code); overflow-wrap: anywhere; }
+.ogo { flex: 1 1 0; min-width: 0; min-height: 56px; padding: 6px 10px 8px 14px; text-align: left; background: none; border: 0; cursor: pointer; }
+.fdir { display: block; font: 400 13px/1.35 var(--font-code); color: var(--muted); }
+.fname { display: block; font: 600 15px/1.35 var(--font-code); }
 .fpurpose { display: block; margin-top: 3px; font-size: 15px; line-height: 1.4; color: var(--ink); }
 .fmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 5px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .ghead::after { transition: none; } }

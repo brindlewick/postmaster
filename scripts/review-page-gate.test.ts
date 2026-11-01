@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createStandIn, type StandInOptions } from "./lib/page-bridge-stand-in.ts";
+import { createSampleRepo } from "./lib/review-sample.ts";
 import { snapshotDescendants } from "./lib/processes.ts";
 import { run, withTempDir } from "./lib/proc.ts";
 import {
@@ -40,6 +41,13 @@ import {
   isAllowedHost,
   judge,
   KIT,
+  type GroupFacts,
+  type LabelFacts,
+  type LabelsFacts,
+  labelProblems,
+  type LineFacts,
+  type LinesFacts,
+  linesProblems,
   loadPlaywright,
   matrix,
   MAX_CODE_OFFSET,
@@ -66,6 +74,10 @@ import {
   servedPath,
   shortReport,
   shotPath,
+  runsOf,
+  type SidewaysFacts,
+  type Swipes,
+  showMoreVerdict,
   sidewaysVerdict,
   splitVerdict,
   startServer,
@@ -1142,7 +1154,7 @@ describe("verdicts on a phone", () => {
   });
 
   test("tree-rows wants a count on folders and a badge and tick on files, and reports compacted rows", () => {
-    const clean = { dirs: 4, files: 11, noCount: [], noBadge: [], compacted: 2 };
+    const clean = { dirs: 4, files: 11, noCount: [], noBadge: [], compacted: 2, oddBadges: [] };
     const v = rowsVerdict(clean);
     expect(v.ok).toBe(true);
     expect(v.detail).toContain("2 compacted");
@@ -1150,9 +1162,10 @@ describe("verdicts on a phone", () => {
     expect(broken.ok).toBe(false);
     expect(broken.detail).toContain("src");
     expect(broken.detail).toContain("a.ts");
-    expect(rowsVerdict({ dirs: 0, files: 0, noCount: [], noBadge: [], compacted: 0 }).ok).toBe(
-      false,
-    );
+    const odd = rowsVerdict({ ...clean, oddBadges: ["R"] });
+    expect(odd.ok).toBe(false);
+    expect(odd.detail).toContain("badge R is drawn unlike");
+    expect(rowsVerdict({ ...clean, dirs: 0, files: 0 }).ok).toBe(false);
   });
 
   test("tree-expand-collapse leaves only root files after collapse, and every file after expand", () => {
@@ -1270,21 +1283,252 @@ describe("verdicts on a phone", () => {
     expect(outside.detail).toContain("inside");
   });
 
-  test("sideways wants the page still and the code box scrollable where it overflows", () => {
-    const box = {
-      boxScrolls: true,
+  describe("sideways wants the lines wider than the box in groups, and the labels, scrolling alone", () => {
+    // The hunk header first, then S fits any box, M is wider than a phone's and fits a folded-out phone's, L is wider than any.
+    const KINDS = "L L S M L L L S L S M M L";
+    const WIDTH: Record<string, number> = { S: 100, M: 600, L: 1500 };
+    const open: GroupFacts = {
+      left: 0,
+      room: 1000,
       overflowX: "auto",
-      scrollLeft: 200,
-      pageScrollWidth: 390,
-      innerWidth: 390,
+      bar: "none none",
+      touch: "auto",
+      overscroll: "contain auto",
+      tab: "-1",
+      shade: "hidden",
+      shadeR: "visible",
+      below: true,
     };
-    expect(sidewaysVerdict(box).ok).toBe(true);
-    expect(
-      sidewaysVerdict({ ...box, boxScrolls: false, scrollLeft: 0, overflowX: "visible" }).ok,
-    ).toBe(true);
-    expect(sidewaysVerdict({ ...box, pageScrollWidth: 520 }).ok).toBe(false);
-    expect(sidewaysVerdict({ ...box, overflowX: "hidden" }).ok).toBe(false);
-    expect(sidewaysVerdict({ ...box, scrollLeft: 0 }).ok).toBe(false);
+    /** The lines of a file in a box `room` px wide, in the groups the page makes unless `groups` places them. */
+    const diff = (room: number, groups?: readonly number[]): LinesFacts => {
+      const lines = KINDS.split(" ").map((k, i) => ({
+        line: i === 0 ? "hunk" : String(i),
+        own: WIDTH[k] ?? 0,
+        group: -1,
+        num: i === 0 ? null : 8,
+      }));
+      const runs = runsOf(lines, room);
+      const placed = lines.map((l, i) => ({ ...l, group: groups?.[i] ?? runs[i] ?? -1 }));
+      const count = Math.max(-1, ...placed.map((l) => l.group)) + 1;
+      return {
+        room,
+        lines: placed,
+        groups: Array.from({ length: count }, () => open),
+        composer: null,
+        field: null,
+        focus: true,
+        selected: 0,
+        button: false,
+        pageX: 0,
+        pageY: 0,
+        boxLeft: 0,
+        pageWidth: room,
+        innerWidth: room,
+      };
+    };
+    /** `f` with its group number `group` scrolled `left` px, the others at 0, and the shade as the page draws it. */
+    const at = (f: LinesFacts, group: number, left = 200): LinesFacts => ({
+      ...f,
+      groups: f.groups.map((g, k) => {
+        const x = k === group ? left : 0;
+        return {
+          ...g,
+          left: x,
+          shade: x > 0 ? "visible" : "hidden",
+          shadeR: g.room - x > 0 ? "visible" : "hidden",
+        };
+      }),
+    });
+    const rest = diff(390);
+    const swipes: Swipes = {
+      // Group 2 is the single wide line.
+      along: { ...at(rest, 2, 135), pageY: 130 },
+      up: { ...rest, pageY: 135 },
+      upBy: 135,
+      name: 135,
+    };
+    const good: SidewaysFacts = {
+      rest,
+      scrolled: [0, 1, 2, 3].map((group) => ({ group, after: at(rest, group) })),
+      swipes,
+      comment: [
+        { ...rest, composer: 6, field: "pan-y" },
+        { ...at(rest, 1), composer: 6, field: "pan-y" },
+      ],
+      resized: diff(755),
+      fonts: diff(755),
+    };
+    const label: LabelFacts = {
+      wide: true,
+      overflowX: "auto",
+      bar: "none none",
+      overscroll: "contain auto",
+      nowrap: true,
+      fade: true,
+      over: false,
+      tab: "-1",
+      left: 100,
+    };
+    const labelsOf = (labels: LabelsFacts["labels"], pageWidth = 390, cut = 0): LabelsFacts => ({
+      labels,
+      cut,
+      pageWidth,
+      innerWidth: 390,
+    });
+    const tree = (facts: LabelsFacts) => [{ screen: "tree", facts }];
+    const calm = tree(labelsOf([label, { ...label, left: 0 }]));
+    const place = (f: LinesFacts, line: number, over: Partial<LineFacts>): LinesFacts => ({
+      ...f,
+      lines: f.lines.map((l, i) => (i === line ? { ...l, ...over } : l)),
+    });
+    const group = (f: LinesFacts, k: number, over: Partial<GroupFacts>): LinesFacts => ({
+      ...f,
+      groups: f.groups.map((g, i) => (i === k ? { ...g, ...over } : g)),
+    });
+
+    test("groups that are the runs, scrolling alone, with swipes, the comment box pinned and the groups made again at the other width and with the fonts pass", () => {
+      const v = sidewaysVerdict(good, calm);
+      expect(v.ok).toBe(true);
+      expect(v.detail).toContain("4 groups of 2, 4, 1, 3 lines");
+    });
+
+    test("a window with no touch and no other width gives no swipes and no second width, and passes", () => {
+      expect(sidewaysVerdict({ ...good, swipes: null, resized: null }, calm).ok).toBe(true);
+    });
+
+    test("each fault in the lines is named", () => {
+      const restOf = (r: LinesFacts): SidewaysFacts => ({ ...good, rest: r });
+      const badGroup = (k: number, over: Partial<GroupFacts>): SidewaysFacts =>
+        restOf(group(rest, k, over));
+      const scrolledOf = (after: LinesFacts): SidewaysFacts => ({
+        ...good,
+        scrolled: [{ group: 0, after }],
+      });
+      const swiped = (over: Partial<Swipes>): SidewaysFacts => ({
+        ...good,
+        swipes: { ...swipes, ...over },
+      });
+      const commentOf = (opened: LinesFacts, pinned: LinesFacts): SidewaysFacts => ({
+        ...good,
+        comment: [opened, pinned],
+      });
+      const field = (f: string) =>
+        commentOf({ ...rest, composer: 6, field: f }, { ...at(rest, 1), composer: 6, field: f });
+      const runs = "the groups are not the runs";
+      const stale = rest.lines.map((l) => l.group);
+      const cases: readonly (readonly [SidewaysFacts, string])[] = [
+        [restOf(place(rest, 8, { group: -1 })), runs],
+        [restOf(place(rest, 7, { group: -1 })), runs],
+        [restOf(place(rest, 0, { group: -1 })), runs],
+        [badGroup(0, { overflowX: "visible" }), "not a scroll container"],
+        [badGroup(1, { bar: "auto none" }), "not a scroll container"],
+        [badGroup(2, { touch: "pan-y" }), "not a scroll container"],
+        [badGroup(3, { overscroll: "contain contain" }), "not a scroll container"],
+        [badGroup(3, { tab: null }), "not a scroll container"],
+        [badGroup(1, { shade: "visible" }), "left shade visible"],
+        [badGroup(1, { shadeR: "hidden" }), "right shade hidden"],
+        [restOf({ ...rest, pageWidth: 520 }), "the page is 520px"],
+        [scrolledOf(at(rest, 0, 0)), "did not scroll sideways"],
+        [scrolledOf(group(at(rest, 0), 1, { left: 9 })), "moved another group"],
+        [scrolledOf({ ...at(rest, 0), pageX: 5 }), "moved the page or the code box"],
+        [
+          scrolledOf(group(at(rest, 0), 0, { shade: "hidden" })),
+          "left shade hidden, scrolled 200px",
+        ],
+        [scrolledOf(group(at(rest, 0), 0, { below: false })), "the lines below group 0"],
+        [
+          scrolledOf({
+            ...at(rest, 0),
+            lines: rest.lines.map((l) =>
+              l.group === 0 && l.num !== null ? { ...l, num: l.num - 200 } : l,
+            ),
+          }),
+          "numbers of group 0 scrolled away",
+        ],
+        [swiped({ along: rest }), "a swipe along a line did not move its group alone"],
+        [
+          swiped({ along: group(at(rest, 2, 135), 3, { left: 100 }) }),
+          "did not move its group alone",
+        ],
+        [swiped({ along: { ...swipes.along, selected: 1 } }), "a swipe along a line selected it"],
+        [swiped({ upBy: 0 }), "a swipe up from a line did not scroll the page alone"],
+        [swiped({ up: at(rest, 2, 135) }), "from a line did not scroll the page alone"],
+        [swiped({ name: 0 }), "a swipe up from a file name did not scroll the page"],
+        [field("auto"), "text field takes a sideways swipe"],
+        [commentOf(rest, rest), "the comment box does not stay at the left edge"],
+        [{ ...good, resized: { ...diff(755), focus: false } }, "lost the focus"],
+        [{ ...good, resized: diff(755, stale) }, "after the window changed width"],
+        [{ ...good, resized: diff(390) }, "nothing was made again"],
+        [{ ...good, fonts: diff(755, stale) }, "after the fonts changed"],
+        [restOf({ ...rest, lines: rest.lines.slice(0, 4) }), "no run of three"],
+      ];
+      for (const [facts, fragment] of cases) {
+        const v = sidewaysVerdict(facts, calm);
+        expect([fragment, v.ok, v.detail.includes(fragment) ? "named" : v.detail]).toEqual([
+          fragment,
+          false,
+          "named",
+        ]);
+      }
+    });
+
+    test("each fault in the labels is named", () => {
+      const cases: readonly (readonly [LabelsFacts, string])[] = [
+        [labelsOf([]), "no one-line label"],
+        [labelsOf([{ ...label, wide: false }]), "as wide as its text"],
+        [labelsOf([{ ...label, overflowX: "hidden" }]), "no scroll container"],
+        [labelsOf([{ ...label, bar: "auto none" }]), "shows a scrollbar"],
+        [labelsOf([{ ...label, nowrap: false }]), "folds"],
+        [labelsOf([{ ...label, tab: null }]), "takes a tab stop"],
+        [labelsOf([{ ...label, overscroll: "auto auto" }]), "chains a sideways swipe"],
+        [labelsOf([{ ...label, fade: false }]), "no fade at its ends"],
+        [labelsOf([{ ...label, over: true }]), "lies over a control"],
+        [labelsOf([label, { ...label, left: 5 }]), "did not move it alone"],
+        [labelsOf([{ ...label, left: 0 }]), "did not move it alone"],
+        [labelsOf([label], 520), "the page is 520px"],
+        [labelsOf([label], 390, 2), "count line of a file is cut off"],
+      ];
+      for (const [facts, fragment] of cases) {
+        const v = sidewaysVerdict(good, tree(facts));
+        expect([fragment, v.ok]).toEqual([fragment, false]);
+        expect([fragment, v.detail.includes("tree: "), v.detail.includes(fragment)]).toEqual([
+          fragment,
+          true,
+          true,
+        ]);
+      }
+    });
+
+    test("show-more wants the button in no group, and one group scrolled where it was after it", () => {
+      const row = (i: number, g = 0) => ({ line: String(i), own: 1500, group: g, num: 8 });
+      const wide = (n: number, left: number, button = false): LinesFacts => ({
+        ...at(
+          {
+            ...diff(390),
+            lines: Array.from({ length: n }, (_, i) => row(i)),
+            groups: [open],
+            button,
+          },
+          0,
+          left,
+        ),
+      });
+      expect(showMoreVerdict(wide(400, 200), wide(451, 200)).ok).toBe(true);
+      const cases: readonly (readonly [LinesFacts, LinesFacts, string])[] = [
+        [wide(400, 200, true), wide(451, 200), "button is part of a group"],
+        [wide(400, 0), wide(451, 0), "did not scroll"],
+        [wide(400, 200), wide(451, 0), "is 0px after Show more"],
+        [
+          wide(400, 200),
+          { ...wide(450, 200), lines: [...wide(450, 200).lines, row(450, -1)] },
+          "after Show more",
+        ],
+      ];
+      for (const [before, after, fragment] of cases) {
+        const v = showMoreVerdict(before, after);
+        expect([fragment, v.ok, v.detail.includes(fragment)]).toEqual([fragment, false, true]);
+      }
+    });
   });
 
   test("wrap flips with each tap, the wrapped lines fit their box, and the page never scrolls sideways", () => {
@@ -1292,10 +1536,17 @@ describe("verdicts on a phone", () => {
       pressed: "false",
       wrapped: false,
       boxScrolls: true,
+      overflows: true,
       pageScrollWidth: 390,
       innerWidth: 390,
     };
-    const on: WrapState = { ...off, pressed: "true", wrapped: true, boxScrolls: false };
+    const on: WrapState = {
+      ...off,
+      pressed: "true",
+      wrapped: true,
+      boxScrolls: false,
+      overflows: false,
+    };
     expect(wrapVerdict(off, on, off).ok).toBe(true);
     // A page that starts with the lines wrapped is as good: the taps flip it the other way first.
     expect(wrapVerdict(on, off, on).ok).toBe(true);
@@ -1305,10 +1556,13 @@ describe("verdicts on a phone", () => {
     expect(wrapVerdict(off, { ...on, pressed: "false" }, off).ok).toBe(false);
     // A second tap that does not bring the first state back.
     expect(wrapVerdict(off, on, on).ok).toBe(false);
+    expect(wrapVerdict(off, on, { ...off, boxScrolls: false }).ok).toBe(false);
     // Lines that are wrapped and still scroll in their box.
     const still = wrapVerdict(off, { ...on, boxScrolls: true }, off);
     expect(still.ok).toBe(false);
     expect(still.detail).toContain("still scroll");
+    // Lines that are wrapped and still go past their box, with no group to scroll them.
+    expect(wrapVerdict(off, { ...on, overflows: true }, off).ok).toBe(false);
     // The page wider than the window in any of the three states.
     const wide = wrapVerdict(off, { ...on, pageScrollWidth: 520 }, off);
     expect(wide.ok).toBe(false);
@@ -1963,11 +2217,14 @@ describe("the real gate", () => {
         await wait("window.__gate.fileReady()");
         // The page sizes the layers behind the code from the box once the browser has laid it out.
         await wait("window.__gate.boxSized()");
+        // Web fonts that load late make the page group its lines again; let them finish before measuring.
+        await page.evaluate("document.fonts.ready.then(() => 0)");
         // The fault's style goes at the very end of the body, after the page's own style element, so
-        // that it wins a tie. The box is measured at rest and scrolled sideways, as the gate does.
+        // that it wins a tie, and its rules for a row start at .rows as the page's do, to be as specific.
+        // The box is measured at rest and scrolled sideways, as the gate does.
         const measure = async (css: string): Promise<Verdict> => {
           await page.evaluate(
-            `document.getElementById("probe")?.remove(); const s = document.createElement("style"); s.id = "probe"; s.textContent = ${JSON.stringify(css)}; document.body.append(s)`,
+            `document.getElementById("probe")?.remove(); const s = document.createElement("style"); s.id = "probe"; s.textContent = ${JSON.stringify(css.replaceAll(".r ", ".rows .r "))}; document.body.append(s)`,
           );
           const at = (await page.evaluate("window.__gate.diffLayout(0)")) as DiffLayoutFacts;
           const scrolled = at.box.scrolls
@@ -1978,7 +2235,7 @@ describe("the real gate", () => {
         };
         const clean = await measure("");
         expect(clean.detail).toContain("left aligned");
-        expect(clean.detail).toContain("pinned while the box scrolls sideways");
+        expect(clean.detail).toContain("pinned while a group scrolls sideways");
         expect(clean.ok).toBe(true);
         const faults: readonly (readonly [string, string])[] = [
           [".r .c { padding-left: 60px }", "at most 16px"],
@@ -2005,6 +2262,92 @@ describe("the real gate", () => {
         }
         // The faults taken away, the page is clean again.
         expect((await measure("")).ok).toBe(true);
+        await context.close();
+      } finally {
+        await browser?.close().catch(() => undefined);
+        server.stop();
+      }
+      expect(await lingering()).toEqual([]);
+    });
+  });
+
+  // The code viewer (review-page files) keeps what the page does: lines wider than the box scroll in groups on their
+  // own and so do its labels, read through the same helpers and verdicts as the page's sideways check. At 1024 px its
+  // files are a column; on a phone they are a strip that scrolls as a whole.
+  test("the code viewer: lines wider than the box and its labels scroll on their own", async () => {
+    const playwright = await loadPlaywright(process.env);
+    if (playwright === null) {
+      expect(describeMissing(process.env)).toContain("PLAYWRIGHT_CORE");
+      return;
+    }
+    await withTempDir(async (tmp) => {
+      const repo = createSampleRepo(tmp);
+      const out = join(tmp, "viewer");
+      const args = [
+        join(import.meta.dir, "review-page.ts"),
+        "files",
+        out,
+        repo.head,
+        "pnpm-lock.yaml",
+      ];
+      expect(run(process.execPath, ["--no-env-file", ...args], { cwd: repo.dir }).code).toBe(0);
+      const server = startServer(out);
+      let browser: PwBrowser | undefined;
+      try {
+        try {
+          browser = await playwright.chromium.launch({
+            headless: true,
+            executablePath: chromiumPath(process.env),
+          });
+        } catch (e) {
+          // Playwright loads but no Chromium starts here: the real gate's test says why.
+          expect(failure(e).length).toBeGreaterThan(0);
+          return;
+        }
+        const context = await browser.newContext(contextOptions(runNamed("w1024-light")));
+        await context.addInitScript(KIT);
+        const page = await context.newPage();
+        // The viewer is one complete document, with its files inside it: the gate's wrapper is not put round it.
+        await page.goto(`${server.origin}/plain.html`, { waitUntil: "load", timeout: 45_000 });
+        await page.waitForFunction('document.querySelectorAll("#code .l").length > 0', undefined, {
+          timeout: 30_000,
+          polling: 50,
+        });
+        const lines = (index: number, left?: number): Promise<LinesFacts> =>
+          page.evaluate(
+            `window.__gate.lines(${index}, ${left}, "#code .lines", ".l")`,
+          ) as Promise<LinesFacts>;
+        const rest = await lines(-1);
+        const scrolled = [];
+        for (const group of new Set(rest.lines.map((l) => l.group)))
+          if (group >= 0)
+            scrolled.push({
+              group,
+              after: await lines(
+                rest.lines.findIndex((l) => l.group === group),
+                200,
+              ),
+            });
+        expect(scrolled.length).toBeGreaterThan(0);
+        expect(linesProblems(rest, scrolled)).toEqual([]);
+        // A regrouping that changes nothing (a fonts event, a box 4px narrower) keeps where a group is scrolled and the text selected in it.
+        const mark = `(() => { const g = Array.from(document.querySelectorAll("#code .grp")).sort((a, b) => b.scrollWidth - b.clientWidth - (a.scrollWidth - a.clientWidth))[0]; window.__g = g; g.scrollLeft = 100; getSelection().selectAllChildren(g.firstElementChild); return [Math.round(g.scrollLeft), getSelection().toString().length]; })()`;
+        const marked = (await page.evaluate(mark)) as number[];
+        expect(marked[0]).toBe(100);
+        expect(marked[1]).toBeGreaterThan(0);
+        await page.evaluate('document.fonts.dispatchEvent(new Event("loadingdone"))');
+        await page.setViewportSize({ width: 1020, height: 768 });
+        await page.evaluate(
+          "new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))",
+        );
+        expect(
+          await page.evaluate(
+            "[Math.round(window.__g.scrollLeft), getSelection().toString().length]",
+          ),
+        ).toEqual(marked);
+        const labels = (await page.evaluate("window.__gate.labels()")) as LabelsFacts;
+        expect(labels.labels.length).toBeGreaterThan(0);
+        expect(labelProblems("viewer", labels)).toEqual([]);
         await context.close();
       } finally {
         await browser?.close().catch(() => undefined);

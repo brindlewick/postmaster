@@ -25,6 +25,7 @@
     "js/02-data.js",
     "js/03-ticks.js",
     "js/04-diff.js",
+    "js/04-groups.js",
     "js/05-tree.js",
     "js/06-order.js",
     "js/07-overview.js",

@@ -4,7 +4,7 @@
   --bg: #f5f6f8; --panel: #ffffff; --ink: #1c2230; --muted: #5a6475; --rule: #dfe3ea;
   --accent: #1d5ca8; --accent-soft: #e5eefa; --on-accent: #ffffff;
   --add: #e6f4ea; --add-ink: #1f6f37; --del: #fbeaea; --del-ink: #a3261a;
-  --mark: #fff1b5; --mark-edge: #d9a700; --gutter: #8b94a4; --lnum: rgba(28, 34, 48, .22);
+  --mark: #fff1b5; --mark-edge: #d9a700; --gutter: #8b94a4; --lnum: rgba(28, 34, 48, .22); --fade: rgba(28, 34, 48, .13);
   --ex: #fbeedf; --ex-ink: #8f4a00; --ok: #1f6f37; --bad: #a3261a;
   --hl-keyword: #4338ca; --hl-string: #1f6f37; --hl-comment: #6b7380; --hl-number: #9c4a00;
   --hl-title: #0d6880; --hl-type: #8330b0; --hl-meta: #a3261a;
@@ -18,7 +18,7 @@
     --bg: #12161d; --panel: #181d26; --ink: #e3e7ee; --muted: #9aa3b2; --rule: #2a313d;
     --accent: #8ab8f2; --accent-soft: #1d2b40; --on-accent: #10151c;
     --add: #15301f; --add-ink: #8fd69b; --del: #3a1a1a; --del-ink: #ff9c8f;
-    --mark: #3d3412; --mark-edge: #c99c1a; --gutter: #6c7686; --lnum: rgba(227, 231, 238, .22);
+    --mark: #3d3412; --mark-edge: #c99c1a; --gutter: #6c7686; --lnum: rgba(227, 231, 238, .22); --fade: rgba(227, 231, 238, .18);
     --ex: #3a2a16; --ex-ink: #f0b46a; --ok: #8fd69b; --bad: #ff9c8f;
     --hl-keyword: #a5b0ff; --hl-string: #8fd69b; --hl-comment: #8b95a5; --hl-number: #f2b66b;
     --hl-title: #6fd0e2; --hl-type: #d6a8ff; --hl-meta: #ff9c8f;
@@ -29,7 +29,7 @@
   --bg: #12161d; --panel: #181d26; --ink: #e3e7ee; --muted: #9aa3b2; --rule: #2a313d;
   --accent: #8ab8f2; --accent-soft: #1d2b40; --on-accent: #10151c;
   --add: #15301f; --add-ink: #8fd69b; --del: #3a1a1a; --del-ink: #ff9c8f;
-  --mark: #3d3412; --mark-edge: #c99c1a; --gutter: #6c7686; --lnum: rgba(227, 231, 238, .22);
+  --mark: #3d3412; --mark-edge: #c99c1a; --gutter: #6c7686; --lnum: rgba(227, 231, 238, .22); --fade: rgba(227, 231, 238, .18);
   --ex: #3a2a16; --ex-ink: #f0b46a; --ok: #8fd69b; --bad: #ff9c8f;
   --hl-keyword: #a5b0ff; --hl-string: #8fd69b; --hl-comment: #8b95a5; --hl-number: #f2b66b;
   --hl-title: #6fd0e2; --hl-type: #d6a8ff; --hl-meta: #ff9c8f;
@@ -41,7 +41,7 @@ html.lock { overflow: hidden; }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 16px; line-height: 1.5; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button { font: inherit; color: inherit; }
-button, a, summary, .r { touch-action: manipulation; }
+button, a, summary, .rows .r { touch-action: manipulation; }
 .app { min-width: 0; overflow-x: clip; padding-bottom: var(--kb, 0px); }
 
 /* shared parts: buttons, the search box, ticks, pills, status badges */
@@ -62,6 +62,12 @@ button, a, summary, .r { touch-action: manipulation; }
 .badge.r { background: var(--ex); color: var(--ex-ink); }
 .plus { color: var(--add-ink); font-weight: 600; }
 .minus { color: var(--del-ink); font-weight: 600; font-style: normal; }
+/* A one-line label (a name, a path, a count) wider than its place scrolls sideways on its own, with no scrollbar. Its
+   text fades over 10px of padding at each end that an equal negative margin takes back, so a label that fits shows no
+   fade. Whatever holds a label leaves 10px beside it and gives it a place of its own width (a grid track is
+   minmax(0, 1fr), a flex item has min-width 0), so that the place never grows to the text. */
+.ln { white-space: nowrap; overflow: auto hidden; overscroll-behavior-x: contain; scrollbar-width: none; padding-inline: 10px; margin-inline: -10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 10px), transparent); }
+.ln::-webkit-scrollbar { display: none; }
 .hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-selector-tag { color: var(--hl-keyword); }
 .hljs-string, .hljs-regexp, .hljs-template-string, .hljs-code { color: var(--hl-string); }
 .hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }

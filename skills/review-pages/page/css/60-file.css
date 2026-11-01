@@ -1,39 +1,55 @@
 /* The file screen: the file's head, its unified diff, and the comment box that opens under a tapped
-   line. The diff scrolls sideways inside its own box; the page never does. A row is the code and
-   nothing in front of it, so the code starts a few pixels from the edge of the screen: no sign column
-   and no number column. The colour of a row says added or removed, with a thin edge in a stronger
-   colour at the left. The row's line number is faint, left aligned a few pixels in from the left
-   edge of the row, on a layer behind the code. */
+   line. A line of the diff, a hunk header too, wider than the code box scrolls sideways with no scrollbar,
+   a run of consecutive ones together as a group and a single one alone; a line that fits ends a run, but
+   the first two below it stay in the group as .tail, pinned at its left edge, so that a finger can sit
+   under the text. js/04-groups.js wraps each run in one scroll container, .grp, and makes the runs again
+   when the width, Wrap or the fonts change; the code box and the page never scroll. A row is the code and
+   nothing in front of it: no sign column and no number column. The colour of a row says added or removed,
+   with a thin edge in a stronger colour at the left. The row's line number is a faint layer behind the
+   code, left aligned a few pixels in, that stays at the left edge of its group. A group that goes on past
+   an edge has a faint shade there: every row of it holds a sticky layer at each edge, shown by the script
+   where the group has more behind it. A comment under a line of a group, and the comment box, stay in the
+   group, pinned 6px in from its left edge. The tree's status badge has the class r as a row has, so every
+   rule for a row starts at .rows or .grp. */
 .file-empty { margin: 0; padding: 32px 16px; text-align: center; color: var(--muted); font-size: 15px; }
 .file-card { background: var(--panel); border-block: 1px solid var(--rule); }
 .file-head { display: flex; align-items: flex-start; padding: 2px 4px 8px 2px; border-bottom: 1px solid var(--rule); }
-.file-head .ftext { flex: 1 1 0; min-width: 0; padding-top: 6px; }
+.file-head .ftext { flex: 1 1 0; min-width: 0; padding: 6px 10px 0; }
 .wrapbtn { flex: none; align-self: flex-start; min-width: 44px; min-height: 44px; margin-top: 2px; padding: 0 10px; font: 600 14px var(--font-ui); color: var(--accent); background: transparent; border: 1px solid var(--rule); border-radius: 10px; cursor: pointer; }
 .wrapbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .file-foot { display: flex; gap: 8px; padding: 10px 12px 72px; border-top: 1px solid var(--rule); }
 .file-foot .btn { flex: 2 1 0; }
 .file-foot .btn.quiet { flex: 1 1 0; }
-.code { --gap: 8px; --numgap: 6px; font: 13.5px/1.55 var(--font-code); padding-block: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; background: var(--panel); }
-.rows { min-width: 100%; width: max-content; }
-.rows.wrap { width: auto; }
-.r { display: flex; isolation: isolate; background: var(--panel); cursor: pointer; scroll-margin-top: 150px; }
-.r .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: var(--codew, 100%); margin-right: calc(var(--codew, 100%) * -1); padding-left: var(--numgap); display: grid; align-content: center; text-align: left; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
-.r .c { position: relative; z-index: 1; flex: 1 0 auto; min-width: 0; white-space: pre; padding: 3px var(--gap); }
-.rows.wrap .r .c { flex: 1 1 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.r.add { background: var(--add); } .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
-.r.del { background: var(--del); } .r.del > .n { box-shadow: inset 3px 0 0 var(--del-ink); }
-.r.sel { background: var(--mark); } .r.sel > .n { box-shadow: inset 3px 0 0 var(--mark-edge); }
-.r.flag { background: var(--accent-soft); } .r.flag > .n { box-shadow: inset 4px 0 0 var(--accent); }
-.hunk { position: sticky; left: 0; box-sizing: border-box; width: var(--codew, 100%); padding: 4px var(--gap); font-size: 13px; color: var(--muted); background: var(--accent-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
-.status { position: sticky; left: 0; box-sizing: border-box; width: var(--codew, 100%); padding: 14px var(--gap); font-size: 14.5px; color: var(--muted); }
-.more { position: sticky; left: 0; display: block; box-sizing: border-box; width: var(--codew, 100%); min-height: 44px; font-size: 15px; color: var(--accent); background: var(--accent-soft); border: 0; cursor: pointer; }
-.thread { position: sticky; left: 0; box-sizing: border-box; width: calc(var(--codew, 100%) - 12px); margin: 6px 6px 8px; display: grid; gap: 6px; font-family: var(--font-ui); white-space: normal; }
-.cm { background: var(--bg); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 6px 8px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code { --gap: 8px; --numgap: 6px; font: 13.5px/1.55 var(--font-code); padding-block: 2px; background: var(--panel); }
+.rows { container-type: inline-size; }
+.rows :is(.r, .hunk) { --rb: var(--panel); display: flex; position: relative; isolation: isolate; background: var(--rb); }
+.rows .r { cursor: pointer; scroll-margin-top: 150px; }
+.grp { display: grid; grid-template-columns: minmax(max-content, 1fr); container-type: inline-size; overflow: auto hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.grp::-webkit-scrollbar { display: none; }
+.rows .r > .n { flex: none; position: sticky; left: 0; z-index: 0; box-sizing: border-box; width: 100cqw; margin-right: -100cqw; padding-left: var(--numgap); display: grid; align-content: center; text-align: left; color: var(--lnum); font-variant-numeric: tabular-nums; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.rows :is(.r, .hunk) > .c { position: relative; z-index: 1; flex: none; white-space: pre; padding: var(--py, 3px) var(--gap); }
+.rows.wrap :is(.r, .hunk) > .c { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.grp > :is(.r, .hunk)::before, .grp > :is(.r, .hunk)::after { content: ""; flex: none; position: sticky; width: 16px; margin-right: -16px; align-self: stretch; z-index: -1; pointer-events: none; visibility: hidden; }
+.grp > :is(.r, .hunk)::before { left: 0; background: linear-gradient(to right, var(--fade), transparent); }
+.grp > :is(.r, .hunk)::after { order: -1; left: calc(100cqw - 16px); background: linear-gradient(to left, var(--fade), transparent); }
+.grp[data-l] > :is(.r, .hunk)::before, .grp[data-r] > :is(.r, .hunk)::after { visibility: visible; }
+.grp > .tail { position: sticky; left: 0; width: 100cqw; }
+.grp > .tail::before, .grp > .tail::after { display: none; }
+.grp > :is(.thread, .composer) { position: sticky; left: 6px; box-sizing: border-box; width: calc(100cqw - 12px); touch-action: pan-y; }
+.rows .r.add { --rb: var(--add); } .rows .r.add > .n { box-shadow: inset 3px 0 0 var(--add-ink); }
+.rows .r.del { --rb: var(--del); } .rows .r.del > .n { box-shadow: inset 3px 0 0 var(--del-ink); }
+.rows .r.sel { --rb: var(--mark); } .rows .r.sel > .n { box-shadow: inset 3px 0 0 var(--mark-edge); }
+.rows .r.flag { --rb: var(--accent-soft); } .rows .r.flag > .n { box-shadow: inset 4px 0 0 var(--accent); }
+.rows .hunk { --rb: var(--accent-soft); --py: 4px; font-size: 13px; color: var(--muted); }
+.status { padding: 14px var(--gap); font-size: 14.5px; color: var(--muted); }
+.more { display: block; box-sizing: border-box; width: 100%; min-height: 44px; font-size: 15px; color: var(--accent); background: var(--accent-soft); border: 0; cursor: pointer; }
+.thread { margin: 6px 6px 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; font-family: var(--font-ui); white-space: normal; }
+.cm { background: var(--bg); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 6px 10px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cm.claude { border-left-color: var(--ok); }
 .cm .who { display: block; font-size: 13px; color: var(--muted); font-weight: 600; }
-.composer { position: sticky; left: 0; box-sizing: border-box; width: calc(var(--codew, 100%) - 12px); display: grid; gap: 8px; margin: 8px 6px 10px; padding: 10px; background: var(--panel); border: 2px solid var(--accent); border-radius: 12px; font-family: var(--font-ui); white-space: normal; scroll-margin-block: 150px 24px; }
-.composer label { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
-.composer textarea { box-sizing: border-box; width: 100%; min-height: 6em; padding: 10px 12px; font: 400 16px/1.4 var(--font-ui); color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 10px; resize: vertical; }
+.composer { display: grid; gap: 8px; margin: 8px 6px 10px; padding: 10px; background: var(--panel); border: 2px solid var(--accent); border-radius: 12px; font-family: var(--font-ui); white-space: normal; scroll-margin-block: 150px 24px; }
+.composer label { font-size: 15px; font-weight: 700; }
+.composer textarea { box-sizing: border-box; width: 100%; min-height: 6em; padding: 10px 12px; font: 400 16px/1.4 var(--font-ui); color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 10px; resize: vertical; touch-action: pan-y; }
 .mhint { margin: 0; font-size: 13.5px; color: var(--muted); }
 .mbtns { display: flex; gap: 8px; }
 .mbtns .btn { flex: 1 1 0; }

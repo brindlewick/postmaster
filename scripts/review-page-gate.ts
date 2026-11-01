@@ -478,7 +478,13 @@ export interface PwFrame {
   fill(selector: string, value: string): Promise<void>;
   locator(selector: string): PwLocator;
 }
+/** A Chrome DevTools session, for the touch events of a real swipe. */
+export interface PwCdpSession {
+  send(method: string, params: object): Promise<unknown>;
+  detach(): Promise<void>;
+}
 export interface PwPage {
+  context(): { newCDPSession(page: PwPage): Promise<PwCdpSession> };
   frames(): PwFrame[];
   on(event: "console", listener: (message: PwConsoleMessage) => void): unknown;
   on(event: "pageerror", listener: (error: Error) => void): unknown;
@@ -488,6 +494,7 @@ export interface PwPage {
   reload(options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   goBack(options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
   evaluate(expression: string): Promise<unknown>;
+  setViewportSize(size: { width: number; height: number }): Promise<void>;
   waitForFunction(
     expression: string,
     arg: undefined,
@@ -886,6 +893,8 @@ export interface RowsFacts {
   noBadge: string[];
   /** Folder rows that stand for a chain of folders. */
   compacted: number;
+  /** Status badges not drawn like the rest (another display, overflow or size than the commonest), by their letter. */
+  oddBadges: string[];
 }
 
 export function rowsVerdict(f: RowsFacts): Verdict {
@@ -894,6 +903,9 @@ export function rowsVerdict(f: RowsFacts): Verdict {
     ...(f.noCount.length > 0 ? [`no file count on ${f.noCount.slice(0, LISTED).join(", ")}`] : []),
     ...(f.noBadge.length > 0
       ? [`no badge or tick on ${f.noBadge.slice(0, LISTED).join(", ")}`]
+      : []),
+    ...(f.oddBadges.length > 0
+      ? [`the status badge ${f.oddBadges.slice(0, LISTED).join(", ")} is drawn unlike the others`]
       : []),
   ];
   return problems.length > 0
@@ -1042,26 +1054,324 @@ export function composerVerdict(f: ComposerFacts): Verdict {
     : fail("the comment box is not inside the code");
 }
 
-export interface BoxFacts {
-  boxScrolls: boolean;
+/** One line of the open diff, a code row or a hunk header, as window.__gate.lines reads it. */
+export interface LineFacts {
+  /** What the page calls the line: its number, or "hunk". */
+  line: string;
+  /** How wide its code is: wider than the box, and the line scrolls. */
+  own: number;
+  /** The group the line is in, by its place among the groups of the diff; -1 for none. */
+  group: number;
+  /** Where its number starts, in window pixels; null for a hunk header, which has none. */
+  num: number | null;
+}
+
+/**
+ * How a group scrolls: `bar` is scrollbar-width and the display of ::-webkit-scrollbar, `overscroll` overscroll-behavior-x
+ * and -y, `shade` and `shadeR` the left and right shade layers of its first row ("absent" where the page makes none);
+ * `below`, read for a group that was scrolled: its last line below stays at its left edge and takes a touch.
+ */
+export interface GroupFacts {
+  left: number;
+  room: number;
   overflowX: string;
-  scrollLeft: number;
-  pageScrollWidth: number;
+  bar: string;
+  touch: string;
+  overscroll: string;
+  tab: string | null;
+  shade: string;
+  shadeR: string;
+  below: boolean | null;
+}
+
+/** The lines of the open diff and their groups, the comment box (its left edge in a group, its text field's touch-action and focus), the lines selected, whether the Show more button is in a group, and the page. */
+export interface LinesFacts {
+  room: number;
+  lines: readonly LineFacts[];
+  groups: readonly GroupFacts[];
+  composer: number | null;
+  field: string | null;
+  focus: boolean;
+  selected: number;
+  button: boolean;
+  pageX: number;
+  pageY: number;
+  boxLeft: number;
+  pageWidth: number;
   innerWidth: number;
 }
 
-/** The page stays still while a wide code box scrolls by itself. */
-export function sidewaysVerdict(f: BoxFacts): Verdict {
-  if (f.pageScrollWidth > f.innerWidth) {
-    return fail(`the page is ${f.pageScrollWidth}px wide in a ${f.innerWidth}px window`);
-  }
-  if (!f.boxScrolls) return pass("the code fits its box and the page does not scroll sideways");
-  if (f.overflowX !== "auto" && f.overflowX !== "scroll") {
-    return fail(`the code is wider than its box and overflow-x is ${f.overflowX}`);
-  }
-  return f.scrollLeft > 0
-    ? pass(`the code box scrolls by itself (${Math.round(f.scrollLeft)}px), the page does not`)
-    : fail("the code is wider than its box but the box did not scroll");
+/** The lines that fit, below a run, that stay in its group so that a finger can sit under the text (TAIL_LINES in js/04-groups.js). */
+const TAIL_LINES = 2;
+
+/** The run each line belongs to: lines wider than the box, one after another, are one run; the first TAIL_LINES lines that fit below it are its last members, the next is on none (-1). These are the groups the page must make. */
+export function runsOf(lines: readonly LineFacts[], room: number): number[] {
+  let run = -1;
+  let count = 0;
+  let tails = 0;
+  return lines.map((l) => {
+    if (l.own > room + ONE_PIXEL) {
+      if (run < 0 || tails > 0) {
+        run = count;
+        count += 1;
+      }
+      tails = 0;
+    } else if (run >= 0 && tails < TAIL_LINES) {
+      tails += 1;
+    } else {
+      run = -1;
+    }
+    return run;
+  });
+}
+
+/** What a scroll container of the page holds: no scrollbar (scrollbar-width and ::-webkit-scrollbar), a sideways swipe kept in it and one up or down let on to the page. */
+const NO_BAR = "none none";
+const HOLDS_SIDEWAYS = "contain auto";
+
+/** A group scrolls by itself: overflow-x auto or scroll, no scrollbar, no scroll chained to the page, no tab stop, and a swipe can pan it both ways. */
+const scrolls = (g: GroupFacts): boolean =>
+  (g.overflowX === "auto" || g.overflowX === "scroll") &&
+  g.bar === NO_BAR &&
+  g.overscroll === HOLDS_SIDEWAYS &&
+  g.tab === "-1" &&
+  (g.touch === "auto" || g.touch === "manipulation");
+
+/** A group shades its left edge when it is scrolled and its right edge when it goes on to the right, and at no other time (the first fault is named). */
+const shadeProblems = (f: LinesFacts): string[] =>
+  f.groups
+    .flatMap((g, k) => [
+      ...(g.shade === "absent" || (g.shade === "visible") === g.left > ONE_PIXEL
+        ? []
+        : [`group ${k} has its left shade ${g.shade}, scrolled ${g.left}px`]),
+      ...(g.shadeR === "absent" || (g.shadeR === "visible") === g.room - g.left > ONE_PIXEL
+        ? []
+        : [`group ${k} has its right shade ${g.shadeR}, ${g.room - g.left}px to go`]),
+    ])
+    .slice(0, 1);
+
+/** The groups at rest are the runs of lines wider than the box and the lines below each, each a scroll container, and the page is no wider than the window. */
+function groupProblems(f: LinesFacts): string[] {
+  const runs = runsOf(f.lines, f.room);
+  const off = f.lines.findIndex((l, i) => l.group !== runs[i]);
+  const bad = f.groups.findIndex((g) => !scrolls(g));
+  return [
+    ...(off < 0
+      ? []
+      : [
+          `the groups are not the runs of lines wider than the box and the ${TAIL_LINES} lines below each: line ${f.lines[off]?.line} is in group ${f.lines[off]?.group}, its run is ${runs[off]} (-1 is none)`,
+        ]),
+    ...(bad < 0
+      ? []
+      : [
+          `group ${bad} is not a scroll container with no scrollbar, tab stop or scroll chained to the page that a swipe can move sideways and up or down`,
+        ]),
+    ...shadeProblems(f),
+    ...(f.pageWidth > f.innerWidth
+      ? [`the page is ${f.pageWidth}px wide in a ${f.innerWidth}px window`]
+      : []),
+  ];
+}
+
+/** The line of the synthetic file that is a single wide line (GROUP_PATTERN), where the real swipes start. */
+export const SINGLE_LINE = "8";
+/** A real swipe moves a group, or the page, at least this far (the finger goes 150px). */
+const MIN_MOVE_PX = 60;
+
+/** What real swipes did: along the single wide line (`along`), up the screen from it (`up`, and how far the page went, `upBy`), and up from a file name of the tree (`name`: how far the page went). */
+export interface Swipes {
+  along: LinesFacts;
+  up: LinesFacts;
+  upBy: number;
+  name: number;
+}
+
+/** What the sideways check reads of the synthetic file: at rest, each group scrolled in turn, real swipes and a changed width (null where there is no touch or the layout would change), the comment box before and after its group was scrolled, and after the fonts changed. */
+export interface SidewaysFacts {
+  rest: LinesFacts;
+  scrolled: readonly { group: number; after: LinesFacts }[];
+  swipes: Swipes | null;
+  comment: readonly [LinesFacts, LinesFacts];
+  resized: LinesFacts | null;
+  fonts: LinesFacts;
+}
+
+/** A one-line label that was given a path's worth of text, as window.__gate.labels reads it (`bar` and `overscroll` as for a group; `over`: its box lies over a control). */
+export interface LabelFacts {
+  wide: boolean;
+  overflowX: string;
+  bar: string;
+  overscroll: string;
+  nowrap: boolean;
+  fade: boolean;
+  over: boolean;
+  tab: string | null;
+  left: number;
+}
+
+/** The labels of one screen, the first scrolled by 100px, how many count lines of files are cut off, and the page. */
+export interface LabelsFacts {
+  labels: readonly LabelFacts[];
+  cut: number;
+  pageWidth: number;
+  innerWidth: number;
+}
+
+/** What is wrong with the groups of a diff: at rest they are not the runs, or not scroll containers, or shade the wrong edges; after each was scrolled in turn (`scrolled`) it did not move, shades the wrong edges, took its numbers or the lines below it along, or moved another group, the page or the code box. */
+export function linesProblems(
+  rest: LinesFacts,
+  scrolled: readonly { group: number; after: LinesFacts }[],
+): string[] {
+  return [
+    ...groupProblems(rest),
+    ...scrolled.flatMap(({ group, after }) => [
+      ...((after.groups[group]?.left ?? 0) > 0
+        ? []
+        : [`group ${group} did not scroll sideways when asked`]),
+      ...(after.groups.some((g, k) => k !== group && g.left !== 0)
+        ? [`scrolling group ${group} moved another group`]
+        : []),
+      ...(after.pageX !== 0 || after.boxLeft !== 0
+        ? [`scrolling group ${group} moved the page or the code box`]
+        : []),
+      ...shadeProblems(after),
+      ...(after.groups[group]?.below === false
+        ? [`the lines below group ${group} move with it or are covered`]
+        : []),
+      ...(after.lines.some(
+        (l, i) =>
+          l.group === group &&
+          l.num !== null &&
+          Math.abs(l.num - (rest.lines[i]?.num ?? l.num)) > ONE_PIXEL,
+      )
+        ? [`the numbers of group ${group} scrolled away with it`]
+        : []),
+    ]),
+  ];
+}
+
+/** What a label does wrong, in a few words; undefined for none. */
+const labelFault = (l: LabelFacts): string | undefined =>
+  [
+    [l.overflowX !== "auto" && l.overflowX !== "scroll", "is no scroll container"],
+    [l.bar !== NO_BAR, "shows a scrollbar"],
+    [!l.nowrap, "folds"],
+    [l.tab !== "-1", "takes a tab stop"],
+    [
+      l.overscroll !== HOLDS_SIDEWAYS,
+      "chains a sideways swipe to the Back gesture, or holds one up or down",
+    ],
+    [!l.fade, "has no fade at its ends"],
+    [l.over, "lies over a control"],
+  ].find(([bad]) => bad)?.[1] as string | undefined;
+
+/** What is wrong with the labels of a screen: one is as wide as its text or does something `labelFault` names, the first did not scroll alone, or the page widened. */
+export function labelProblems(screen: string, f: LabelsFacts): string[] {
+  const first = f.labels[0];
+  const fault = f.labels.map(labelFault).find((x) => x !== undefined);
+  return [
+    ...(first === undefined ? ["no one-line label to look at"] : []),
+    ...(f.labels.some((l) => !l.wide)
+      ? ["a label is as wide as its text, so its place grows to it"]
+      : []),
+    ...(fault ? [`a label ${fault}`] : []),
+    ...(first === undefined || (first.left > 0 && f.labels.slice(1).every((l) => l.left === 0))
+      ? []
+      : ["scrolling a label did not move it alone"]),
+    ...(f.cut > 0 ? ["the count line of a file is cut off, though it wraps"] : []),
+    ...(f.pageWidth > f.innerWidth
+      ? [`the page is ${f.pageWidth}px wide in a ${f.innerWidth}px window`]
+      : []),
+  ].map((p) => `${screen}: ${p}`);
+}
+
+/**
+ * Lines wider than the box scroll sideways in groups and one-line labels scroll on their own, and nothing else does:
+ * the groups are exactly the runs (a single wide line is a group of one) with the lines below each, each a scroll
+ * container with no scrollbar that moves alone and shades the edges it goes on past; with real swipes, one along a line
+ * moves its group alone and selects nothing, and one up from a line or a file name scrolls the page; the comment box
+ * stays at the left edge of its group and its text field leaves a sideways swipe to the page; the groups are made
+ * again when the window changes width and when the fonts change. Every label, given a path's worth of text, is wider
+ * than its place, on one row with a fade and no scrollbar, not over a control, and scrolls alone.
+ */
+export function sidewaysVerdict(
+  f: SidewaysFacts,
+  screens: readonly { screen: string; facts: LabelsFacts }[],
+): Verdict {
+  const { rest, comment, resized, swipes } = f;
+  if (rest.lines.length === 0) return fail("no diff lines to check");
+  const runs = runsOf(rest.lines, rest.room);
+  const wide = (i: number): boolean => (rest.lines[i]?.own ?? 0) > rest.room + ONE_PIXEL;
+  const sizes = [...new Set(runs.filter((r) => r >= 0))].map(
+    (r) => runs.filter((x, i) => x === r && wide(i)).length,
+  );
+  const [before, after] = comment;
+  const single = rest.lines.find((l) => l.line === SINGLE_LINE)?.group;
+  const moved = (x: LinesFacts): number[] =>
+    x.groups.flatMap((g, k) => (g.left > MIN_MOVE_PX ? [k] : []));
+  const problems = [
+    ...linesProblems(rest, f.scrolled),
+    ...(swipes === null
+      ? []
+      : [
+          ...(moved(swipes.along).join() === String(single)
+            ? []
+            : ["a swipe along a line did not move its group alone"]),
+          ...(swipes.along.selected === 0 ? [] : ["a swipe along a line selected it"]),
+          ...(swipes.upBy >= MIN_MOVE_PX && moved(swipes.up).length === 0
+            ? []
+            : ["a swipe up from a line did not scroll the page alone"]),
+          ...(swipes.name >= MIN_MOVE_PX
+            ? []
+            : ["a swipe up from a file name did not scroll the page"]),
+        ]),
+    ...(before.composer !== null &&
+    after.composer !== null &&
+    Math.abs(after.composer - before.composer) <= ONE_PIXEL
+      ? []
+      : ["the comment box does not stay at the left edge of its group"]),
+    ...(before.field === "pan-y" ? [] : ["the comment box's text field takes a sideways swipe"]),
+    ...(resized === null
+      ? []
+      : [
+          ...(resized.focus
+            ? []
+            : ["the comment box lost the focus when the groups were made again"]),
+          ...groupProblems(resized).map((p) => `after the window changed width: ${p}`),
+          ...(JSON.stringify(runsOf(resized.lines, resized.room)) === JSON.stringify(runs)
+            ? ["the groups are the same at the other width, so nothing was made again"]
+            : []),
+        ]),
+    ...groupProblems(f.fonts).map((p) => `after the fonts changed: ${p}`),
+    ...(sizes.some((n) => n >= 3) && sizes.some((n) => n === 1)
+      ? []
+      : ["the file made no run of three wide lines and no single wide line"]),
+    ...screens.flatMap((x) => labelProblems(x.screen, x.facts)),
+  ];
+  return problems.length === 0
+    ? pass(
+        `${plural(sizes.length, "group", "groups")} of ${sizes.join(", ")} lines scroll alone, the comment box stays pinned, the groups are made again when the window or the fonts change; the labels of ${screens.map((x) => x.screen).join(", ")} scroll alone`,
+      )
+    : fail([...new Set(problems)].join("; "));
+}
+
+/** Show more draws the next slice of a long diff of wide lines: the button is part of no group, and the lines are one group scrolled where it was (`before` is read with the first group scrolled). */
+export function showMoreVerdict(before: LinesFacts, after: LinesFacts): Verdict {
+  const was = before.groups[0]?.left ?? 0;
+  const now = after.groups[0]?.left ?? 0;
+  const problems = [
+    ...(before.button ? ["the Show more button is part of a group"] : []),
+    ...(was > MIN_MOVE_PX ? [] : ["the first group did not scroll"]),
+    ...groupProblems(after).map((p) => `after Show more: ${p}`),
+    ...(Math.abs(now - was) <= ONE_PIXEL
+      ? []
+      : [`the group was scrolled ${was}px and is ${now}px after Show more`]),
+  ];
+  return problems.length === 0
+    ? pass(
+        `the button is part of no group; ${after.lines.length} lines are one group, scrolled ${was}px`,
+      )
+    : fail(problems.join("; "));
 }
 
 /** The Wrap button and the code rows at one moment. */
@@ -1070,8 +1380,10 @@ export interface WrapState {
   pressed: string | null;
   /** The rows carry the class that wraps long lines. */
   wrapped: boolean;
-  /** The code box is wider inside than it is on screen, so it scrolls sideways. */
+  /** A group of lines is there to scroll sideways. */
   boxScrolls: boolean;
+  /** Some line is wider than the box: it scrolls in a group, or its text is cut off. */
+  overflows: boolean;
   pageScrollWidth: number;
   innerWidth: number;
 }
@@ -1087,13 +1399,15 @@ export function wrapVerdict(first: WrapState, tapped: WrapState, again: WrapStat
     ...(tapped.wrapped !== first.wrapped && tapped.pressed !== first.pressed
       ? []
       : ["a tap on Wrap did not change the lines and the button together"]),
-    ...(again.wrapped === first.wrapped && again.pressed === first.pressed
+    ...(again.wrapped === first.wrapped &&
+    again.pressed === first.pressed &&
+    again.boxScrolls === first.boxScrolls
       ? []
       : ["a second tap on Wrap did not bring the first state back"]),
     ...(states.every((s) => s.pressed === String(s.wrapped))
       ? []
       : ["the button says one thing and the lines show another"]),
-    ...(states.some((s) => s.wrapped && s.boxScrolls)
+    ...(states.some((s) => s.wrapped && (s.boxScrolls || s.overflows))
       ? ["wrapped lines still scroll sideways in their box"]
       : []),
     ...states
@@ -1242,14 +1556,14 @@ function strayedNumber(rows: readonly DiffRowFacts[], boxLeft: number): DiffRowF
   return worst !== undefined && off(worst) > INSET_SLACK ? worst : undefined;
 }
 
-/** After a sideways scroll of the box: it moved, and every number is still at the left edge of what is shown. */
+/** After a sideways scroll of the groups: one moved, and every number is still at the left edge of what is shown. */
 function scrollProblems(scrolled: DiffLayoutFacts): string[] {
-  if (scrolled.box.scrollLeft <= 0) return ["the box did not scroll sideways when it was asked to"];
+  if (scrolled.box.scrollLeft <= 0) return ["a group did not scroll sideways when it was asked to"];
   const strayed = strayedNumber(scrolled.rows, scrolled.box.left);
   return strayed === undefined
     ? []
     : [
-        `after the box scrolled sideways by ${Math.round(scrolled.box.scrollLeft)}px a number starts ${px(insetOf(strayed, scrolled.box.left))} from the left edge of the box, not ${NUMBER_INSET}px`,
+        `after a group scrolled sideways by ${Math.round(scrolled.box.scrollLeft)}px a number starts ${px(insetOf(strayed, scrolled.box.left))} from the left edge of the box, not ${NUMBER_INSET}px`,
       ];
 }
 
@@ -1259,8 +1573,8 @@ function scrollProblems(scrolled: DiffLayoutFacts): string[] {
  * aligned NUMBER_INSET px in from the left edge of the row and centered down the row, never taking
  * a tap), and the code starts within MAX_CODE_OFFSET of the left edge of the window (of its own
  * box, when a tree pane sits beside it). The left edge of a row is the left edge of the box.
- * `scrolled` is the same measurement after the box was scrolled sideways, or null when the box
- * does not scroll: the number stays NUMBER_INSET px in from the left edge of what is shown.
+ * `scrolled` is the same measurement after the groups of lines were scrolled sideways, or null when
+ * no line scrolls: the number stays NUMBER_INSET px in from the left edge of what is shown.
  */
 export function diffLayoutVerdict(
   at: DiffLayoutFacts,
@@ -1328,7 +1642,7 @@ export function diffLayoutVerdict(
       : [`the number is too faint (alpha ${faint.numberAlpha}, at least ${NUMBER_ALPHA_MIN})`]),
     ...(scrolled === null ? [] : scrollProblems(scrolled)),
   ];
-  const pinned = scrolled === null ? "" : ", pinned while the box scrolls sideways";
+  const pinned = scrolled === null ? "" : ", pinned while a group scrolls sideways";
   return problems.length === 0
     ? pass(
         `${plural(rows.length, "row", "rows")}: no sign or number column, code from ${px(biggest(offset))}, numbers left aligned ${NUMBER_INSET}px in on a layer behind it at alpha ${first.numberAlpha}${pinned}`,
@@ -1450,7 +1764,9 @@ export const GATE_FUNCTIONS = [
   "collapsed",
   "fileFacts",
   "fileReady",
-  "box",
+  "lines",
+  "spot",
+  "labels",
   "composer",
   "progress",
   "tick",
@@ -1502,6 +1818,8 @@ window.__gate = (() => {
   // The width the page must fit. In mobile emulation innerWidth grows with an over-wide page, so
   // the narrower of it and the root's client width is the viewport.
   const vw = () => Math.min(innerWidth, document.documentElement.clientWidth);
+  // Resolves after n frames: what the page does in answer to a change (a scroll event, an observer) has been done.
+  const frames = (n) => new Promise((r) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : r()); step(n); });
   const rowName = (li) => { const n = $(".tname", li); return n ? n.textContent.trim() : label(li); };
   const openIds = () => all('#tree li.trow.dir[aria-expanded="true"]').map((li) => li.dataset.id);
   const TARGETS = "button, a[href], input, select, summary, textarea, [role=checkbox], [role=tab]";
@@ -1583,12 +1901,22 @@ window.__gate = (() => {
     return { left: r ? r.left : 0, right: r ? r.right : 0, innerWidth: vw(), outside };
   };
 
+  // The status badges of the tree that are not drawn like the commonest: another display, overflow or size.
+  const oddBadges = () => {
+    const badges = all("#tree .badge").filter(shown);
+    const key = (b) => { const cs = getComputedStyle(b); return cs.display + cs.overflowX + b.offsetWidth + "x" + b.offsetHeight; };
+    const tally = {};
+    for (const b of badges) tally[key(b)] = (tally[key(b)] || 0) + 1;
+    const common = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
+    return badges.filter((b) => key(b) !== common).map((b) => b.textContent.trim());
+  };
+
   const rows = () => {
     const lis = all("#tree .trow");
     const dirs = lis.filter((li) => li.classList.contains("dir"));
     const files = lis.filter((li) => li.classList.contains("file"));
     return {
-      dirs: dirs.length, files: files.length,
+      dirs: dirs.length, files: files.length, oddBadges: oddBadges(),
       noCount: dirs.filter((li) => !/[0-9]+ files?/u.test((($(".tmeta", li) || {}).textContent) || "")).map(rowName),
       noBadge: files.filter((li) => !$(".badge", li) || !$(".tick", li)).map(rowName),
       compacted: dirs.filter((li) => rowName(li).includes("/")).length,
@@ -1616,28 +1944,87 @@ window.__gate = (() => {
   };
   const fileReady = () => { const f = fileFacts(); return f.fileShown && (f.rows > 0 || f.status !== ""); };
 
-  const box = (left) => {
-    const c = $("#file-code");
-    const page = document.documentElement.scrollWidth;
-    if (!c) return { boxScrolls: false, overflowX: "", scrollLeft: 0, pageScrollWidth: page, innerWidth: vw() };
-    const boxScrolls = c.scrollWidth > c.clientWidth;
-    if (boxScrolls && typeof left === "number") {
-      const was = c.style.scrollBehavior;
-      c.style.scrollBehavior = "auto";
-      c.scrollLeft = left;
-      c.style.scrollBehavior = was;
+  // The visibility of a shade layer ("::before" at the left edge of a row, "::after" at the right), or "absent".
+  const shade = (e, which) => { const cs = getComputedStyle(e, which); return cs.content === "none" ? "absent" : cs.visibility; };
+  // Every line of the open diff, a code row or a hunk header, with how wide its code is and the group it is in, how each
+  // group scrolls, the comment box when it is inside a group, and the page. When "left" is a number the group of the line
+  // at "index" is first scrolled that far and every other group put back at 0, and the last line below that group is read.
+  // "boxSel" and "rowSel" name the box the lines are in and a line; they are those of the review page unless given.
+  const lines = async (index, left, boxSel, rowSel) => {
+    const box = $(boxSel || "#file-code .rows");
+    const els = box ? all(rowSel || ".r, .hunk", box) : [];
+    const groups = box ? all(".grp", box) : [];
+    const mine = els[index] ? els[index].closest(".grp") : null;
+    const tails = mine && typeof left === "number" ? all(":scope > .tail", mine) : [];
+    const tail = tails[tails.length - 1];
+    if (typeof left === "number") {
+      if (tail) tail.scrollIntoView({ block: "center" });
+      groups.forEach((g) => { g.scrollLeft = g === mine ? left : 0; });
+      await frames(2);
     }
-    return { boxScrolls, overflowX: getComputedStyle(c).overflowX, scrollLeft: c.scrollLeft,
-      pageScrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth), innerWidth: vw() };
+    const t = tail ? tail.getBoundingClientRect() : null;
+    const below = t === null ? null : Math.round(t.left) === Math.round(mine.getBoundingClientRect().left) && tail.contains(document.elementFromPoint(t.left + 120, (t.top + t.bottom) / 2));
+    const comment = $("#composer");
+    const more = box ? $(".more", box) : null;
+    return {
+      room: box ? box.clientWidth : 0,
+      lines: els.map((e) => { const n = e.querySelector(".n"); return { line: e.dataset.line || e.dataset.n || "hunk", own: e.lastElementChild.offsetWidth, group: groups.indexOf(e.closest(".grp")), num: n ? Math.round(n.getBoundingClientRect().left) : null }; }),
+      groups: groups.map((g) => { const cs = getComputedStyle(g); return { left: Math.round(g.scrollLeft), room: Math.round(g.scrollWidth - g.clientWidth), overflowX: cs.overflowX, bar: cs.scrollbarWidth + " " + getComputedStyle(g, "::-webkit-scrollbar").display, touch: cs.touchAction, overscroll: cs.overscrollBehaviorX + " " + cs.overscrollBehaviorY, tab: g.getAttribute("tabindex"), shade: shade(g.firstElementChild, "::before"), shadeR: shade(g.firstElementChild, "::after"), below: g === mine ? below : null }; }),
+      composer: comment && comment.closest(".grp") ? Math.round(comment.getBoundingClientRect().left) : null,
+      field: $("#mtext") ? getComputedStyle($("#mtext")).touchAction : null,
+      focus: document.activeElement === $("#mtext"),
+      selected: els.filter((e) => e.classList.contains("sel")).length, button: !!(more && more.closest(".grp")),
+      pageX: window.scrollX, pageY: Math.round(window.scrollY), boxLeft: box && box.parentElement ? box.parentElement.scrollLeft : 0,
+      pageWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth), innerWidth: vw(),
+    };
+  };
+
+  // Where a swipe on the first visible element at "sel" starts: it is brought to 60% of the window's height; the middle of
+  // the part that shows, a point 24px in from its right edge, and where the page then stands.
+  const spot = (sel) => {
+    const e = all(sel).find(shown);
+    if (!e) throw new Error("nothing to swipe on at " + sel);
+    window.scrollBy(0, e.getBoundingClientRect().top - innerHeight * 0.6);
+    const r = e.getBoundingClientRect();
+    const right = Math.min(r.right, vw());
+    return { x: (Math.max(r.left, 0) + right) / 2, right: right - 24, y: r.top + r.height / 2, top: Math.round(window.scrollY) };
+  };
+
+  const lies = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+  // The one-line labels on the screen (the class ln and the names the page gives them), each given a path's worth of text:
+  // is it wider than its place, how it scrolls, does it fade and lie over a control of its screen; which moved when the first
+  // was scrolled by 100px; and the page.
+  const labels = () => {
+    const els = all(".ln, .tname, .fdir, .fname, .lpath, .who, #mclabel, #fname").filter(shown);
+    els.forEach((e) => { e.textContent = "x".repeat(200); });
+    // The count line of a file row is no label: it wraps, so a long one is not cut off.
+    const counts = all("#tree li.trow.file .tmeta").filter(shown);
+    counts.forEach((e) => { e.textContent = "word ".repeat(40); });
+    const wide = els.map((e) => e.scrollWidth > e.clientWidth + 1);
+    if (els[0]) els[0].scrollLeft = 100;
+    const near = (e) => all(TARGETS, e.closest("#hdr, #find, [id^=screen-]") || document.body).filter(shown);
+    return {
+      labels: els.map((e, i) => {
+        const cs = getComputedStyle(e);
+        const r = e.getBoundingClientRect();
+        return { wide: wide[i], overflowX: cs.overflowX, bar: cs.scrollbarWidth + " " + getComputedStyle(e, "::-webkit-scrollbar").display,
+          overscroll: cs.overscrollBehaviorX + " " + cs.overscrollBehaviorY, nowrap: cs.whiteSpace === "nowrap",
+          fade: [cs.maskImage, cs.webkitMaskImage].some((m) => !!m && m !== "none"),
+          over: near(e).some((c) => !c.contains(e) && !e.contains(c) && lies(r, c.getBoundingClientRect())),
+          tab: e.getAttribute("tabindex"), left: Math.round(e.scrollLeft) };
+      }),
+      cut: counts.filter((e) => e.scrollWidth > e.clientWidth + 1).length,
+      pageWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth), innerWidth: vw(),
+    };
   };
 
   const wrapState = () => {
     const b = $("#wrap");
     const rows = $("#file-code .rows");
-    const c = $("#file-code");
     return { pressed: b ? b.getAttribute("aria-pressed") : null,
       wrapped: !!(rows && rows.classList.contains("wrap")),
-      boxScrolls: !!c && c.scrollWidth > c.clientWidth,
+      boxScrolls: all("#file-code .grp").length > 0,
+      overflows: !!rows && all(".c", rows).some((c) => c.offsetWidth > rows.clientWidth + 1),
       pageScrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
       innerWidth: vw() };
   };
@@ -1698,29 +2085,23 @@ window.__gate = (() => {
       fileLeft: f ? f.getBoundingClientRect().left : 0, backShown: shown($("#back")) };
   };
 
-  // The page measures the code box once the browser has laid it out (--codew, the width of what the box
-  // shows); the layers behind the code are as wide as that. True once it has.
-  const boxSized = () => {
-    const c = $("#file-code");
-    return !!c && c.style.getPropertyValue("--codew") !== "";
-  };
+  // The page makes the groups of lines when it draws the diff; true once there is a diff to look at.
+  const boxSized = () => !!$("#file-code .rows");
   // The alpha of a computed colour: rgba(r, g, b, a) or a colour function with "/ a"; 1 when there is none.
   const alphaOf = (color) => {
     const m = /^rgba\(.*,[ \t]*([0-9.]+)\)$/u.exec(color) || /\/[ \t]*([0-9.]+)[ \t]*\)$/u.exec(color);
     return m ? Number(m[1]) : 1;
   };
-  // The rows of the open diff that are on screen below the header: up to five changed and five unchanged,
-  // measured with the code box scrolled to "left" pixels when it scrolls (a number).
+  // The rows of the open diff that are on screen below the header: up to five in a group, five changed and five
+  // unchanged, measured with the groups scrolled to "left" pixels when there are any (a number). The first group is
+  // brought into view, so that a row that scrolls is among those measured.
   const diffLayout = (left) => {
     const code = $("#file-code");
     if (!code) return { box: { left: 0, width: 0, scrollLeft: 0, scrolls: false }, rows: [] };
-    const scrolls = code.scrollWidth > code.clientWidth;
-    if (scrolls && typeof left === "number") {
-      const was = code.style.scrollBehavior;
-      code.style.scrollBehavior = "auto";
-      code.scrollLeft = left;
-      code.style.scrollBehavior = was;
-    }
+    const groups = all(".grp", code);
+    const scrolls = groups.length > 0;
+    if (scrolls) groups[0].scrollIntoView({ block: "center", behavior: "instant" });
+    if (scrolls && typeof left === "number") groups.forEach((g) => { g.scrollLeft = left; });
     const b = code.getBoundingClientRect();
     const h = $("#hdr");
     const top = h ? h.getBoundingClientRect().bottom : 0;
@@ -1729,7 +2110,8 @@ window.__gate = (() => {
       return t.top >= top && t.bottom <= innerHeight;
     });
     const changed = (r) => r.classList.contains("add") || r.classList.contains("del");
-    const sample = onScreen.filter(changed).slice(0, 5).concat(onScreen.filter((r) => !changed(r)).slice(0, 5));
+    const sample = onScreen.filter((r) => r.closest(".grp")).slice(0, 5)
+      .concat(onScreen.filter(changed).slice(0, 5), onScreen.filter((r) => !changed(r)).slice(0, 5));
     const measured = sample.map((r) => {
       const kids = Array.from(r.children);
       const n = kids.find((k) => k.classList.contains("n") && shown(k)) || null;
@@ -1768,7 +2150,7 @@ window.__gate = (() => {
         tap: !hit ? "none" : n.contains(hit) ? "number" : r.contains(hit) ? "row" : "other",
       };
     });
-    return { box: { left: b.left, width: b.width, scrollLeft: code.scrollLeft, scrolls }, rows: measured };
+    return { box: { left: b.left, width: b.width, scrollLeft: scrolls ? groups[0].scrollLeft : 0, scrolls }, rows: measured };
   };
 
   // The lines the page shows where ticks and comments appear ("Not saved"), those on screen, by what they are about.
@@ -1793,7 +2175,7 @@ window.__gate = (() => {
   // The path of the open file, as its head shows it.
   const openPath = () => (text("#file-head .fdir") || "") + (text("#file-head .fname") || "");
 
-  return { screens, header, audit, fonts, edges, rows, tree, collapsed, fileFacts, fileReady, box, composer,
+  return { screens, header, audit, fonts, edges, rows, tree, collapsed, fileFacts, fileReady, lines, spot, labels, composer,
     progress, tick, unticked, find, rulings, flagged, arm, left, scrollTo, visibleFile, panes, wrapState,
     boxSized, diffLayout, saveNotes, tickedFiles, threads, flaggedLines, rowsOf, openPath };
 })();
@@ -1835,8 +2217,14 @@ const POLL_MS = 50;
 /** How many files from the top of the tree are tried when a check needs a file with enough lines. */
 const FILES_TRIED = 12;
 const SCROLL_TARGET = 300;
-/** How far a code box is scrolled sideways where a check needs it moved. */
+/** How far a group of lines is scrolled sideways where a check needs it moved. */
 const SIDEWAYS_PX = 200;
+/** The widths the sideways check changes between: a phone, and a folded-out phone for a run that is wider than PHONE_MAX_PX. */
+const PHONE_PX = 390;
+const UNFOLDED_PX = 755;
+const PHONE_MAX_PX = 700;
+/** How long the page is given to make its groups again after the window changed width. */
+const SETTLE_MS = 3000;
 /**
  * Back goes through the browser's history, and the page shows the list itself if the step has not
  * arrived within 400 ms. The helpers that move around the page wait that window out after every
@@ -2197,26 +2585,218 @@ async function widestOfChunks({ origin, review }: Ctx): Promise<number | null> {
   return widestFile(loaded.flat());
 }
 
+/** Open the file at index `fi` from the tree; its path. */
+async function openFileAt(ctx: Ctx, fi: number): Promise<string | undefined> {
+  const { page, review } = ctx;
+  await gotoTab(page, "tree");
+  await tap(page, "#tree-expand");
+  await tap(page, rowSelector(fi));
+  await waitFileReady(page);
+  return review.files[fi]?.path;
+}
+
 /**
- * Open the file with the longest code line, so that a box wider than its screen is really tried.
+ * Open the file with the longest code line, so that a line wider than its screen is really tried.
  * Its path; or undefined when the chunks hold no code, and the screen is left as it is.
  */
 async function openWidest(ctx: Ctx): Promise<string | undefined> {
   const widest = await widestOfChunks(ctx);
-  if (widest === null) return undefined;
-  const { page, review } = ctx;
-  await gotoTab(page, "tree");
-  await tap(page, "#tree-expand");
-  await tap(page, rowSelector(widest));
-  await waitFileReady(page);
-  return review.files[widest]?.path;
+  return widest === null ? undefined : openFileAt(ctx, widest);
 }
 
-/** The code box of the file with the longest line scrolls by itself, and the page does not. */
+/** The lines of a new file made of the kinds of a pattern: S fits any window, M is a little wider than a phone (a line that goes only a little past its box is grouped too) and fits a folded-out one, L is wider than any window of the single-pane flow. Its hunk header is as wide as an L. */
+export const GROUP_PATTERN = "L S M L L L S L S M M L";
+
+/** The unified diff of a new file whose lines are as long as their kind says. */
+export function groupDiff(pattern: string = GROUP_PATTERN): string {
+  const kinds = pattern.split(" ");
+  const line = (k: string): string =>
+    `+const v = [${"1, ".repeat(k === "S" ? 0 : k === "M" ? 14 : 65)}];`;
+  return [`@@ -0,0 +1,${kinds.length} @@ ${"1, ".repeat(65)}`, ...kinds.map(line), ""].join("\n");
+}
+
+/** Serve the first file with a diff as the synthetic lines of `pattern` (groupDiff), load the page afresh, open the file and run the body; then serve the built data again and load the page afresh once more, at the window's own width. */
+async function underDiff(
+  ctx: Ctx,
+  pattern: string,
+  body: () => Promise<Verdict>,
+): Promise<Verdict> {
+  const { page, run, server } = ctx;
+  const fi = ctx.review.files.findIndex(
+    (f) => typeof f["chunk"] === "number" && f["binary"] !== true && f["withheld"] === undefined,
+  );
+  const chunk = ctx.review.files[fi]?.["chunk"];
+  if (typeof chunk !== "number")
+    return fail("review.json lists no file with a diff to serve the synthetic lines as");
+  const path = `/chunks/${chunk}.json`;
+  server.overrides.set(path, JSON.stringify([{ i: fi, diff: groupDiff(pattern) }]));
+  try {
+    await reload(ctx);
+    await openFileAt(ctx, fi);
+    return await body();
+  } finally {
+    server.overrides.delete(path);
+    await page.setViewportSize({ width: run.width, height: run.height });
+    await reload(ctx);
+  }
+}
+
+/** A swipe goes this far. */
+const SWIPE_PX = 150;
+
+/** Where a swipe starts (window.__gate.spot): the middle of the element, a point near its right edge, and the page's place. */
+interface Spot {
+  x: number;
+  y: number;
+  right: number;
+  top: number;
+}
+
+/** A swipe as a finger makes it, with real touch events: down at `from`, along to `to` in steps, held still a moment so that nothing flies on, up. */
+async function swipe(
+  cdp: PwCdpSession,
+  from: Spot | { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  const touch = (type: string, touchPoints: { x: number; y: number }[]): Promise<unknown> =>
+    cdp.send("Input.dispatchTouchEvent", { type, touchPoints });
+  await touch("touchStart", [from]);
+  for (let step = 1; step <= 12; step++) {
+    await touch("touchMove", [
+      { x: from.x + ((to.x - from.x) * step) / 12, y: from.y + ((to.y - from.y) * step) / 12 },
+    ]);
+    await Bun.sleep(16);
+  }
+  await Bun.sleep(150);
+  await touch("touchEnd", []);
+  await Bun.sleep(300);
+}
+
+/** A swipe up the screen from the middle of the first visible element at `selector`: how far the page went. */
+async function swipeUp(page: PwPage, cdp: PwCdpSession, selector: string): Promise<number> {
+  const at = await gate<Spot>(page, "spot", selector);
+  await swipe(cdp, at, { x: at.x, y: at.y - SWIPE_PX });
+  return ((await page.evaluate("Math.round(window.scrollY)")) as number) - at.top;
+}
+
+/**
+ * Serve the first file with a diff as the synthetic lines of GROUP_PATTERN (line 8 is the single wide line) and look at
+ * it: the groups, each scrolled in turn; with touch, real swipes along line 8, up from it and up from a file name of
+ * the tree; the comment box under line 5; the groups after the window was unfolded or folded (single pane) and after the
+ * fonts changed. Then, on the file screen, the overview, the order, the tree and the file list, every label given a path.
+ */
 async function checkSideways(ctx: Ctx): Promise<Verdict> {
-  const name = await openWidest(ctx);
-  const verdict = sidewaysVerdict(await gate<BoxFacts>(ctx.page, "box", SIDEWAYS_PX));
-  return name === undefined ? verdict : { ...verdict, detail: `${name}: ${verdict.detail}` };
+  const { page, run } = ctx;
+  const single = run.width < WIDE_FROM;
+  return underDiff(ctx, GROUP_PATTERN, async () => {
+    const read = (index: number, left?: number): Promise<LinesFacts> =>
+      gate<LinesFacts>(page, "lines", ...(left === undefined ? [index] : [index, left]));
+    const rest = await read(-1);
+    const indexOf = (line: string): number => rest.lines.findIndex((l) => l.line === line);
+    const scrolled = [];
+    for (const group of new Set(rest.lines.map((l) => l.group)))
+      if (group >= 0)
+        scrolled.push({
+          group,
+          after: await read(
+            rest.lines.findIndex((l) => l.group === group),
+            SIDEWAYS_PX,
+          ),
+        });
+    const cdp = single ? await page.context().newCDPSession(page) : null;
+    try {
+      // Real swipes, in a window with touch, the groups at 0 and the page given room to scroll: along the single wide
+      // line, then up the screen from it.
+      let swipes: Swipes | null = null;
+      if (cdp !== null) {
+        await page.evaluate('document.documentElement.style.paddingBottom = "900px"');
+        await read(indexOf(SINGLE_LINE), 0);
+        const line = `#file-code .r[data-line="${SINGLE_LINE}"]`;
+        const at = await gate<Spot>(page, "spot", line);
+        await swipe(cdp, { x: at.right, y: at.y }, { x: at.right - SWIPE_PX, y: at.y });
+        const along = await read(-1);
+        await read(indexOf(SINGLE_LINE), 0);
+        const upBy = await swipeUp(page, cdp, line);
+        swipes = { along, up: await read(-1), upBy, name: 0 };
+      }
+      // The comment box opens under line 5, in the run of three, and stays at the left edge of its group.
+      await tap(page, '#file-code .r[data-line="5"]');
+      await tap(page, "#mtext");
+      const opened = await read(-1);
+      const pinned = await read(indexOf("5"), SIDEWAYS_PX);
+      let resized: LinesFacts | null = null;
+      if (single) {
+        await page.setViewportSize({
+          width: run.width < PHONE_MAX_PX ? UNFOLDED_PX : PHONE_PX,
+          height: run.height,
+        });
+        resized = await read(-1);
+        for (
+          let waited = 0;
+          linesProblems(resized, []).length > 0 && waited < SETTLE_MS;
+          waited += POLL_MS
+        ) {
+          await Bun.sleep(POLL_MS);
+          resized = await read(-1);
+        }
+      }
+      // A late font changes the width of the text and not of the box: the groups are made again when the fonts have loaded.
+      await page.evaluate(
+        'document.head.append(Object.assign(document.createElement("style"), { textContent: "#file-code .c { letter-spacing: 30px }" })); document.fonts.dispatchEvent(new Event("loadingdone"))',
+      );
+      const fonts = await read(-1);
+      const screens = [{ screen: "file", facts: await gate<LabelsFacts>(page, "labels") }];
+      let name = 0;
+      for (const tab of ["overview", "order", "tree", "find"] as const) {
+        await gotoTab(page, tab === "find" ? "tree" : tab);
+        if (tab === "tree") await tap(page, "#tree-expand");
+        if (tab === "find") {
+          await tap(page, "#prog");
+          await until(page, "window.__gate.find().opened", "the file list");
+        }
+        screens.push({ screen: tab, facts: await gate<LabelsFacts>(page, "labels") });
+        if (tab === "order" && single) {
+          // A tap on a name does what its row does: it opens the file.
+          await tap(page, "#order-list .fname.ln");
+          await until(page, "window.__gate.screens().file", "the file, opened from a name");
+        }
+        if (tab === "tree" && cdp !== null)
+          name = await swipeUp(page, cdp, "#tree .trow.file .tname.ln");
+      }
+      return sidewaysVerdict(
+        {
+          rest,
+          scrolled,
+          swipes: swipes && { ...swipes, name },
+          comment: [opened, pinned],
+          resized,
+          fonts,
+        },
+        screens,
+      );
+    } finally {
+      await cdp?.detach().catch(() => undefined);
+    }
+  });
+}
+
+/** More lines than the page draws at a time (SLICE in js/04-diff.js), all wide: one group, and Show more keeps it. */
+const SHOW_MORE_LINES = 450;
+
+/** Serve a diff of SHOW_MORE_LINES wide lines, scroll its group and press Show more. */
+async function checkShowMore(ctx: Ctx): Promise<Verdict> {
+  const { page } = ctx;
+  const wide = Array.from({ length: SHOW_MORE_LINES }, () => "L").join(" ");
+  return underDiff(ctx, wide, async () => {
+    const before = await gate<LinesFacts>(page, "lines", 1, SIDEWAYS_PX);
+    await tap(page, "#file-code .more");
+    await tryUntil(
+      page,
+      `document.querySelector("#file-code .grp").children.length > ${SHOW_MORE_LINES}`,
+      SETTLE_MS,
+    );
+    return showMoreVerdict(before, await gate<LinesFacts>(page, "lines", -1));
+  });
 }
 
 /**
@@ -2777,6 +3357,7 @@ const PHONE_CHECKS: readonly (readonly [string, PhoneCheck])[] = [
   ["comment-box", checkComposer],
   ["diff-layout", checkDiffLayout],
   ["sideways", checkSideways],
+  ["show-more", checkShowMore],
   ["wrap-toggle", checkWrap],
   ["find-sheet", checkFind],
   ["ruling-links", checkRulings],
@@ -2828,6 +3409,7 @@ async function runChecks(ctx: Ctx): Promise<Check[]> {
     : [
         await attempt("split", () => checkSplit(ctx)),
         await attempt("diff-layout", () => checkDiffLayout(ctx)),
+        await attempt("sideways", () => checkSideways(ctx)),
       ];
   const fonts = plain ? [] : [await attempt("fonts", () => checkFonts(ctx))];
   const driven: Check[] = [];

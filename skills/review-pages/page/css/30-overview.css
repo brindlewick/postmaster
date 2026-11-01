@@ -35,7 +35,7 @@
 .rtext { margin: 0 0 12px; font-size: 15.5px; line-height: 1.55; overflow-wrap: anywhere; }
 .rlinks { display: grid; gap: 8px; }
 .lnk { display: grid; gap: 1px; min-height: 44px; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); text-decoration: none; font-weight: 600; font-size: 15px; overflow-wrap: anywhere; cursor: pointer; }
-.lnk small { font: 400 13px var(--font-code); color: var(--muted); overflow-wrap: anywhere; }
+.lnk .lpath { font: 400 13px var(--font-code); color: var(--muted); }
 .ticketbox > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; font-weight: 700; cursor: pointer; list-style: none; }
 .ticketbox > summary::-webkit-details-marker { display: none; }
 .ticketbox > summary::after { content: ""; flex: none; width: 9px; height: 9px; margin: -3px 4px 0 0; border: solid var(--gutter); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .15s ease; }

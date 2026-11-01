@@ -7,6 +7,7 @@ import { $, S, baseName, note } from "./01-core.js";
 import { reviewedFile } from "./02-data.js";
 import { setReviewed } from "./03-ticks.js";
 import { keepComposerVisible, renderFile } from "./04-diff.js";
+import { regroup } from "./04-groups.js";
 import { markCurrentRows, revealInTree } from "./05-tree.js";
 import { closeFind, fitFind, openFind } from "./08-find.js";
 
@@ -182,6 +183,7 @@ export function initNav() {
       $("wrap").setAttribute("aria-pressed", String(S.wrap));
       const rows = document.querySelector("#file-code .rows");
       if (rows) rows.classList.toggle("wrap", S.wrap);
+      regroup();
     }
   });
   // every tick button on the page, in any list

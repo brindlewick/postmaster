@@ -30,14 +30,20 @@ Three tabs and a file screen.
   returns to the list with the same open folders and scroll position. Previous and next move
   through the files in the order of the list the reader came from: tree order from the tree, review
   order from the order or the overview. A button at the end of the file ticks it as reviewed and
-  opens the next. Code scrolls sideways inside its own box and never moves the page; Wrap, in the
-  file's head, folds long lines instead. A row is the code and nothing in front of it, so the code
-  starts 8 px from the edge of the screen: there is no sign column and no number column. Added and
-  removed lines are told apart by their colour and a 3 px edge in a stronger colour at the left of
-  the row, and each line's number is a faint layer behind the code, left aligned 6 px in from the
-  left edge of the row and centered down it, that stays at the left edge of what is shown as the
-  code scrolls. Tapping anywhere on a row opens a comment box under it; tapping a second line
-  extends the range.
+  opens the next. Lines wider than the screen scroll sideways with no scrollbar, a run of
+  consecutive ones together as a group and a single one alone; a line that fits ends a run, but the
+  first two below it stay in the group, pinned at the left, so that a finger can sit under the
+  text, and the page never moves sideways. Wrap, in the file's head, folds long lines instead; it is
+  also the way for a keyboard reader, since a group and a label take no tab stop. A row
+  is the code and nothing in front of it, so the code starts 8 px from the edge of the screen: there
+  is no sign column and no number column. Added and removed lines are told apart by their colour and a 3 px
+  edge in a stronger colour at the left of the row, and each line's number is a faint layer behind
+  the code, left aligned 6 px in from the left edge of the row and centered down it, that stays at
+  the left edge of its group as the group scrolls. Tapping anywhere on a row opens a comment box
+  under it, pinned at the left edge of the group; tapping a second line extends the range.
+- **Long names.** A name, a path or a count wider than its place scrolls sideways on its own with
+  no scrollbar and a fade at the end it goes on past: in the tree, the order, the file list, a
+  file's head and bar, and under a ruling link. Text meant to be read as prose wraps.
 
 Below 1200 px the page shows one screen at a time, however wide the screen is: a phone, a
 folded-out phone and a tablet all read a file at its full width. From 1200 px up (a laptop or a

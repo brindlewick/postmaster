@@ -24,6 +24,7 @@
   --hl-title: #0d6880;
   --hl-type: #8330b0;
   --hl-meta: #a3261a;
+  --fade: rgba(28, 34, 48, .13);
   --font-ui: "Red Hat Text", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Red Hat Display", "Red Hat Text", system-ui, sans-serif;
   --font-code: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -34,7 +35,7 @@
     --accent: #8ab8f2; --accent-soft: #1d2b40; --mark: #3d3412; --mark-edge: #c99c1a; --gutter: #6c7686;
     --wt: #3a2a16; --wt-ink: #f0b46a;
     --hl-keyword: #a5b0ff; --hl-string: #8fd69b; --hl-comment: #8b95a5; --hl-number: #f2b66b;
-    --hl-title: #6fd0e2; --hl-type: #d6a8ff; --hl-meta: #ff9c8f;
+    --hl-title: #6fd0e2; --hl-type: #d6a8ff; --hl-meta: #ff9c8f; --fade: rgba(227, 231, 238, .18);
     color-scheme: dark;
   }
 }
@@ -43,7 +44,7 @@
   --accent: #8ab8f2; --accent-soft: #1d2b40; --mark: #3d3412; --mark-edge: #c99c1a; --gutter: #6c7686;
   --wt: #3a2a16; --wt-ink: #f0b46a;
   --hl-keyword: #a5b0ff; --hl-string: #8fd69b; --hl-comment: #8b95a5; --hl-number: #f2b66b;
-  --hl-title: #6fd0e2; --hl-type: #d6a8ff; --hl-meta: #ff9c8f;
+  --hl-title: #6fd0e2; --hl-type: #d6a8ff; --hl-meta: #ff9c8f; --fade: rgba(227, 231, 238, .18);
   color-scheme: dark;
 }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.5; }
@@ -52,28 +53,44 @@ body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); fo
 .eyebrow { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wt-ink); }
 h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.2; text-wrap: balance; }
 .lede { margin: 0; color: var(--muted); max-width: 68ch; }
-.files { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.files { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.files::-webkit-scrollbar { display: none; }
 .file { flex: none; display: grid; gap: 2px; text-align: left; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 8px 12px; cursor: pointer; min-width: 0; }
 .file:focus-visible, .l:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .file[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
-.file .fn { font-family: var(--font-code); font-size: 13px; font-weight: 500; white-space: nowrap; }
-.file .fr { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.viewer { display: grid; gap: 8px; min-width: 0; }
+.file .fn { font-family: var(--font-code); font-size: 13px; font-weight: 500; }
+.file .fr { font-size: 12px; color: var(--muted); }
+/* A one-line label (a name, a path) wider than its place scrolls sideways on its own, with no scrollbar, as a line of code does.
+   Its text fades out over 10px of padding at each end, which an equal negative margin takes back: a label that fits shows
+   no fade and takes no more room. Whatever holds a label leaves 10px beside it. */
+.ln { white-space: nowrap; overflow: auto hidden; overscroll-behavior-x: contain; scrollbar-width: none; padding-inline: 10px; margin-inline: -10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 10px), transparent); }
+.ln::-webkit-scrollbar { display: none; }
+.viewer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px; background: var(--bg); padding-block: 8px; border-bottom: 1px solid var(--rule); }
 .path { display: grid; min-width: 0; }
-#fpath { font-family: var(--font-code); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+#fpath { font-family: var(--font-code); font-size: 13px; font-weight: 500; }
 #fmeta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
-.code { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; font-family: var(--font-code); font-size: 12.5px; line-height: 1.6; padding-block: 8px; }
-.lines { min-width: 100%; }
-.nowrap .lines { width: max-content; }
-.l { display: grid; grid-template-columns: calc(var(--digits, 3) * 1ch + 1.8ch) minmax(0, 1fr); scroll-margin-top: 72px; }
-.nowrap .l { grid-template-columns: calc(var(--digits, 3) * 1ch + 1.8ch) max-content; }
-.n { color: var(--gutter); text-align: right; padding-right: 1ch; user-select: none; -webkit-user-select: none; font-variant-numeric: tabular-nums; }
-.c { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 14px; min-width: 0; }
-.nowrap .c { white-space: pre; overflow-wrap: normal; }
-.l.sel { background: var(--mark); box-shadow: inset 3px 0 0 var(--mark-edge); }
-.l.sel .n { color: var(--ink); }
+/* Lines wider than the code box scroll sideways with no scrollbar, a run of consecutive ones together as a group, a single one
+   alone; a line that fits ends a run, and the first two below it stay in the group as .tail, pinned at the left, so that a
+   finger can sit under the text. The script wraps each run in one scroll container, .grp, and makes the runs again when the
+   width, Fold or the fonts change; the code box and the page never scroll. The number stays at the left edge of its line, on the
+   line's own colour. A group that goes on past its right edge has a faint shade there: every row of it holds a sticky layer at
+   the edge, and the script shows it where the group has more behind it. Fold turns the lines into wrapped ones. */
+.code { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; font-family: var(--font-code); font-size: 12.5px; line-height: 1.6; padding-block: 8px; }
+.lines { container-type: inline-size; }
+.l { --rb: var(--panel); display: flex; position: relative; isolation: isolate; background: var(--rb); scroll-margin-top: 72px; }
+.grp { display: grid; grid-template-columns: minmax(max-content, 1fr); container-type: inline-size; overflow: auto hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.grp::-webkit-scrollbar { display: none; }
+.grp > .l::after { content: ""; order: -1; flex: none; position: sticky; left: calc(100cqw - 16px); width: 16px; margin-right: -16px; align-self: stretch; z-index: -1; pointer-events: none; background: linear-gradient(to left, var(--fade), transparent); visibility: hidden; }
+.grp[data-r] > .l::after { visibility: visible; }
+.grp > .tail { position: sticky; left: 0; width: 100cqw; }
+.grp > .tail::after { display: none; }
+.n { flex: none; position: sticky; left: 0; z-index: 1; box-sizing: border-box; width: calc(var(--digits, 3) * 1ch + 1.8ch); background: var(--rb); color: var(--gutter); text-align: right; padding-right: 1ch; user-select: none; -webkit-user-select: none; font-variant-numeric: tabular-nums; }
+.c { position: relative; z-index: 0; flex: none; white-space: pre; padding-right: 14px; }
+.fold .c { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.l.sel { --rb: var(--mark); }
+.l.sel .n { color: var(--ink); box-shadow: inset 3px 0 0 var(--mark-edge); }
 .status { padding: 14px; color: var(--muted); font-family: var(--font-ui); }
 .hljs-keyword, .hljs-built_in, .hljs-literal, .hljs-selector-tag { color: var(--hl-keyword); }
 .hljs-string, .hljs-regexp, .hljs-template-string, .hljs-code { color: var(--hl-string); }
@@ -91,7 +108,6 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
   .top { grid-area: top; }
   .files { grid-area: files; flex-direction: column; overflow: visible; position: sticky; top: 16px; }
   .file { flex: initial; }
-  .file .fn, .file .fr { white-space: normal; overflow-wrap: anywhere; }
   .viewer { grid-area: viewer; }
   .foot { grid-area: foot; }
   .code { font-size: 13.5px; }
@@ -111,8 +127,8 @@ h1 { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 
 
   <main class="viewer">
     <div class="bar">
-      <div class="path"><span id="fpath">Loading…</span><span id="fmeta"></span></div>
-      <label class="wrap" for="wrap"><input type="checkbox" id="wrap" checked> Wrap long lines</label>
+      <div class="path"><span id="fpath" class="ln" tabindex="-1">Loading…</span><span id="fmeta"></span></div>
+      <label class="wrap" for="wrap"><input type="checkbox" id="wrap"> Wrap long lines</label>
     </div>
     <div class="code" id="code" role="region" aria-label="File contents"><div class="status">Loading the file…</div></div>
   </main>
@@ -143,8 +159,9 @@ function renderFileList() {
     b.className = "file";
     b.id = "pick-" + f.id;
     b.dataset.id = f.id;
-    const fn = document.createElement("span"); fn.className = "fn"; fn.textContent = baseName(f.path);
-    const fr = document.createElement("span"); fr.className = "fr"; fr.textContent = f.path.split("/").slice(0, -1).join("/") || ".";
+    // A name wider than its place scrolls on its own (the .ln rule); a scroller is a tab stop in Chrome, so each is kept out of the tab order.
+    const fn = document.createElement("span"); fn.className = "fn ln"; fn.tabIndex = -1; fn.textContent = baseName(f.path);
+    const fr = document.createElement("span"); fr.className = "fr ln"; fr.tabIndex = -1; fr.textContent = f.path.split("/").slice(0, -1).join("/") || ".";
     b.append(fn, fr);
     b.addEventListener("click", () => openFile(f.id, null));
     nav.append(b);
@@ -226,12 +243,72 @@ async function openFile(id, range) {
     if (current !== f) return;
     $("fmeta").textContent = WHERE.at + REF.slice(0, 7) + " · " + entry.lines.length + " lines · " + (entry.bytes / 1024).toFixed(1) + " KB";
     code.replaceChildren(renderLines(f, entry));
+    regroup();
     if (range) { select(range.from, range.to); scrollToLine(range.from); }
     else code.scrollTop = 0;
   } catch (e) {
     code.replaceChildren(Object.assign(document.createElement("div"), { className: "status", textContent: "Could not load " + f.path + " (" + e.message + "). Reload the page to try again." }));
   }
 }
+
+// Groups of lines: a run of consecutive lines wider than the code box scrolls sideways together, wrapped in one scroll
+// container (.grp), a single such line alone; a line that fits ends a run, but the first two below it stay in the group
+// as its .tail. The runs are made again when the width, Fold or the fonts change, moving as few lines as it takes: a
+// group that is as it was keeps its scroll, and a line that is not moved keeps the text selected in it. Where a group
+// has more of itself to the right, its rows show the shade of it.
+function edges(g) { g.toggleAttribute("data-r", g.scrollLeft + g.clientWidth < g.scrollWidth - 1); }
+
+function regroup() {
+  const box = $("code").querySelector(".lines");
+  if (!box || box.clientWidth === 0) return;
+  const flat = [];
+  const was = new Map();
+  for (const e of Array.from(box.children)) {
+    if (!e.classList.contains("grp")) { flat.push(e); continue; }
+    for (const k of Array.from(e.children)) { flat.push(k); was.set(k, e.scrollLeft); }
+  }
+  const room = box.clientWidth + 1;
+  const folded = $("code").classList.contains("fold");
+  const plan = [];
+  let run = null;
+  let tails = 0;
+  for (const e of flat) {
+    const wide = !folded && e.lastElementChild.offsetWidth > room;
+    const under = !wide && run !== null && tails < 2;
+    e.classList.toggle("tail", under);
+    if (wide) { if (run === null || tails > 0) { run = []; plan.push(run); } tails = 0; run.push(e); }
+    else if (under) { tails += 1; run.push(e); }
+    else { run = null; plan.push(e); }
+  }
+  const had = new Map();
+  for (const g of box.querySelectorAll(":scope > .grp")) had.set(g.firstElementChild, g);
+  const made = [];
+  const want = plan.map((p) => {
+    if (!Array.isArray(p)) return p;
+    const old = had.get(p[0]);
+    if (old && old.children.length === p.length && p.every((x, i) => old.children[i] === x)) return old;
+    const g = document.createElement("div");
+    g.className = "grp";
+    // Chrome makes a scroller a tab stop; a file has hundreds of groups.
+    g.tabIndex = -1;
+    g.append(...p);
+    made.push([g, was.get(p[0]) || 0]);
+    return g;
+  });
+  const keep = new Set(want);
+  let at = box.firstElementChild;
+  for (const w of want) {
+    while (at !== null && at !== w && !keep.has(at)) at = at.nextElementSibling;
+    if (w === at) at = at.nextElementSibling; else box.insertBefore(w, at);
+  }
+  for (const e of Array.from(box.children)) if (!keep.has(e)) e.remove();
+  for (const [g, x] of made) if (x > 0) g.scrollLeft = x;
+  for (const g of box.querySelectorAll(":scope > .grp")) edges(g);
+}
+
+$("code").addEventListener("scroll", (ev) => { if (ev.target.matches(".grp")) edges(ev.target); }, true);
+new ResizeObserver(regroup).observe($("code"));
+document.fonts.addEventListener("loadingdone", regroup);
 
 function scrollToLine(n) {
   const row = $(current.id + "-L" + n);
@@ -245,7 +322,7 @@ function select(from, to) {
   for (let n = a; n <= b; n++) $(current.id + "-L" + n)?.classList.add("sel");
 }
 
-$("wrap").addEventListener("change", (ev) => { $("code").classList.toggle("nowrap", !ev.target.checked); });
+$("wrap").addEventListener("change", (ev) => { $("code").classList.toggle("fold", ev.target.checked); regroup(); });
 
 function fromHash() {
   const m = /^#(f\d+)(?:-L(\d+)(?:-L(\d+))?)?$/.exec(location.hash);

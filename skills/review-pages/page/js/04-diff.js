@@ -2,9 +2,10 @@
 // under a tapped line (kept above the phone keyboard) and the comment threads.
 import {
   $, MINUS, S, baseName, dirName, el,
-  hl, hm, note, num, parseDiff, runs, softBreaks,
+  hl, hm, label, note, num, parseDiff, runs,
 } from "./01-core.js";
 import { fileKind, item, reviewedFile } from "./02-data.js";
+import { regroup } from "./04-groups.js";
 import { barOffset, openFile, scrollToEl } from "./09-nav.js";
 import { cutText } from "../../../../scripts/lib/page-bridge.ts";
 import { commentNote, paintSaveNotes, submitBridgeComment } from "./10-bridge.js";
@@ -16,10 +17,8 @@ const SLICE = 400; // rows drawn at a time in a long diff
 export function fileTextNodes(f, fi) {
   const out = [];
   const dir = dirName(f.path);
-  const dirText = el("span", "fdir");
-  dirText.append(softBreaks(dir));
-  const nameText = el("span", "fname");
-  nameText.append(softBreaks(baseName(f.path)));
+  const dirText = label("fdir", dir);
+  const nameText = label("fname", baseName(f.path));
   if (dir) out.push(dirText);
   out.push(nameText);
   if (f.purpose) out.push(el("span", "fpurpose", f.purpose));
@@ -73,7 +72,12 @@ function diffRows(f, hunks, into) {
     const frag = document.createDocumentFragment();
     for (let k = at; k < end; k++) {
       const x = flat[k];
-      if (x.hunk) { frag.append(el("div", "hunk", x.hunk)); continue; }
+      if (x.hunk) {
+        const h = el("div", "hunk");
+        h.append(el("span", "c", x.hunk));
+        frag.append(h);
+        continue;
+      }
       const l = x.l;
       const isNew = l.n != null;
       const line = String(isNew ? l.n : l.o);
@@ -119,23 +123,13 @@ export async function renderFile(fi) {
     else {
       diffRows(f, parseDiff(it.diff), rows);
     }
-    watchBox(code);
     paintComments();
     applyFlags(fi);
+    regroup();
   } catch (e) {
     drawn = -1;
     code.replaceChildren(el("div", "status", `This file did not load (${e.message}).`));
   }
-}
-
-// --codew is the width of what the box shows. It is rounded down, so a layer that is this wide never
-// sticks out of a box whose width has a fraction.
-const boxWatcher = typeof ResizeObserver === "function"
-  ? new ResizeObserver((entries) => { for (const en of entries) en.target.style.setProperty("--codew", `${Math.floor(en.contentRect.width)}px`); })
-  : null;
-function watchBox(code) {
-  if (boxWatcher) boxWatcher.observe(code);
-  else code.style.setProperty("--codew", `${Math.floor(code.getBoundingClientRect().width)}px`);
 }
 
 // ---------- links to lines ----------
@@ -185,7 +179,7 @@ export function initComposer() {
   c.className = "composer";
   c.id = "composer";
   c.hidden = true;
-  c.innerHTML = '<label for="mtext" id="mclabel">Comment</label><textarea id="mtext" maxlength="3000" rows="3" placeholder="What should change here?"></textarea><p class="mhint" id="mhint">Tap another line to extend the comment to a range.</p><p class="savenote" data-scope="comments" hidden></p><div class="mbtns"><button type="button" class="btn quiet" id="mcancel">Cancel</button><button type="button" class="btn" id="msave">Save comment</button></div>';
+  c.innerHTML = '<label for="mtext" id="mclabel" class="ln" tabindex="-1">Comment</label><textarea id="mtext" maxlength="3000" rows="3" placeholder="What should change here?"></textarea><p class="mhint" id="mhint">Tap another line to extend the comment to a range.</p><p class="savenote" data-scope="comments" hidden></p><div class="mbtns"><button type="button" class="btn quiet" id="mcancel">Cancel</button><button type="button" class="btn" id="msave">Save comment</button></div>';
   document.body.append(c);
   $("mcancel").addEventListener("click", () => { $("mtext").value = ""; clearSel(); });
   // A button that is clicked, not a form that is submitted: a frame sandboxed without allow-forms blocks a
@@ -321,7 +315,7 @@ export function paintComments() {
       const m = el("div", `cm${x.by === "claude" ? " claude" : ""}${x.status === "closed" ? " closed" : ""}`);
       const place = c.from === c.to ? `line ${c.from}` : `lines ${c.from} to ${c.to}`;
       const said = commentNote(x);
-      m.append(el("span", "who", `${whoWrote(x)} · ${place} · ${hm(x.at)}${x.status === "closed" ? " · closed" : ""}${said === "Saving" ? " · saving" : ""}`));
+      m.append(label("who", `${whoWrote(x)} · ${place} · ${hm(x.at)}${x.status === "closed" ? " · closed" : ""}${said === "Saving" ? " · saving" : ""}`));
       m.append(x.text);
       if (x.source === "bridge") m.dataset.save = x.save;
       if (said !== null && said !== "Saving") m.append(el("span", "cnote", said));

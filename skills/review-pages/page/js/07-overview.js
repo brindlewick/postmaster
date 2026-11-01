@@ -1,6 +1,6 @@
 // The overview: the title, the reviewer's progress, the summary, the rulings with links to their
 // lines, the ticket and the line that copies a note for the chat.
-import { $, MINUS, S, el, hm, markdown, note, num, plural } from "./01-core.js";
+import { $, MINUS, S, el, hm, label, markdown, note, num, plural } from "./01-core.js";
 import { reviewedFile } from "./02-data.js";
 import { reviewedCount } from "./03-ticks.js";
 import { gotoLines } from "./04-diff.js";
@@ -21,7 +21,7 @@ function ruleCards(into, ol) {
     for (const l of r.links) {
       const a = el("a", "lnk");
       a.href = `#${l.path}`;
-      a.append(l.label, el("small", null, `${l.path}, ${l.from === l.to ? `line ${l.from}` : `lines ${l.from} to ${l.to}`}`));
+      a.append(l.label, label("lpath", `${l.path}, ${l.from === l.to ? `line ${l.from}` : `lines ${l.from} to ${l.to}`}`));
       a.addEventListener("click", (ev) => { ev.preventDefault(); gotoLines(l.path, l.from, l.to); });
       links.append(a);
     }
